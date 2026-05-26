@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "coke-sales-management-system",
+    "coke-sales-management-system": "coke-sales-management-system"
+  },
+  "targets": {},
+  "etags": {}
+}

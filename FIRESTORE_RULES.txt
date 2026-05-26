@@ -1,0 +1,77 @@
+// Firestore Security Rules for Coke Sales Management System
+// Copy and paste these rules into Firebase Console → Firestore Database → Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Distributors collection
+    match /distributors/{distributorId} {
+      // Allow read if user is authenticated (admin or distributor)
+      allow read: if request.auth != null;
+      
+      // Allow create/update/delete only if user is authenticated
+      // For production, you may want to restrict this to admins only
+      allow create, update, delete: if request.auth != null;
+    }
+    
+    // Orders collection
+    match /orders/{orderId} {
+      // Allow read if user is authenticated
+      allow read: if request.auth != null;
+      
+      // Allow create/update/delete if user is authenticated
+      allow create, update, delete: if request.auth != null;
+    }
+    
+    // Sales Data collection
+    match /sales_data/{salesDataId} {
+      // Allow read if user is authenticated
+      allow read: if request.auth != null;
+      
+      // Allow create/update/delete if user is authenticated
+      allow create, update, delete: if request.auth != null;
+    }
+    
+    // Admins collection (optional - if you store admin data separately)
+    match /admins/{adminId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == adminId;
+    }
+  }
+}
+
+// ==========================================
+// ALTERNATIVE: More restrictive rules (for production)
+// ==========================================
+// Uncomment and use these if you want only authenticated users
+// who are listed in the distributors/admins collections to have write access
+//
+// rules_version = '2';
+// service cloud.firestore {
+//   match /databases/{database}/documents {
+//     
+//     // Helper function to check if user is a distributor
+//     function isDistributor() {
+//       return request.auth != null && 
+//              exists(/databases/$(database)/documents/distributors/$(request.auth.uid));
+//     }
+//     
+//     // Helper function to check if user is an admin
+//     function isAdmin() {
+//       return request.auth != null && 
+//              exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+//     }
+//     
+//     match /distributors/{distributorId} {
+//       allow read: if request.auth != null;
+//       allow create, update, delete: if isAdmin() || (isDistributor() && request.auth.uid == distributorId);
+//     }
+//     
+//     match /orders/{orderId} {
+//       allow read: if request.auth != null;
+//       allow create: if isDistributor() || isAdmin();
+//       allow update, delete: if isAdmin();
+//     }
+//   }
+// }

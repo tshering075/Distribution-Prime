@@ -1,0 +1,11 @@
+/* Distributor dashboard: compact target / stock tables on small screens */
+@media (max-width: 768px) {
+  .distributor-dashboard-main .MuiTableCell-root {
+    padding: 6px 4px !important;
+    font-size: 0.75rem !important;
+  }
+
+  .distributor-dashboard-main .MuiTable-root {
+    min-width: 100% !important;
+  }
+}

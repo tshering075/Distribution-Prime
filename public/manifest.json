@@ -1,0 +1,41 @@
+{
+  "id": "/",
+  "short_name": "CokeSales",
+  "name": "CokeSales Management System",
+  "description": "Distributor sales, targets, orders, and admin workflow for Tashi Beverages Ltd.",
+  "icons": [
+    {
+      "src": "coke-sales-icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "coke-sales-icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "coke-sales-icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "coke-sales-icon-1024.png",
+      "type": "image/png",
+      "sizes": "1024x1024",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/login",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "theme_color": "#E40521",
+  "background_color": "#ffffff",
+  "categories": ["business", "productivity"],
+  "prefer_related_applications": false
+}

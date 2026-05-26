@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 88" role="img" aria-labelledby="wmTitle wmDesc">
+  <title id="wmTitle">Tashi Beverages Ltd  CokeSales Management System</title>
+  <desc id="wmDesc">Wordmark: Tashi Beverages Ltd operates the CokeSales Management System application for distributor sales.</desc>
+  <rect x="4" y="12" width="64" height="64" rx="14" fill="#0d47a1"/>
+  <text x="36" y="58" text-anchor="middle" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="28" font-weight="800" fill="#ffffff">TB</text>
+  <text x="84" y="40" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="#0d47a1">Tashi Beverages Ltd</text>
+  <text x="84" y="62" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#424242">CokeSales Management System</text>
+</svg>

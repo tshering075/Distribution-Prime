@@ -1,0 +1,71 @@
+// ==========================================
+// SIMPLE FIREBASE SECURITY RULES
+// For Coke Sales Management System
+// Recommended for most use cases
+// ==========================================
+// Copy and paste these rules into Firebase Console → Firestore Database → Rules
+// Then click "Publish"
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // DISTRIBUTORS COLLECTION
+    // ==========================================
+    match /distributors/{distributorId} {
+      // Authenticated users can read/write distributors
+      allow read, write: if request.auth != null;
+    }
+    
+    // ==========================================
+    // TARGETS COLLECTION
+    // ==========================================
+    match /targets/{targetId} {
+      // Authenticated users can read/write targets
+      allow read, write: if request.auth != null;
+    }
+    
+    // ==========================================
+    // SCHEMES COLLECTION
+    // ==========================================
+    match /schemes/{schemeId} {
+      // Authenticated users can read/write schemes
+      allow read, write: if request.auth != null;
+    }
+    
+    // ==========================================
+    // SALES DATA COLLECTION
+    // ==========================================
+    match /sales_data/{salesDataId} {
+      // Authenticated users can read/write sales data
+      allow read, write: if request.auth != null;
+    }
+    
+    // ==========================================
+    // ORDERS COLLECTION
+    // ==========================================
+    match /orders/{orderId} {
+      // Authenticated users can read/write orders
+      allow read, write: if request.auth != null;
+    }
+    
+    // ==========================================
+    // ADMINS COLLECTION
+    // ==========================================
+    match /admins/{adminId} {
+      // Users can read/write their own admin document
+      allow read, write: if request.auth != null && 
+                            request.auth.uid == adminId;
+    }
+    
+    // ==========================================
+    // APP CONFIG COLLECTION (Gmail Credentials)
+    // ==========================================
+    match /app_config/{configId} {
+      // Authenticated users can read/write app config
+      // (In production, you may want to restrict this to admins only)
+      allow read, write: if request.auth != null;
+    }
+  }
+}

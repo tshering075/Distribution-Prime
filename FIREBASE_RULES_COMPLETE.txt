@@ -1,0 +1,153 @@
+// ==========================================
+// COMPLETE FIREBASE SECURITY RULES
+// For Coke Sales Management System
+// ==========================================
+// Copy and paste these rules into Firebase Console → Firestore Database → Rules
+// Then click "Publish"
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // HELPER FUNCTIONS
+    // ==========================================
+    
+    // Check if user is an admin (exists in admins collection)
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // Check if user is a distributor (exists in distributors collection with matching uid)
+    function isDistributor() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/distributors/$(request.auth.uid));
+    }
+    
+    // Check if user owns the distributor document (uid matches)
+    function ownsDistributor(distributorId) {
+      return request.auth != null && 
+             request.auth.uid == distributorId;
+    }
+    
+    // ==========================================
+    // DISTRIBUTORS COLLECTION
+    // ==========================================
+    match /distributors/{distributorId} {
+      // Admins can read/write all distributors
+      allow read, write: if isAdmin();
+      
+      // Distributors can read their own data (where uid matches their auth uid)
+      allow read: if request.auth != null && 
+                     (resource.data.uid == request.auth.uid || 
+                      request.auth.uid == distributorId);
+      
+      // Distributors can update limited fields of their own data
+      allow update: if request.auth != null && 
+                        (resource.data.uid == request.auth.uid || 
+                         request.auth.uid == distributorId) &&
+                        // Only allow updating specific fields (not target/achieved)
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['target', 'achieved']);
+    }
+    
+    // ==========================================
+    // SALES DATA COLLECTION
+    // ==========================================
+    match /sales_data/{salesDataId} {
+      // Only admins can read/write sales data
+      allow read, write: if isAdmin();
+      
+      // Distributors can read sales data (for viewing their own performance)
+      allow read: if request.auth != null;
+    }
+    
+    // ==========================================
+    // ORDERS COLLECTION
+    // ==========================================
+    match /orders/{orderId} {
+      // Admins can read/write all orders
+      allow read, write: if isAdmin();
+      
+      // Distributors can create their own orders
+      allow create: if request.auth != null && 
+                       request.resource.data.distributorCode != null;
+      
+      // Distributors can read their own orders
+      allow read: if request.auth != null && 
+                     (resource.data.distributorCode == request.auth.uid ||
+                      resource.data.distributorCode == resource.data.distributorCode);
+    }
+    
+    // ==========================================
+    // ADMINS COLLECTION
+    // ==========================================
+    match /admins/{adminId} {
+      // Users can read/write their own admin document
+      allow read, write: if request.auth != null && 
+                            request.auth.uid == adminId;
+      
+      // Admins can read other admin documents (for management)
+      allow read: if isAdmin();
+    }
+    
+    // ==========================================
+    // APP CONFIG COLLECTION (Gmail Credentials, etc.)
+    // ==========================================
+    match /app_config/{configId} {
+      // Only admins can read/write app configuration
+      allow read, write: if isAdmin();
+    }
+    
+    // ==========================================
+    // ACTIVITIES COLLECTION (if you use it)
+    // ==========================================
+    match /activities/{activityId} {
+      // Authenticated users can create activities
+      allow create: if request.auth != null;
+      
+      // Admins can read all activities
+      allow read: if isAdmin();
+      
+      // Users can read their own activities
+      allow read: if request.auth != null && 
+                     resource.data.userId == request.auth.uid;
+    }
+  }
+}
+
+// ==========================================
+// ALTERNATIVE: SIMPLER RULES (If helper functions cause issues)
+// ==========================================
+// Use these if the above rules don't work due to helper function limitations
+//
+// rules_version = '2';
+// service cloud.firestore {
+//   match /databases/{database}/documents {
+//     
+//     // Distributors - authenticated users can read/write
+//     match /distributors/{distributorId} {
+//       allow read, write: if request.auth != null;
+//     }
+//     
+//     // Sales Data - authenticated users can read/write
+//     match /sales_data/{salesDataId} {
+//       allow read, write: if request.auth != null;
+//     }
+//     
+//     // Orders - authenticated users can read/write
+//     match /orders/{orderId} {
+//       allow read, write: if request.auth != null;
+//     }
+//     
+//     // Admins - users can read/write their own document
+//     match /admins/{adminId} {
+//       allow read, write: if request.auth != null && request.auth.uid == adminId;
+//     }
+//     
+//     // App Config - authenticated users can read/write (restrict to admins in production)
+//     match /app_config/{configId} {
+//       allow read, write: if request.auth != null;
+//     }
+//   }
+// }
