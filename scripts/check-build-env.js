@@ -6,11 +6,41 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const envPath = path.join(root, '.env');
 
-// Load .env for local builds (CRA does this too; Cloudflare injects vars directly).
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+function parseWranglerVars(tomlPath) {
+  if (!fs.existsSync(tomlPath)) return {};
+  const vars = {};
+  let inVars = false;
+  for (const line of fs.readFileSync(tomlPath, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (trimmed === '[vars]') {
+      inVars = true;
+      continue;
+    }
+    if (trimmed.startsWith('[')) {
+      inVars = false;
+      continue;
+    }
+    if (!inVars) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    vars[key] = value;
+  }
+  return vars;
+}
+
+function loadDotEnv(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  for (const line of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const eq = trimmed.indexOf('=');
@@ -21,6 +51,17 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+// 1) Cloudflare dashboard (often ignored when wrangler.toml has pages_build_output_dir)
+// 2) wrangler.toml [vars] — reliable for Pages Git builds
+// 3) local .env — dev fallback
+const wranglerVars = parseWranglerVars(path.join(root, 'wrangler.toml'));
+for (const [key, value] of Object.entries(wranglerVars)) {
+  if (!(key in process.env) || !String(process.env[key] || '').trim()) {
+    process.env[key] = value;
+  }
+}
+loadDotEnv(path.join(root, '.env'));
+
 const reactAppKeys = Object.keys(process.env)
   .filter((k) => k.startsWith('REACT_APP_'))
   .sort();
@@ -29,6 +70,9 @@ console.log(
   reactAppKeys.length ? reactAppKeys.join(', ') : '(none)'
 );
 console.log('[build-env] CF_PAGES:', process.env.CF_PAGES || 'not set', '| CI:', process.env.CI || 'not set');
+if (Object.keys(wranglerVars).length) {
+  console.log('[build-env] wrangler.toml [vars] keys:', Object.keys(wranglerVars).join(', '));
+}
 
 const url = (process.env.REACT_APP_SUPABASE_URL || '').trim();
 const key = (process.env.REACT_APP_SUPABASE_ANON_KEY || '').trim();
@@ -43,7 +87,6 @@ console.log(
 );
 
 if (urlSet && keySet) {
-  // Belt-and-suspenders: CRA always reads .env.production.local during build.
   const productionLocal = path.join(root, '.env.production.local');
   fs.writeFileSync(
     productionLocal,
@@ -55,11 +98,8 @@ if (urlSet && keySet) {
 if (!urlSet || !keySet) {
   console.error(
     '\n[build-env] Supabase env vars are missing at build time.\n' +
-      'Cloudflare Pages → your project → Settings → Variables and Secrets:\n' +
-      '  • Add REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY\n' +
-      '  • Scope: Production (and Preview if needed)\n' +
-      '  • Type: Plain text (not runtime-only)\n' +
-      '  • Then push a new commit or Retry deployment\n'
+      'With wrangler.toml (pages_build_output_dir), Cloudflare ignores dashboard variables.\n' +
+      'Add them under [vars] in wrangler.toml, or in local .env for development.\n'
   );
   if (process.env.CI === 'true' || process.env.CF_PAGES === '1') {
     process.exit(1);

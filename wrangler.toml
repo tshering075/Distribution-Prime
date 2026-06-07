@@ -1,7 +1,12 @@
 # Cloudflare Pages — React (Create React App) static deploy
-# Git-connected Pages reads this file when pages_build_output_dir is set.
-# Dashboard: set build command to `npm run build` if not inherited automatically.
+# When pages_build_output_dir is set, wrangler.toml is the source of truth and
+# dashboard "Variables and Secrets" are NOT injected into `npm run build`.
+# Put REACT_APP_* vars here so CRA can bake them into the static bundle.
 
 name = "distribution-prime"
 compatibility_date = "2025-04-01"
 pages_build_output_dir = "./build"
+
+[vars]
+REACT_APP_SUPABASE_URL = "https://uusvhmuvxgsehcwkwerf.supabase.co"
+REACT_APP_SUPABASE_ANON_KEY = "sb_publishable_FvGtm3hN0huziFRrFxM19A_2cjJS7HC"
