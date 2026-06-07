@@ -622,7 +622,7 @@ function ShippingDashboard({ onLogout }) {
     } finally {
       invoiceSaveLockRef.current = Math.max(0, invoiceSaveLockRef.current - 1);
     }
-  }, [orderIdentityFallback, showToast, pushNotification]);
+  }, [orderIdentityFallback, showToast, pushNotification, logShippingActivity]);
 
   const snapshotInputFiles = (input) => {
     const files = Array.from(input?.files ?? []);
@@ -839,7 +839,7 @@ function ShippingDashboard({ onLogout }) {
       setDeliveringId(null);
       setDeliverConfirmOrder(null);
     }
-  }, [orderIdentityFallback, showToast, pushNotification, loadOrders]);
+  }, [orderIdentityFallback, showToast, pushNotification, loadOrders, logShippingActivity]);
 
   const statusChipColor = (status) => {
     if (status === ORDER_STATUS.APPROVED) return "info";
