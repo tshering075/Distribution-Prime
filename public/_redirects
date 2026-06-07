@@ -1,2 +1,5 @@
-# (No rules here — avoids Cloudflare Workers deploy error 10021.)
-# Netlify still uses netlify.toml for SPA routing.
+# Cloudflare Pages / Netlify — SPA + static legal pages
+/privacy-policy    /privacy-policy.html    200
+/terms-of-service  /terms-of-service.html  200
+/legal/*           /legal/:splat            200
+/*                 /index.html             200

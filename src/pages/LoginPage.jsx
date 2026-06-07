@@ -15,6 +15,8 @@ import {
   Zoom,
   useTheme,
   Alert,
+  Checkbox,
+  FormControlLabel,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import { useNavigate, Link as RouterLink, useSearchParams } from "react-router-dom";
@@ -44,6 +46,7 @@ import AppSnackbar from "../components/AppSnackbar";
 import DayNightThemeToggle from "../components/DayNightThemeToggle";
 import { useDayNightTheme } from "../theme/AppThemeProvider";
 import { markLandingSeen } from "../utils/landingSeen";
+import { readRememberedLogin, writeRememberedLogin } from "../utils/loginRememberMe";
 
 const publicUrl = process.env.PUBLIC_URL || "";
 const LOGIN_POINTS = [
@@ -84,6 +87,7 @@ function LoginPage({
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [success, setSuccess] = useState(false);
@@ -108,6 +112,23 @@ function LoginPage({
     const inviteEmail = searchParams.get("email");
     if (inviteEmail && !userId) setUserId(inviteEmail);
   }, [searchParams, userId]);
+
+  useEffect(() => {
+    const slug =
+      lockedWorkspaceSlug ||
+      searchParams.get("workspace") ||
+      getLastWorkspaceSlug() ||
+      DEFAULT_ORGANIZATION_SLUG;
+    const remembered = readRememberedLogin(slug);
+    if (!remembered) return;
+    setRememberMe(true);
+    if (!searchParams.get("email") && remembered.userId) {
+      setUserId(remembered.userId);
+    }
+    if (remembered.password) {
+      setPassword(remembered.password);
+    }
+  }, [lockedWorkspaceSlug, searchParams]);
 
   const navigateAfterStaffLogin = (actualRole) => {
     if (inviteToken) {
@@ -179,7 +200,16 @@ function LoginPage({
       setLoading(false);
       return;
     }
-    
+
+    const rememberSlug = String(organizationSlug || lockedWorkspaceSlug || DEFAULT_ORGANIZATION_SLUG).trim();
+    const persistRememberMe = () => {
+      writeRememberedLogin(rememberSlug, {
+        userId: trimmedUserId,
+        password: trimmedPassword,
+        rememberMe,
+      });
+    };
+
     try {
       let normalizedSupabaseError = "";
       if (isSupabaseConfigured) {
@@ -213,6 +243,7 @@ function LoginPage({
               }
             ).catch(err => console.error('Activity logging error:', err));
             
+            persistRememberMe();
             onLogin("distributor", distributor);
             setSuccess(true);
             // Navigate immediately without delay
@@ -238,6 +269,7 @@ function LoginPage({
                 userName: localDistributor.name,
               }
             ).catch((err) => console.error("Activity logging error:", err));
+            persistRememberMe();
             onLogin("distributor", localDistributor);
             setSuccess(true);
             navigate("/distributor", { replace: true });
@@ -277,6 +309,7 @@ function LoginPage({
                 }
               ).catch(err => console.error('Activity logging error:', err));
               
+              persistRememberMe();
               onLogin(actualRole); // Pass actual role (admin, viewer, or shipping)
               setSuccess(true);
               navigateAfterStaffLogin(actualRole);
@@ -305,6 +338,7 @@ function LoginPage({
         const distributor = validateDistributorLogin(trimmedUserId, trimmedPassword);
         if (distributor) {
           setDistributorInfo({ name: distributor.name, code: distributor.code });
+          persistRememberMe();
           onLogin("distributor", distributor);
           setSuccess(true);
           setTimeout(() => navigate("/distributor", { replace: true }), 1500);
@@ -313,6 +347,7 @@ function LoginPage({
         }
 
         if (validateAdminLogin(trimmedUserId, trimmedPassword)) {
+          persistRememberMe();
           onLogin("admin");
           setSuccess(true);
           if (inviteToken) {
@@ -344,6 +379,7 @@ function LoginPage({
             role: "shipping",
           }
         ).catch((err) => console.error("Activity logging error:", err));
+        persistRememberMe();
         onLogin("shipping");
         setSuccess(true);
         navigateAfterStaffLogin("shipping");
@@ -594,7 +630,7 @@ function LoginPage({
                   }}
                   error={!!fieldErrors.password}
                   helperText={fieldErrors.password}
-                  sx={{ mb: 2.75 }}
+                  sx={{ mb: 1 }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -620,6 +656,28 @@ function LoginPage({
                     },
                   }}
                   InputLabelProps={{ sx: { fontWeight: 650 } }}
+                />
+
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={rememberMe}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setRememberMe(checked);
+                        if (!checked) {
+                          writeRememberedLogin(
+                            String(organizationSlug || lockedWorkspaceSlug || DEFAULT_ORGANIZATION_SLUG).trim(),
+                            { userId: "", password: "", rememberMe: false }
+                          );
+                        }
+                      }}
+                      color="primary"
+                      size="small"
+                    />
+                  }
+                  label="Remember me on this device"
+                  sx={{ mb: 2, ml: 0.25, userSelect: "none" }}
                 />
 
                 <Zoom in timeout={600}>

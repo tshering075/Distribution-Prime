@@ -43,7 +43,7 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "deploy:cf": "npm run build && npx wrangler@4 deploy"
+    "deploy:cf": "npm run build && npx wrangler@4 pages deploy build --project-name=distribution-prime"
   },
   "eslintConfig": {
     "extends": [

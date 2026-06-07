@@ -1,12 +1,7 @@
-# Cloudflare Workers — static React app (Option B).
-# Deploy: npm run build && npx wrangler deploy
-# Or: npm run deploy:cf
+# Cloudflare Pages — React (Create React App) static deploy
+# Git-connected Pages reads this file when pages_build_output_dir is set.
+# Dashboard: set build command to `npm run build` if not inherited automatically.
 
-name = "cokesales-management-system"
+name = "distribution-prime"
 compatibility_date = "2025-04-01"
-
-[assets]
-directory = "./build"
-# Serve *.html at their real paths (200). Default "auto" 308-strips .html and breaks Google OAuth privacy URL checks.
-html_handling = "none"
-not_found_handling = "single-page-application"
+pages_build_output_dir = "./build"
