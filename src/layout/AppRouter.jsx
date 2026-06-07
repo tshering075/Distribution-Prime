@@ -552,8 +552,6 @@ function AppRouterInner() {
 
       <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
       <Route path="/terms-of-service" element={<TermsOfServicePage />} />
-      <Route path="/privacy-policy.html" element={<Navigate to="/privacy-policy" replace />} />
-      <Route path="/terms-of-service.html" element={<Navigate to="/terms-of-service" replace />} />
 
       {/* Unknown paths */}
       <Route

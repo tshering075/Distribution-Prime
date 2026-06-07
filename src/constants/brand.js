@@ -11,9 +11,10 @@ export const BRAND_LOGO_SRC = "/distribution-prime-icon-512.png";
 export const BRAND_WORDMARK_SRC = "/distribution-prime-wordmark.svg";
 /** OAuth / store listing logo */
 export const OAUTH_LOGO_SRC = "/oauth-app-logo.svg";
-/** In-app routes; LegalDocumentPage embeds public/*.html */
+/** In-app SPA routes (React legal pages). */
 export const PRIVACY_POLICY_PATH = "/privacy-policy";
 export const TERMS_OF_SERVICE_PATH = "/terms-of-service";
+/** Static HTML for Google OAuth / Search Console — use these in Cloud Console URLs. */
 export const PRIVACY_POLICY_HTML = "/privacy-policy.html";
 export const TERMS_OF_SERVICE_HTML = "/terms-of-service.html";
 
