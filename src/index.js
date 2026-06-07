@@ -82,11 +82,13 @@ const root = ReactDOM.createRoot(document.getElementById("root"));
 const AppComponent = App;
 
 function dismissSplash() {
-  const splash = document.getElementById('splash-screen');
+  const splash = document.getElementById("splash-screen");
   if (splash) {
-    splash.classList.add('fade-out');
+    splash.classList.add("fade-out");
     setTimeout(() => splash.remove(), 600);
   }
+  const publicSummary = document.getElementById("public-app-summary");
+  if (publicSummary) publicSummary.remove();
 }
 
 root.render(

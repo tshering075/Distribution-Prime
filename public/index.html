@@ -11,8 +11,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Dist Prime" />
-    <!-- Google Search Console: add URL-prefix property https://cokesales-management-system.pages.dev/ and paste the meta tag below. -->
-    <meta name="google-site-verification" content="DIdPOeUQ1nVZfMtDBpMv7Pso5S0h2n8i8breS8tUDSQ" />
+    <!-- Google Search Console: verify URL-prefix https://distribution-prime.pages.dev/ (HTML meta tag method). -->
+    <meta name="google-site-verification" content="Nkj1OMpwkCk9kChZ8MhHwpTpVE98xUEAyjvQ-5KjcnI" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/distribution-prime-icon-512.png" />
     <!-- All icons generated from distribution-prime-icon-1024.png via scripts/generate-distribution-prime-icons.ps1 -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
@@ -56,10 +56,22 @@
         line-height: 1.6;
         color: #1a1a1a;
       }
-      #oauth-home-fallback h1 { font-size: 1.75rem; margin: 0 0 0.5rem; color: #0d47a1; }
-      #oauth-home-fallback .operator { color: #555; margin-bottom: 1.25rem; }
-      #oauth-home-fallback a { color: #0d47a1; }
-      #oauth-home-fallback img { width: 72px; height: 72px; vertical-align: middle; margin-right: 12px; }
+      #oauth-home-fallback h1,
+      #public-app-summary h1 { font-size: 1.75rem; margin: 0 0 0.5rem; color: #0d47a1; }
+      #oauth-home-fallback .operator,
+      #public-app-summary .operator { color: #555; margin-bottom: 1.25rem; }
+      #oauth-home-fallback a,
+      #public-app-summary a { color: #0d47a1; }
+      #oauth-home-fallback img,
+      #public-app-summary img { width: 72px; height: 72px; vertical-align: middle; margin-right: 12px; }
+      #public-app-summary {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.6;
+        color: #1a1a1a;
+      }
       @keyframes splashPulse {
         0%, 100% { transform: scale(1); }
         50% { transform: scale(1.05); }
@@ -84,13 +96,32 @@
         <p>
           <a href="%PUBLIC_URL%/login">Sign in</a>
           &middot;
-          <a href="%PUBLIC_URL%/privacy-policy.html">Privacy Policy</a>
+          <a href="%PUBLIC_URL%/privacy-policy">Privacy Policy</a>
           &middot;
-          <a href="%PUBLIC_URL%/terms-of-service.html">Terms of Service</a>
+          <a href="%PUBLIC_URL%/terms-of-service">Terms of Service</a>
         </p>
-        <p>Contact: <a href="mailto:tsheringtamang@bhutancoke.com">tsheringtamang@bhutancoke.com</a></p>
+        <p>Contact: <a href="mailto:codewynbuild@gmail.com">codewynbuild@gmail.com</a></p>
       </main>
     </noscript>
+    <!-- Static summary for OAuth / Search Console reviewers (removed after React mounts). -->
+    <main id="public-app-summary">
+      <p><img src="%PUBLIC_URL%/distribution-prime-icon-512.png" alt="Distribution Prime" width="72" height="72" /></p>
+      <h1>Distribution Prime</h1>
+      <p class="operator"><strong>Distribution Prime</strong> — professional distribution management for bottlers and distributor networks.</p>
+      <p>
+        Run your own isolated workspace with distributors, orders, targets, shipping, and reports.
+        Features include distributor target tracking, order approval workflows, product rate management,
+        stock lifting, physical stock, and optional Gmail-based order notifications for administrators.
+      </p>
+      <p>
+        <a href="%PUBLIC_URL%/login">Sign in</a>
+        &middot;
+        <a href="%PUBLIC_URL%/privacy-policy">Privacy Policy</a>
+        &middot;
+        <a href="%PUBLIC_URL%/terms-of-service">Terms of Service</a>
+      </p>
+      <p>Contact: <a href="mailto:codewynbuild@gmail.com">codewynbuild@gmail.com</a></p>
+    </main>
     <div id="splash-screen">
       <img src="%PUBLIC_URL%/distribution-prime-icon-512.png" alt="Distribution Prime" width="200" height="200" />
       <div class="splash-loader"></div>
