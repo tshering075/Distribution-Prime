@@ -23,7 +23,8 @@ const AdminDashboard = lazy(() => import("../pages/AdminDashboard"));
 const ShippingDashboard = lazy(() => import("../pages/ShippingDashboard"));
 const PlatformLoginPage = lazy(() => import("../pages/PlatformLoginPage"));
 const PlatformDashboard = lazy(() => import("../pages/PlatformDashboard"));
-const LegalDocumentPage = lazy(() => import("../pages/LegalDocumentPage"));
+const PrivacyPolicyPage = lazy(() => import("../pages/PrivacyPolicyPage"));
+const TermsOfServicePage = lazy(() => import("../pages/TermsOfServicePage"));
 
 const SESSION_ROLE_KEY = "session_role";
 const SESSION_DISTRIBUTOR_INFO_KEY = "session_distributor_info";
@@ -549,14 +550,8 @@ function AppRouterInner() {
         }
       />
 
-      <Route
-        path="/privacy-policy"
-        element={<LegalDocumentPage title="Privacy Policy" htmlPath="/privacy-policy.html" />}
-      />
-      <Route
-        path="/terms-of-service"
-        element={<LegalDocumentPage title="Terms of Service" htmlPath="/terms-of-service.html" />}
-      />
+      <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+      <Route path="/terms-of-service" element={<TermsOfServicePage />} />
       <Route path="/privacy-policy.html" element={<Navigate to="/privacy-policy" replace />} />
       <Route path="/terms-of-service.html" element={<Navigate to="/terms-of-service" replace />} />
 
