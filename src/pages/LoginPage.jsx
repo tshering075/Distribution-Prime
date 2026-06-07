@@ -29,7 +29,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
 import "./LoginPage.css";
-import { resolveOrganizationBrand, logoSrcWithPublicUrl } from "../utils/organizationBrand";
+import { logoSrcWithPublicUrl } from "../utils/organizationBrand";
 import { APP_NAME, BRAND_MARK_SRC, PRIVACY_POLICY_PATH, TERMS_OF_SERVICE_PATH } from "../constants/brand";
 import { useBrand } from "../hooks/useBrand";
 import {

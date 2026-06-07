@@ -17,7 +17,6 @@ import {
   Badge,
   useMediaQuery,
   useTheme,
-  LinearProgress,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import { navDrawerPaperSx, navDrawerItemSx } from "../theme/contrastSurfaces";

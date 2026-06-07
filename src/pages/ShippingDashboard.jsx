@@ -485,7 +485,7 @@ function ShippingDashboard({ onLogout }) {
     };
   }, [loadOrders, workspaceReady]);
 
-  const saveInvoicesOnOrder = async (order, newInvoices, { merge = true } = {}) => {
+  const saveInvoicesOnOrder = useCallback(async (order, newInvoices, { merge = true } = {}) => {
     invoiceSaveLockRef.current += 1;
     try {
       const orderId = getOrderId(order);
@@ -622,7 +622,7 @@ function ShippingDashboard({ onLogout }) {
     } finally {
       invoiceSaveLockRef.current = Math.max(0, invoiceSaveLockRef.current - 1);
     }
-  };
+  }, [orderIdentityFallback, showToast, pushNotification]);
 
   const snapshotInputFiles = (input) => {
     const files = Array.from(input?.files ?? []);
@@ -704,7 +704,7 @@ function ShippingDashboard({ onLogout }) {
     input.click();
   };
 
-  const handleDeliver = async (order) => {
+  const handleDeliver = useCallback(async (order) => {
     const orderId = getOrderId(order);
     const current = getOrderStatus(order);
     if (current !== ORDER_STATUS.APPROVED) {
@@ -839,7 +839,7 @@ function ShippingDashboard({ onLogout }) {
       setDeliveringId(null);
       setDeliverConfirmOrder(null);
     }
-  };
+  }, [orderIdentityFallback, showToast, pushNotification, loadOrders]);
 
   const statusChipColor = (status) => {
     if (status === ORDER_STATUS.APPROVED) return "info";
@@ -1160,7 +1160,17 @@ function ShippingDashboard({ onLogout }) {
         setSavingPreview(false);
       }
     },
-    [previewOrder, previewDistributor, showToast, persistOrderTransport]
+    [
+      previewOrder,
+      previewDistributor,
+      showToast,
+      persistOrderTransport,
+      brand.address,
+      brand.companyName,
+      brand.gstNo,
+      brand.postNo,
+      saveInvoicesOnOrder,
+    ]
   );
 
   const handleMarkDispatchedFromPreview = useCallback(
@@ -1209,7 +1219,7 @@ function ShippingDashboard({ onLogout }) {
       showToast(e.message || "Could not mark order dispatched", "error", "Shipping");
     }
   },
-    [previewOrder, showToast, persistOrderTransport]
+    [previewOrder, showToast, persistOrderTransport, handleDeliver]
   );
 
   const handleConfirmDeliver = async () => {

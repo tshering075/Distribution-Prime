@@ -34,6 +34,8 @@ export default function ShippingInvoiceAttachment({
       hasData && showInlinePreview && primary
         ? createInvoicePreviewUrl(primary)
         : { url: null, revoke: () => {} },
+    // primaryKey avoids re-creating blob URLs when `primary` is a new object reference with the same content
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key; see primaryKey above
     [hasData, showInlinePreview, primaryKey]
   );
 

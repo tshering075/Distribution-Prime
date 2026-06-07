@@ -3,8 +3,6 @@ import {
   APP_SHORT_NAME,
   BRAND_MARK_SRC,
   BRAND_PRIMARY,
-  BRAND_PRIMARY_DARK,
-  BRAND_PRIMARY_LIGHT,
   COMPANY_NAME,
 } from '../constants/brand';
 

@@ -198,7 +198,6 @@ function formatAmount(totalAmount, density) {
 function QtyCell({ row, density, editable, purchasedCases, onPurchasedCasesChange }) {
   const cases = num(row.cases);
   const freeCases = num(row.freeCases);
-  const scheme = row.schemeApplied;
   const orderedCases = freeCases > 0 ? Math.max(0, cases - freeCases) : cases;
 
   if (editable) {
@@ -690,7 +689,6 @@ export default function OrderCalculatedTableDialog({
                   {(editable ? editRows : staticRows).map((sourceRow, i) => {
                     const row = editable ? computedFromEdit[i] || sourceRow : sourceRow;
                     const editSource = editable ? sourceRow : null;
-                    const rate = num(row.rate);
                     const totalAmount = num(row.totalAmount);
                     const totalTon = num(row.totalTon);
                     const totalUC = row.totalUC != null && row.totalUC !== "" ? num(row.totalUC) : null;

@@ -79,7 +79,7 @@ import {
   unlockNotificationAudio,
 } from "../utils/distributorNotificationSound";
 import { isCombinedTargetAchievedUC } from "../utils/targetAchievement";
-import { getDistributors, saveDistributors } from "../utils/distributorAuth";
+import { getDistributors } from "../utils/distributorAuth";
 import { 
   getDistributorByCode, 
   subscribeToDistributor,
@@ -87,7 +87,6 @@ import {
   fetchAllOrderNumbers,
   fetchOrderShippingInvoice,
   subscribeToOrders,
-  updateDistributor,
   getTarget,
   subscribeToTarget,
   getActiveSchemesForDistributor,
@@ -1340,7 +1339,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     } catch (error) {
       console.warn("Could not restore distributor current view:", error);
     }
-  }, [DISTRIBUTOR_VIEW_STORAGE_KEY]);
+  }, [DISTRIBUTOR_VIEW_STORAGE_KEY, loadProductRates]);
 
   // Target period: localStorage, refreshed when Supabase global period is loaded (targetPeriodRev)
   const targetPeriod = useMemo(() => {

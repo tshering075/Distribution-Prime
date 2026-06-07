@@ -148,12 +148,16 @@ export default function ShippingTransportFields({
   const theme = useTheme();
   const brand = theme.palette.primary.main;
 
-  const transport = value || {
-    transporterVehicle: "",
-    vehicleType: "",
-    vehicleNo: "",
-    transportationCharges: "",
-  };
+  const transport = useMemo(
+    () =>
+      value || {
+        transporterVehicle: "",
+        vehicleType: "",
+        vehicleNo: "",
+        transportationCharges: "",
+      },
+    [value]
+  );
 
   const orgId = getActiveOrganizationId();
   const [customVehicleTypes, setCustomVehicleTypes] = useState(() =>

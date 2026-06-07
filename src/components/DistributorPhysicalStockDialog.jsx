@@ -160,7 +160,7 @@ export default function DistributorPhysicalStockDialog({
         if (reqId === loadRequestIdRef.current) setLoadingRows(false);
       }
     },
-    [distributorCode, fetchLatestSnapshot, isSupabaseConfigured, productRates, productLines]
+    [distributorCode, fetchLatestSnapshot, isSupabaseConfigured, productRates]
   );
 
   useEffect(() => {

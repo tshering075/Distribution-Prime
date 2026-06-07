@@ -7,7 +7,6 @@
 import { supabase } from '../supabase';
 import {
   getActiveOrganizationId,
-  withOrgPayload,
   wrapTenantTableQuery,
 } from './tenantScope';
 

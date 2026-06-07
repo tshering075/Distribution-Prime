@@ -5,12 +5,10 @@
  */
 
 import { supabase } from '../supabase';
-import { hashPasswordSync } from '../utils/distributorAuth';
 import { resolvePermissionsForRole } from '../utils/permissions';
 import {
   getActiveOrganizationId,
   getActiveOrganizationSlug,
-  setActiveOrganization,
   withOrgPayload,
   wrapTenantTableQuery,
 } from './tenantScope';
@@ -52,17 +50,6 @@ function getLinkedEmailFromDistributorRow(row) {
   return e != null ? String(e).trim() : '';
 }
 
-/** True if password matches legacy `credentials` on the distributors row (same rules as localStorage login). */
-function distributorRowPasswordMatches(row, plainPassword) {
-  if (!row || plainPassword == null) return false;
-  const cred = row.credentials;
-  if (!cred || typeof cred !== 'object') return false;
-  const hash = hashPasswordSync(String(plainPassword));
-  if (cred.passwordHash != null && String(cred.passwordHash) === hash) return true;
-  if (cred.password != null && cred.password === plainPassword) return true;
-  return false;
-}
-
 // ==================== AUTHENTICATION ====================
 
 /**
@@ -73,12 +60,6 @@ function distributorRowPasswordMatches(row, plainPassword) {
  * @param {string} password - Password matching distributors.credentials in Supabase
  * @returns {Promise<Object>} Distributor record for the dashboard
  */
-function distributorLoginIdVariants(loginId) {
-  const id = String(loginId || '').trim();
-  if (!id) return [];
-  return [...new Set([id, id.toUpperCase(), id.toLowerCase()])];
-}
-
 function isSupabasePermissionError(error) {
   const msg = String(error?.message || error || '').toLowerCase();
   return (
@@ -199,81 +180,6 @@ async function fetchWorkspaceOrderNumbersRpc(distributorCode) {
   return (data || [])
     .map((row) => row?.order_number ?? row)
     .filter((n) => n != null && String(n).trim() !== '');
-}
-
-/**
- * Resolve a distributor row for login using code, username column, or credentials.username.
- * @param {string} loginId - Code or username entered on login screen
- */
-async function findDistributorForLogin(loginId) {
-  if (!supabase) return null;
-
-  const variants = distributorLoginIdVariants(loginId);
-  if (variants.length === 0) return null;
-
-  const slug = getActiveOrganizationSlug();
-  if (slug) {
-    for (const variant of variants) {
-      try {
-        const { data, error } = await supabase.rpc('lookup_distributor_for_login', {
-          p_slug: slug,
-          p_code: variant,
-        });
-        if (error) {
-          const missingRpc =
-            error.code === 'PGRST202' ||
-            error.code === '42883' ||
-            /function.*does not exist/i.test(String(error.message || ''));
-          if (!missingRpc && isSupabasePermissionError(error)) throw error;
-          if (!missingRpc) continue;
-          break;
-        }
-        const row = firstRow(data);
-        if (row) return row;
-      } catch (e) {
-        if (isSupabasePermissionError(e)) throw e;
-      }
-    }
-  }
-
-  for (const variant of variants) {
-    const byCode = await getDistributorByCode(variant);
-    if (byCode) return byCode;
-  }
-
-  for (const variant of variants) {
-    const byUsername = await getDistributorByUsername(variant);
-    if (byUsername) return byUsername;
-  }
-
-  for (const variant of variants) {
-    try {
-      const { data, error } = await fromTenant('distributors')
-        .select('*')
-        .eq('credentials->>username', variant);
-      if (error) {
-        if (isSupabasePermissionError(error)) throw error;
-        continue;
-      }
-      if (data?.length) return data[0];
-    } catch (e) {
-      if (isSupabasePermissionError(e)) throw e;
-    }
-  }
-
-  const id = variants[0];
-  try {
-    const { data, error } = await fromTenant('distributors').select('*').ilike('code', id);
-    if (error) {
-      if (isSupabasePermissionError(error)) throw error;
-      return null;
-    }
-    if (data?.length === 1) return data[0];
-  } catch (e) {
-    if (isSupabasePermissionError(e)) throw e;
-  }
-
-  return null;
 }
 
 export async function signInDistributor(distributorCode, password) {
