@@ -26,7 +26,7 @@
       "src": "distribution-prime-icon-1024.png",
       "type": "image/png",
       "sizes": "1024x1024",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
   "start_url": "/login",

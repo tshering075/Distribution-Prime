@@ -19,9 +19,106 @@ import { usePwaInstall } from "../hooks/usePwaInstall";
 import { APP_SHORT_NAME, BRAND_MARK_SRC } from "../constants/brand";
 import { logoSrcWithPublicUrl } from "../utils/organizationBrand";
 
+function InstallGuideDialog({ open, mode, onClose }) {
+  if (!mode || mode === "native") return null;
+
+  const title =
+    mode === "ios"
+      ? "Install on iPhone / iPad"
+      : mode === "android"
+        ? "Install on Android"
+        : mode === "in-app"
+          ? "Open in your browser"
+          : `Install ${APP_SHORT_NAME}`;
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontWeight: 800 }}>{title}</DialogTitle>
+      <DialogContent>
+        {mode === "in-app" ? (
+          <Typography variant="body2" color="text.secondary">
+            In-app browsers (WhatsApp, Facebook, Instagram, etc.) cannot install apps. Tap{" "}
+            <strong>⋮</strong> or <strong>⋯</strong> and choose <strong>Open in Chrome</strong> or{" "}
+            <strong>Open in Safari</strong>, then tap Install again.
+          </Typography>
+        ) : null}
+
+        {mode === "ios" ? (
+          <>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Safari does not show a one-tap install button. Use <strong>Add to Home Screen</strong>:
+            </Typography>
+            <Stack spacing={1.25} component="ol" sx={{ pl: 2.5, m: 0 }}>
+              <Typography component="li" variant="body2">
+                Tap <strong>Share</strong>{" "}
+                <IosShareIcon sx={{ fontSize: 18, verticalAlign: "text-bottom" }} /> at the bottom of Safari.
+              </Typography>
+              <Typography component="li" variant="body2">
+                Choose <strong>Add to Home Screen</strong>.
+              </Typography>
+              <Typography component="li" variant="body2">
+                Tap <strong>Add</strong> — {APP_SHORT_NAME} opens like an app.
+              </Typography>
+            </Stack>
+          </>
+        ) : null}
+
+        {mode === "android" ? (
+          <Stack spacing={1.25} component="ol" sx={{ pl: 2.5, m: 0 }}>
+            <Typography component="li" variant="body2">
+              Open this site in <strong>Chrome</strong> (not an in-app browser).
+            </Typography>
+            <Typography component="li" variant="body2">
+              Tap the menu <strong>⋮</strong> (top right).
+            </Typography>
+            <Typography component="li" variant="body2">
+              Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+            </Typography>
+            <Typography component="li" variant="body2">
+              Confirm — {APP_SHORT_NAME} will appear on your home screen.
+            </Typography>
+          </Stack>
+        ) : null}
+
+        {mode === "desktop" ? (
+          <Stack spacing={1.25} component="ol" sx={{ pl: 2.5, m: 0 }}>
+            <Typography component="li" variant="body2">
+              Use <strong>Chrome</strong> or <strong>Edge</strong> on this site.
+            </Typography>
+            <Typography component="li" variant="body2">
+              Look for the install icon in the address bar, or open the browser menu.
+            </Typography>
+            <Typography component="li" variant="body2">
+              Choose <strong>Install {APP_SHORT_NAME}</strong> or <strong>Install app</strong>.
+            </Typography>
+          </Stack>
+        ) : null}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} sx={{ fontWeight: 700 }}>
+          Got it
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+async function runInstallFlow({ getInstallGuideMode, promptInstall, setGuideOpen }) {
+  const mode = getInstallGuideMode();
+  if (!mode) return;
+  if (mode === "native") {
+    const { outcome } = await promptInstall();
+    if (outcome !== "accepted") {
+      const fallback = getInstallGuideMode();
+      setGuideOpen(fallback && fallback !== "native" ? fallback : "desktop");
+    }
+    return;
+  }
+  setGuideOpen(mode);
+}
+
 /**
- * Bottom banner + iOS instructions for “Install app” (PWA).
- * Shown on first visits until dismissed or installed.
+ * Bottom banner + install instructions for “Install app” (PWA).
  */
 export default function InstallAppBanner() {
   const theme = useTheme();
@@ -32,25 +129,31 @@ export default function InstallAppBanner() {
     showIosGuide,
     promptInstall,
     dismissBanner,
+    getInstallGuideMode,
   } = usePwaInstall();
-  const [iosOpen, setIosOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideMode, setGuideMode] = useState(null);
   const [installing, setInstalling] = useState(false);
 
   if (!showBanner) return null;
 
   const handleInstall = async () => {
-    if (showIosGuide && !canNativeInstall) {
-      setIosOpen(true);
-      return;
-    }
     setInstalling(true);
     try {
-      const { outcome } = await promptInstall();
-      if (outcome === "unavailable" && showIosGuide) setIosOpen(true);
+      await runInstallFlow({
+        getInstallGuideMode,
+        promptInstall,
+        setGuideOpen: (mode) => {
+          setGuideMode(mode);
+          setGuideOpen(true);
+        },
+      });
     } finally {
       setInstalling(false);
     }
   };
+
+  const showHowTo = showIosGuide && !canNativeInstall;
 
   return (
     <>
@@ -91,7 +194,7 @@ export default function InstallAppBanner() {
             variant="contained"
             size="small"
             disabled={installing}
-            startIcon={showIosGuide && !canNativeInstall ? <IosShareIcon /> : <GetAppIcon />}
+            startIcon={showHowTo ? <IosShareIcon /> : <GetAppIcon />}
             onClick={handleInstall}
             sx={{
               flexShrink: 0,
@@ -101,7 +204,7 @@ export default function InstallAppBanner() {
               "&:hover": { bgcolor: theme.palette.error.dark },
             }}
           >
-            {showIosGuide && !canNativeInstall ? "How to" : "Install"}
+            {showHowTo ? "How to" : "Install"}
           </Button>
           <IconButton size="small" aria-label="Dismiss install banner" onClick={dismissBanner}>
             <CloseIcon fontSize="small" />
@@ -109,34 +212,7 @@ export default function InstallAppBanner() {
         </Stack>
       </Paper>
 
-      <Dialog open={iosOpen} onClose={() => setIosOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Install on iPhone / iPad</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Safari does not show a one-tap install button. Use <strong>Add to Home Screen</strong>:
-          </Typography>
-          <Stack spacing={1.25} component="ol" sx={{ pl: 2.5, m: 0 }}>
-            <Typography component="li" variant="body2">
-              Tap the <strong>Share</strong> button{" "}
-              <IosShareIcon sx={{ fontSize: 18, verticalAlign: "text-bottom" }} /> at the bottom of Safari.
-            </Typography>
-            <Typography component="li" variant="body2">
-              Scroll and choose <strong>Add to Home Screen</strong>.
-            </Typography>
-            <Typography component="li" variant="body2">
-              Tap <strong>Add</strong> — {APP_SHORT_NAME} will open like an app.
-            </Typography>
-          </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>
-            Tip: Open this link in <strong>Safari</strong>, not inside another app&apos;s browser.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIosOpen(false)} sx={{ fontWeight: 700 }}>
-            Got it
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <InstallGuideDialog open={guideOpen} mode={guideMode} onClose={() => setGuideOpen(false)} />
     </>
   );
 }
@@ -145,21 +221,24 @@ export default function InstallAppBanner() {
 export function InstallAppButton({ size = "medium", sx = {} }) {
   const theme = useTheme();
   const brand = theme.palette.primary.main;
-  const { canNativeInstall, showIosGuide, isStandalone, promptInstall } = usePwaInstall();
-  const [iosOpen, setIosOpen] = useState(false);
+  const { isStandalone, promptInstall, getInstallGuideMode } = usePwaInstall();
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideMode, setGuideMode] = useState(null);
   const [installing, setInstalling] = useState(false);
 
   if (isStandalone) return null;
 
   const handleClick = async () => {
-    if (showIosGuide && !canNativeInstall) {
-      setIosOpen(true);
-      return;
-    }
     setInstalling(true);
     try {
-      const { outcome } = await promptInstall();
-      if (outcome === "unavailable" && showIosGuide) setIosOpen(true);
+      await runInstallFlow({
+        getInstallGuideMode,
+        promptInstall,
+        setGuideOpen: (mode) => {
+          setGuideMode(mode);
+          setGuideOpen(true);
+        },
+      });
     } finally {
       setInstalling(false);
     }
@@ -183,18 +262,7 @@ export function InstallAppButton({ size = "medium", sx = {} }) {
       >
         Install app
       </Button>
-      <Dialog open={iosOpen} onClose={() => setIosOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Install {APP_SHORT_NAME}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            In Safari: Share <IosShareIcon sx={{ fontSize: 16, verticalAlign: "text-bottom" }} /> →{" "}
-            <strong>Add to Home Screen</strong> → Add.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIosOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      <InstallGuideDialog open={guideOpen} mode={guideMode} onClose={() => setGuideOpen(false)} />
     </>
   );
 }

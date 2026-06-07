@@ -9,17 +9,18 @@ const isLocalhost = Boolean(
 );
 
 export function register() {
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      const swUrl = `${process.env.PUBLIC_URL}/service-worker.js`;
+  if (!("serviceWorker" in navigator)) return;
 
-      if (isLocalhost) {
-        checkValidServiceWorker(swUrl);
-      } else {
-        registerValidSW(swUrl);
-      }
-    });
+  const base = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+  const swUrl = `${base}/service-worker.js`;
+
+  if (isLocalhost) {
+    window.addEventListener("load", () => checkValidServiceWorker(swUrl));
+    return;
   }
+
+  // Register immediately in production so Chrome can offer "Install app" sooner.
+  registerValidSW(swUrl);
 }
 
 function registerValidSW(swUrl) {

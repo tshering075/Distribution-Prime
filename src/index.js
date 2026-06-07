@@ -7,6 +7,9 @@ import { initializeAdminCredentials } from "./utils/distributorAuth";
 import { isProductionAuthMode } from "./utils/productionMode";
 import ErrorBoundary from "./components/ErrorBoundary";
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration";
+import { initPwaInstallListener } from "./utils/pwaInstallStore";
+
+initPwaInstallListener();
 
 // Demo localStorage credentials only in non-production development
 if (!isProductionAuthMode()) {

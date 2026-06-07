@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  getDeferredInstallPrompt,
+  subscribePwaInstall,
+  triggerPwaInstall,
+} from "../utils/pwaInstallStore";
 
 const DISMISS_KEY = "coke_pwa_install_banner_dismissed";
 
@@ -39,74 +44,54 @@ export function isInAppBrowser() {
   return /FBAN|FBAV|Instagram|Line\/|Twitter|WhatsApp|MicroMessenger/i.test(ua);
 }
 
+function isAndroidDevice() {
+  if (typeof navigator === "undefined") return false;
+  return /android/i.test(navigator.userAgent);
+}
+
 /**
  * Chrome / Edge / Samsung Internet install prompt + iOS “Add to Home Screen” detection.
  */
 export function usePwaInstall() {
-  const deferredRef = useRef(null);
-  const [canNativeInstall, setCanNativeInstall] = useState(false);
+  useSyncExternalStore(subscribePwaInstall, getDeferredInstallPrompt, () => null);
+
   const [isStandalone, setIsStandalone] = useState(isStandaloneDisplayMode);
   const [isIos, setIsIos] = useState(isIosDevice);
   const [inAppBrowser, setInAppBrowser] = useState(isInAppBrowser);
   const [dismissed, setDismissed] = useState(readDismissed);
-  const [promptTimedOut, setPromptTimedOut] = useState(false);
 
   useEffect(() => {
     setIsStandalone(isStandaloneDisplayMode());
     setIsIos(isIosDevice());
     setInAppBrowser(isInAppBrowser());
 
-    const onBeforeInstall = (event) => {
-      event.preventDefault();
-      deferredRef.current = event;
-      setCanNativeInstall(true);
-      setPromptTimedOut(false);
-    };
-
-    const onInstalled = () => {
-      deferredRef.current = null;
-      setCanNativeInstall(false);
-      setIsStandalone(true);
-    };
-
-    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    const onInstalled = () => setIsStandalone(true);
     window.addEventListener("appinstalled", onInstalled);
-
-    const timer = window.setTimeout(() => {
-      if (!deferredRef.current) setPromptTimedOut(true);
-    }, 3500);
-
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
+    return () => window.removeEventListener("appinstalled", onInstalled);
   }, []);
 
-  const promptInstall = useCallback(async () => {
-    const event = deferredRef.current;
-    if (!event) return { outcome: "unavailable" };
-    try {
-      await event.prompt();
-      const { outcome } = await event.userChoice;
-      if (outcome === "accepted") {
-        deferredRef.current = null;
-        setCanNativeInstall(false);
-      }
-      return { outcome };
-    } catch {
-      return { outcome: "error" };
-    }
-  }, []);
+  const canNativeInstall = Boolean(getDeferredInstallPrompt());
+  const showIosGuide = isIos && !isStandalone;
+  const showAndroidGuide = isAndroidDevice() && !isStandalone && !canNativeInstall;
+  const showBanner =
+    !isStandalone && !dismissed && (canNativeInstall || showIosGuide || showAndroidGuide);
+
+  const promptInstall = useCallback(() => triggerPwaInstall(), []);
 
   const dismissBanner = useCallback(() => {
     dismissPwaInstallBanner();
     setDismissed(true);
   }, []);
 
-  const showIosGuide = isIos && !isStandalone;
-  const showBanner =
-    !isStandalone && !dismissed && (canNativeInstall || showIosGuide);
+  /** How the UI should handle an Install click when native prompt is unavailable. */
+  const getInstallGuideMode = useCallback(() => {
+    if (isStandalone) return null;
+    if (inAppBrowser) return "in-app";
+    if (canNativeInstall) return "native";
+    if (showIosGuide) return "ios";
+    if (showAndroidGuide) return "android";
+    return "desktop";
+  }, [canNativeInstall, inAppBrowser, isStandalone, showAndroidGuide, showIosGuide]);
 
   return {
     canNativeInstall,
@@ -114,9 +99,10 @@ export function usePwaInstall() {
     isIos,
     inAppBrowser,
     showIosGuide,
+    showAndroidGuide,
     showBanner,
-    promptTimedOut,
     promptInstall,
     dismissBanner,
+    getInstallGuideMode,
   };
 }
