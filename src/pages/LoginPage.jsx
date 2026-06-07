@@ -555,6 +555,13 @@ function LoginPage({
                     Sign in to accept your team invite. You will return here after signing in.
                   </Alert>
                 ) : null}
+                {!isSupabaseConfigured ? (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    Database not connected. Set <strong>REACT_APP_SUPABASE_URL</strong> and{" "}
+                    <strong>REACT_APP_SUPABASE_ANON_KEY</strong> in Cloudflare Pages → Settings →
+                    Variables and Secrets (Production), then redeploy.
+                  </Alert>
+                ) : null}
                 {isSupabaseConfigured && (
                   <TextField
                     fullWidth
