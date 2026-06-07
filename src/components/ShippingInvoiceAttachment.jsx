@@ -22,13 +22,19 @@ export default function ShippingInvoiceAttachment({
   const invoices = getOrderShippingInvoices(order);
   const hasData = invoices.length > 0;
   const primary = invoices[0];
+  // `primary` is derived from `order` and is often a new object reference each render.
+  // For PDFs, changing the blob URL forces the iframe to reload (visible as flicker).
+  // Use a stable identity key instead of object reference equality.
+  const primaryKey = primary
+    ? `${primary.fileName || ""}|${primary.mimeType || ""}|${String(primary.data || "").length}`
+    : "";
 
   const preview = useMemo(
     () =>
       hasData && showInlinePreview && primary
         ? createInvoicePreviewUrl(primary)
         : { url: null, revoke: () => {} },
-    [hasData, showInlinePreview, primary]
+    [hasData, showInlinePreview, primaryKey]
   );
 
   useEffect(() => () => preview.revoke(), [preview]);

@@ -1,0 +1,27 @@
+-- ============================================================
+-- Production SQL run order (Option B — multi-tenant go-live)
+-- Run each file in Supabase SQL Editor in this order.
+-- Verify with audit_tenant_schema.sql after step 8.
+-- ============================================================
+-- 1. platform_admin.sql
+-- 2. TENANT_RLS_STRICT.sql
+-- 3. workspace_signup_rpc.sql
+-- 4. distributor_orders_rpc.sql          (sessions + authenticate_distributor)
+-- 5. add_shipping_order_columns.sql      (if dispatch columns missing)
+-- 6. add_distributor_gstin_tpn.sql         (optional)
+-- 7. platform_admin_v2.sql
+-- 8. fix_rls_linter_cleanup.sql
+-- 9. fix_rls_consolidate_policies.sql
+-- 10. fix_linter_security.sql
+-- 11. fix_rls_function_grants.sql        (if Rate Master cloud save fails with RLS)
+-- 12. fix_app_config_tenant_pkey.sql     (if duplicate key app_config_pkey on Rate Master)
+-- 13. audit_tenant_schema.sql            (diagnostic — fix any MISSING rows)
+-- Re-run distributor_orders_rpc.sql after updates (save_workspace_product_rates RPC).
+--
+-- Then seed platform admin:
+--   INSERT INTO platform_admins (user_id) VALUES ('your-auth-user-uuid');
+--
+-- App env (.env):
+--   REACT_APP_SUPABASE_URL=
+--   REACT_APP_SUPABASE_ANON_KEY=
+--   REACT_APP_REQUIRE_SUPABASE_AUTH=true   (optional in dev)

@@ -4,15 +4,17 @@ import '@fontsource/roboto';
 import App from "./App";
 import "./index.css";
 import { initializeAdminCredentials } from "./utils/distributorAuth";
+import { isProductionAuthMode } from "./utils/productionMode";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { AppThemeProvider } from "./theme/AppThemeProvider";
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration";
 
-// Initialize admin credentials on app start
-try {
-  initializeAdminCredentials();
-} catch (error) {
-  // Silently fail - app can still work without admin credentials initialized
+// Demo localStorage credentials only in non-production development
+if (!isProductionAuthMode()) {
+  try {
+    initializeAdminCredentials();
+  } catch (error) {
+    /* ignore */
+  }
 }
 
 // Helper to serialize error objects for better logging
@@ -86,11 +88,9 @@ function dismissSplash() {
 
 root.render(
   <React.StrictMode>
-    <AppThemeProvider>
-      <ErrorBoundary>
-        <AppComponent />
-      </ErrorBoundary>
-    </AppThemeProvider>
+    <ErrorBoundary>
+      <AppComponent />
+    </ErrorBoundary>
   </React.StrictMode>
 );
 

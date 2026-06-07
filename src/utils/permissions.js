@@ -20,7 +20,7 @@ export const ROLES = {
   },
   shipping: {
     label: "Shipping",
-    description: "Shipping dashboard only — upload invoices and mark orders delivered",
+    description: "Shipping dashboard only — upload invoices and mark orders dispatched",
     color: "primary",
     permissions: { read: true, write: false, delete: false, manageUsers: false },
   },

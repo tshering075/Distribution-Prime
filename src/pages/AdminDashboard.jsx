@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
    Box,
    AppBar,
@@ -19,7 +20,14 @@ import {
   LinearProgress,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import { DRAWER_FOREGROUND } from "../theme/drawerContrast";
+import { navDrawerPaperSx, navDrawerItemSx } from "../theme/contrastSurfaces";
+import {
+  saasAppBarSx,
+  saasAppBarToolbarSx,
+  saasDashboardMainSx,
+  navDrawerSectionLabelSx,
+} from "../theme/saasChrome";
+import SaasAppBarTitle from "../components/saas/SaasAppBarTitle";
 import MenuIcon from "@mui/icons-material/Menu";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import LogoutIcon from "@mui/icons-material/Logout";                    
@@ -52,6 +60,14 @@ import AdminStockLiftingRecordsDialog from "../components/AdminStockLiftingRecor
 import AppSnackbar from "../components/AppSnackbar";
 import { useLogoutConfirmation } from "../components/LogoutConfirmDialog";
 import DayNightThemeToggle from "../components/DayNightThemeToggle";
+import WorkspaceChip from "../components/WorkspaceChip";
+import WorkspaceSettingsDialog from "../components/WorkspaceSettingsDialog";
+import TeamManagementDialog from "../components/TeamManagementDialog";
+import OnboardingWizardDialog from "../components/OnboardingWizardDialog";
+import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
+import { useOrganization } from "../context/OrganizationProvider";
+import GroupAddOutlinedIcon from "@mui/icons-material/GroupAddOutlined";
+import BusinessOutlinedIcon from "@mui/icons-material/BusinessOutlined";
 import { playOrderApprovedChime } from "../utils/orderApprovedSound";
 import { playNewOrderIncomingAlert, playTargetAchievedBell } from "../utils/newOrderAlertSound";
 import { isCombinedTargetAchievedUC } from "../utils/targetAchievement";
@@ -61,6 +77,12 @@ import WarehouseIcon from "@mui/icons-material/Warehouse";
 import TableChartIcon from "@mui/icons-material/TableChart";
 import CokeCalculator from "../cokecalculator";
 import { getDistributors, saveDistributors } from "../utils/distributorAuth";
+import {
+  readTenantJson,
+  removeTenantJson,
+  writeTenantJson,
+} from "../utils/tenantLocalStorage";
+import { readOrdersCache, writeOrdersCache } from "../utils/ordersLocalStorage";
 // Import extracted components
 import InfoCards from "./AdminDashboard/components/InfoCards";
 import PerformanceTable from "./AdminDashboard/components/PerformanceTable";
@@ -69,9 +91,13 @@ import PerformanceToolbar from "./AdminDashboard/components/PerformanceToolbar";
 import OrdersSection from "./AdminDashboard/components/OrdersSection";
 import AdminSummaryStrip from "./AdminDashboard/components/AdminSummaryStrip";
 import { getTargetPeriod, saveTargetPeriod } from "../utils/targetPeriod";
-import { parseExcelFile } from "../utils/excelUtils";
-import { findDistributorForPartyName, partyNameAggregationKey } from "../utils/distributorNameMatch";
 import { buildDistributorPerformanceSkuDetailRows } from "../utils/performanceSkuAggregation";
+import { backfillDispatchedOrdersToSalesData } from "../services/deliveredOrderAchievement";
+import {
+  buildPerformanceAchievedByDistributor,
+  EMPTY_ACHIEVED,
+  normalizeAchievedShape,
+} from "../utils/achievedFromDispatches";
 import { 
   getAllDistributors, 
   saveDistributor, 
@@ -82,7 +108,6 @@ import {
   getAllOrders,
   subscribeToSalesData,
   deleteAllSalesDataFromAdmin,
-  saveSalesDataBatch,
   getAllTargets,
   saveTargetsBatch,
   deleteTargetsBatch,
@@ -98,8 +123,6 @@ import {
   getGlobalTargetPeriod,
   getGlobalGstPolicy,
   saveGlobalGstPolicy,
-  getSalesPerformanceLastUpdated,
-  saveSalesPerformanceLastUpdated,
 } from "../services/supabaseService";
 import { 
   sendOrderEmail, 
@@ -109,7 +132,9 @@ import {
 import { getCurrentUserRole, getUserPermissions } from "../utils/permissions";
 import { logActivity, ACTIVITY_TYPES } from "../services/activityService";
 import { readProductRatesFromLocalStorage, writeProductRatesToLocalStorage } from "../utils/productRatesStorage";
+import { ensureProductCatalog } from "../utils/productCatalog";
 import {
+  DEFAULT_GST_REGIONS,
   readGlobalGstPolicyFromLocalStorage,
   writeGlobalGstPolicyToLocalStorage,
   resolveGstEnabledForRegion,
@@ -147,6 +172,8 @@ function readStoredAdminRegion() {
 
 function AdminDashboard({ onLogout }) {
   const { requestLogout, logoutConfirmDialog } = useLogoutConfirmation(onLogout);
+  const { organization } = useOrganization();
+  const [searchParams, setSearchParams] = useSearchParams();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile); // Open by default on desktop
@@ -175,6 +202,10 @@ function AdminDashboard({ onLogout }) {
   const [performanceSkuDialog, setPerformanceSkuDialog] = useState(null);
   const [productRates, setProductRates] = useState(null);
   const [gstSettingsOpen, setGstSettingsOpen] = useState(false);
+  const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const onboardingTriggered = useRef(false);
   const [globalGstPolicy, setGlobalGstPolicy] = useState(() => readGlobalGstPolicyFromLocalStorage());
   const [savingGlobalGst, setSavingGlobalGst] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(null); // Order ID being sent
@@ -220,27 +251,6 @@ function AdminDashboard({ onLogout }) {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [adminPhysicalStockBadgeTick, setAdminPhysicalStockBadgeTick] = useState(0);
   const dialogBackHistoryRef = useRef(false);
-
-  const SALES_PERF_UPDATED_KEY = "coke_sales_performance_last_updated";
-
-  const applySalesPerformanceUpdatedAt = async (when, { persistCloud } = { persistCloud: false }) => {
-    const d = when instanceof Date ? when : new Date(when);
-    if (Number.isNaN(d.getTime())) return;
-    const iso = d.toISOString();
-    if (persistCloud && supabase) {
-      try {
-        await saveSalesPerformanceLastUpdated(iso);
-      } catch (e) {
-        console.warn("Could not save sales performance timestamp to Supabase:", e);
-      }
-    }
-    try {
-      localStorage.setItem(SALES_PERF_UPDATED_KEY, iso);
-    } catch (e) {
-      /* ignore */
-    }
-    setUpdatedDate(d);
-  };
 
   // Target period: local default first; Supabase global overwrites on load when configured
   const [targetPeriod, setTargetPeriod] = useState(() => getTargetPeriod());
@@ -300,6 +310,17 @@ function AdminDashboard({ onLogout }) {
       cancelled = true;
     };
   }, [isSupabaseConfigured]);
+
+  // Only show welcome wizard right after workspace signup (?onboarding=1), not on every visit.
+  useEffect(() => {
+    if (onboardingTriggered.current) return;
+    if (searchParams.get("onboarding") !== "1" || !organization?.id) return;
+    onboardingTriggered.current = true;
+    setOnboardingOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("onboarding");
+    setSearchParams(next, { replace: true });
+  }, [organization?.id, searchParams, setSearchParams]);
 
   // Restore Gmail session silently after admin login (connect once per browser)
   useEffect(() => {
@@ -473,7 +494,12 @@ function AdminDashboard({ onLogout }) {
   }, [isSupabaseConfigured]);
   
   // Load distributors from Supabase or localStorage
+  const SALES_DATA_STORAGE_KEY = "admin_sales_data";
+  const SKIP_DISPATCH_BACKFILL_KEY = "admin_skip_dispatch_backfill";
+  const SCHEMES_STORAGE_KEY = "schemes";
+
   const [distributors, setDistributors] = useState(() => {
+    if (isSupabaseConfigured) return [];
     const stored = getDistributors();
     return stored.length > 0 ? augment(stored) : [];
   });
@@ -591,13 +617,8 @@ function AdminDashboard({ onLogout }) {
             // IMPORTANT: Log that performance table should now show this data
             console.log('📋 Performance table will display achieved values from loaded distributors');
           } else {
-            console.log('⚠️ Supabase returned empty distributors, checking localStorage...');
-            // Fallback to localStorage if Supabase is empty
-            const stored = getDistributors();
-            if (stored.length > 0) {
-              console.log(`📦 Loaded ${stored.length} distributors from localStorage`);
-              setDistributors(augment(stored));
-            }
+            console.log('✅ New workspace has no distributors yet — starting empty');
+            setDistributors([]);
           }
         } catch (error) {
           if (error.name === 'AbortError') {
@@ -606,11 +627,12 @@ function AdminDashboard({ onLogout }) {
           }
           if (!isMounted) return;
           console.error("❌ Error loading distributors from Supabase:", error);
-          // Fallback to localStorage
-          const stored = getDistributors();
-          if (stored.length > 0) {
-            console.log(`📦 Fallback: Loaded ${stored.length} distributors from localStorage`);
-            setDistributors(augment(stored));
+          if (!isSupabaseConfigured) {
+            const stored = getDistributors();
+            if (stored.length > 0) {
+              console.log(`📦 Fallback: Loaded ${stored.length} distributors from localStorage`);
+              setDistributors(augment(stored));
+            }
           }
         } finally {
           if (isMounted) {
@@ -745,7 +767,7 @@ function AdminDashboard({ onLogout }) {
   }, [isSupabaseConfigured]);
 
   // Save distributors to Firestore or localStorage whenever they change
-  // This includes achievements when sales data is uploaded
+  // Achievements update when shipping marks orders delivered (distributor.achieved + sales_data)
   // Use a ref to track previous distributors to avoid duplicate saves
   // Use a ref to track if we're doing a bulk update (to skip auto-save)
   const prevDistributorsRef = useRef([]);
@@ -770,7 +792,7 @@ function AdminDashboard({ onLogout }) {
   };
   
   useEffect(() => {
-    // Skip auto-save if we're doing a bulk update (handleUpdateAchieved handles saves explicitly)
+    // Skip auto-save during bulk distributor updates
     if (isBulkUpdatingRef.current) {
       console.log('⏭️ Skipping auto-save during bulk update');
       return;
@@ -905,17 +927,13 @@ function AdminDashboard({ onLogout }) {
 
   const normalize = (v) => (v === null || v === undefined) ? "" : String(v).toLowerCase().trim();
 
-  const [updatedDate, setUpdatedDate] = useState(null);
-  const hiddenFileRef = useRef(null);
   const tableRef = useRef(null); // Ref for PDF export (TableContainer)
   const performancePaperRef = useRef(null); // Parent Paper — overflow:hidden clips html2canvas capture
-  const [loadingFile, setLoadingFile] = useState(false);
-  const [, setExcelFile] = useState(null);
-  const [, setParsedAchievements] = useState(null); // parsed achievement data (setter only; consumers use local vars)
   const [showOrders, setShowOrders] = useState(false); // Toggle orders view
   const [allOrders, setAllOrders] = useState([]); // All orders from all distributors
   const ADMIN_VIEW_STORAGE_KEY = "admin_current_view";
   const [allSalesData, setAllSalesData] = useState([]); // All sales data from Supabase
+  const [salesDataHydrated, setSalesDataHydrated] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false); // Track delete-all-data operation
   const newOrderIdsNotifyInitRef = useRef(false);
   const previousOrderIdsRef = useRef(new Set());
@@ -937,20 +955,16 @@ function AdminDashboard({ onLogout }) {
           setSchemes(firebaseSchemes);
           console.log(`✅ Loaded ${firebaseSchemes.length} schemes from Firebase`);
         } else {
-          // Fallback to localStorage
-          const stored = localStorage.getItem("schemes");
-          if (stored) {
-            const parsedSchemes = JSON.parse(stored);
+          const parsedSchemes = readTenantJson(SCHEMES_STORAGE_KEY);
+          if (parsedSchemes) {
             setSchemes(parsedSchemes);
             console.log(`📦 Loaded ${parsedSchemes.length} schemes from localStorage`);
           }
         }
       } catch (error) {
         console.error("Error loading schemes:", error);
-        // Fallback to localStorage
-        const stored = localStorage.getItem("schemes");
-        if (stored) {
-          const parsedSchemes = JSON.parse(stored);
+        const parsedSchemes = readTenantJson(SCHEMES_STORAGE_KEY);
+        if (parsedSchemes) {
           setSchemes(parsedSchemes);
         }
       }
@@ -965,11 +979,7 @@ function AdminDashboard({ onLogout }) {
         if (isSupabaseConfigured) {
           const ratesDoc = await getProductRates();
           if (ratesDoc) {
-            const next = {
-              skuRates: ratesDoc.skuRates || {},
-              canRate: ratesDoc.canRate,
-              customProducts: Array.isArray(ratesDoc.customProducts) ? ratesDoc.customProducts : [],
-            };
+            const next = ensureProductCatalog(ratesDoc);
             setProductRates(next);
             writeProductRatesToLocalStorage(next);
             return;
@@ -980,11 +990,7 @@ function AdminDashboard({ onLogout }) {
       }
       const local = readProductRatesFromLocalStorage();
       if (local) {
-        setProductRates({
-          skuRates: local.skuRates || {},
-          canRate: local.canRate,
-          customProducts: Array.isArray(local.customProducts) ? local.customProducts : [],
-        });
+        setProductRates(ensureProductCatalog(local));
       }
     };
     loadRates();
@@ -1013,7 +1019,7 @@ function AdminDashboard({ onLogout }) {
     const fromDistributors = Array.isArray(distributors)
       ? distributors.map((d) => String(d?.region || "").trim()).filter(Boolean)
       : [];
-    const defaults = ["Southern", "Western", "Eastern"];
+  const defaults = DEFAULT_GST_REGIONS;
     return Array.from(new Set([...fromDistributors, ...defaults]));
   }, [distributors]);
 
@@ -1085,15 +1091,10 @@ function AdminDashboard({ onLogout }) {
           }
         } else {
           console.log('🔄 Loading orders from localStorage...');
-          const stored = localStorage.getItem("coke_orders");
-          if (stored) {
-            const orders = JSON.parse(stored);
-            if (orders && orders.length > 0) {
-              setAllOrders(orders);
-              console.log(`✅ Loaded ${orders.length} orders from localStorage`);
-            } else {
-              console.log('⚠️ No orders found in localStorage');
-            }
+          const orders = readOrdersCache();
+          if (orders.length > 0) {
+            setAllOrders(orders);
+            console.log(`✅ Loaded ${orders.length} orders from localStorage`);
           } else {
             console.log('⚠️ No orders found in localStorage');
           }
@@ -1116,20 +1117,10 @@ function AdminDashboard({ onLogout }) {
         }
       } else {
         console.log('🔄 Fetching orders from localStorage...');
-        const stored = localStorage.getItem("coke_orders");
-        if (stored) {
-          try {
-            const orders = JSON.parse(stored);
-            if (orders && orders.length > 0) {
-              setAllOrders(orders);
-              console.log(`✅ Refreshed ${orders.length} orders from localStorage`);
-            } else {
-              setAllOrders((prevOrders) => prevOrders);
-            }
-          } catch (e) {
-            console.error("Error parsing localStorage orders:", e);
-            setAllOrders((prevOrders) => prevOrders);
-          }
+        const orders = readOrdersCache();
+        if (orders.length > 0) {
+          setAllOrders(orders);
+          console.log(`✅ Refreshed ${orders.length} orders from localStorage`);
         } else {
           console.log('⚠️ No orders found in localStorage');
           setAllOrders((prevOrders) => prevOrders);
@@ -1172,12 +1163,9 @@ function AdminDashboard({ onLogout }) {
       if (!isMounted) return;
       if (typeof document !== "undefined" && document.hidden) return;
       try {
-        const stored = localStorage.getItem("coke_orders");
-        if (stored) {
-          const orders = JSON.parse(stored);
-          if (orders && orders.length > 0) {
-            setAllOrders(orders);
-          }
+        const orders = readOrdersCache();
+        if (orders.length > 0) {
+          setAllOrders(orders);
         }
       } catch {
         // Ignore errors
@@ -1220,6 +1208,7 @@ function AdminDashboard({ onLogout }) {
           csdUC: Number(read(["csdUC", "csd_uc", "CSD_UC"], 0) || 0),
           waterPC: Number(read(["waterPC", "water_pc", "Water_PC"], 0) || 0),
           waterUC: Number(read(["waterUC", "water_uc", "Water_UC"], 0) || 0),
+          source: read(["source"], record.source || ""),
           invoiceDate: Number.isNaN(invoiceDate.getTime()) ? new Date() : invoiceDate,
         };
       };
@@ -1227,28 +1216,7 @@ function AdminDashboard({ onLogout }) {
       // ALWAYS try Firebase first (if configured) - this is the source of truth
       if (isSupabaseConfigured) {
         try {
-          const [salesData, cloudSalesUpdatedAt] = await Promise.all([
-            getAllSalesData(),
-            getSalesPerformanceLastUpdated(),
-          ]);
-          if (cloudSalesUpdatedAt) {
-            setUpdatedDate(cloudSalesUpdatedAt);
-            try {
-              localStorage.setItem(SALES_PERF_UPDATED_KEY, cloudSalesUpdatedAt.toISOString());
-            } catch (e) {
-              /* ignore */
-            }
-          } else {
-            try {
-              const raw = localStorage.getItem(SALES_PERF_UPDATED_KEY);
-              if (raw) {
-                const d = new Date(raw);
-                if (!Number.isNaN(d.getTime())) setUpdatedDate(d);
-              }
-            } catch (e) {
-              /* ignore */
-            }
-          }
+          const salesData = await getAllSalesData();
           // Supabase is source of truth: empty table means clear UI + cache (do not revive from localStorage)
           if (Array.isArray(salesData) && salesData.length > 0) {
             const salesDataWithDates = salesData.map(normalizeSalesRecord);
@@ -1264,27 +1232,22 @@ function AdminDashboard({ onLogout }) {
                   ? record.invoiceDate.toISOString() 
                   : record.invoiceDate
               }));
-              localStorage.setItem("admin_sales_data", JSON.stringify(serializableData));
+              writeTenantJson(SALES_DATA_STORAGE_KEY, serializableData);
               console.log(`✅ Synced ${serializableData.length} sales data records to localStorage`);
             } catch (syncError) {
               console.error("Error syncing Supabase data to localStorage:", syncError);
             }
           } else {
             setAllSalesData([]);
-            try {
-              localStorage.removeItem("admin_sales_data");
-            } catch (e) {
-              /* ignore */
-            }
-            console.log("✅ Supabase has no sales_data rows — cleared in-app sales and admin_sales_data cache");
+            removeTenantJson(SALES_DATA_STORAGE_KEY);
+            console.log("✅ Supabase has no sales_data rows — cleared in-app sales cache for this workspace");
           }
+          setSalesDataHydrated(true);
         } catch (error) {
           console.error("Error loading sales data from Firebase:", error);
-          // Fallback to localStorage if Firebase fails
           try {
-            const stored = localStorage.getItem("admin_sales_data");
-            if (stored) {
-              const salesData = JSON.parse(stored);
+            const salesData = readTenantJson(SALES_DATA_STORAGE_KEY);
+            if (Array.isArray(salesData) && salesData.length > 0) {
               const salesDataWithDates = salesData.map(normalizeSalesRecord);
               setAllSalesData(salesDataWithDates);
               console.log(`✅ Loaded ${salesDataWithDates.length} sales data records from localStorage (Firebase error)`);
@@ -1292,6 +1255,7 @@ function AdminDashboard({ onLogout }) {
           } catch (e) {
             console.error("Error loading sales data from localStorage:", e);
           }
+          setSalesDataHydrated(true);
         }
 
         // Subscribe to real-time updates
@@ -1299,6 +1263,7 @@ function AdminDashboard({ onLogout }) {
           if (!Array.isArray(salesData)) return;
           const salesDataWithDates = salesData.map(normalizeSalesRecord);
           setAllSalesData(salesDataWithDates);
+          setSalesDataHydrated(true);
           try {
             if (salesDataWithDates.length > 0) {
               const serializableData = salesDataWithDates.map(record => ({
@@ -1307,9 +1272,9 @@ function AdminDashboard({ onLogout }) {
                   ? record.invoiceDate.toISOString() 
                   : record.invoiceDate
               }));
-              localStorage.setItem("admin_sales_data", JSON.stringify(serializableData));
+              writeTenantJson(SALES_DATA_STORAGE_KEY, serializableData);
             } else {
-              localStorage.removeItem("admin_sales_data");
+              removeTenantJson(SALES_DATA_STORAGE_KEY);
             }
           } catch (syncError) {
             console.error("Error syncing real-time sales data to localStorage:", syncError);
@@ -1317,327 +1282,62 @@ function AdminDashboard({ onLogout }) {
         });
         return () => unsubscribe();
       } else {
-        // Firebase not configured - use localStorage only
         try {
-          const stored = localStorage.getItem("admin_sales_data");
-          if (stored) {
-            const salesData = JSON.parse(stored);
+          const salesData = readTenantJson(SALES_DATA_STORAGE_KEY);
+          if (Array.isArray(salesData) && salesData.length > 0) {
             const salesDataWithDates = salesData.map(normalizeSalesRecord);
             setAllSalesData(salesDataWithDates);
             console.log(`✅ Loaded ${salesDataWithDates.length} sales data records from localStorage`);
           }
-          try {
-            const raw = localStorage.getItem(SALES_PERF_UPDATED_KEY);
-            if (raw) {
-              const d = new Date(raw);
-              if (!Number.isNaN(d.getTime())) setUpdatedDate(d);
-            }
-          } catch (e) {
-            /* ignore */
-          }
         } catch (e) {
           console.error("Error loading sales data from localStorage:", e);
         }
+        setSalesDataHydrated(true);
       }
     };
     
     loadSalesData();
   }, [isSupabaseConfigured]);
 
-  // load workbook file and parse into grids per sheet
-  const handleLoadFile = async (file) => {
-    if (!file) return;
-    
-    // Allow all admins and viewers to upload sales data
-    
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) {
-      showEmailToast(
-        "Choose an Excel file under 10 MB, or split the data into smaller files.",
-        "error",
-        5500,
-        "File too large"
-      );
-      return;
-    }
-    
-    // Validate file type
-    const validTypes = [
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.ms-excel",
-      "application/excel"
-    ];
-    if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
-      showEmailToast(
-        "Only Excel workbooks (.xlsx or .xls) are supported. Export from Excel and try again.",
-        "error",
-        5000,
-        "Wrong file type"
-      );
-      return;
-    }
-    
-    setLoadingFile(true);
-    try {
-      // Note: We no longer parse Excel for grid preview - only parse for achievements
-      // The performance table will show updated data automatically after achievements are applied
-      
-      // Parse for achievement updates and automatically apply
-      try {
-        console.log("Parsing Excel for achievements and sales data...");
-        const parseResult = await parseExcelFile(file);
-        const achievements = parseResult.achievements || parseResult; // Backward compatibility
-        const salesData = parseResult.salesData || [];
-        
-        console.log("Parsed achievements:", achievements);
-        console.log("Parsed sales data records:", salesData.length);
-        setParsedAchievements(achievements);
-        setExcelFile(file);
-        
-        // Save sales data to Supabase and localStorage (REPLACE previous data, don't accumulate)
-        if (salesData.length > 0) {
-          console.log(`📊 Processing ${salesData.length} sales data records...`);
-          
-          // Match party name to master distributor (same rules as performance table)
-          const salesDataToSave = salesData.map(sale => {
-            const distributor = findDistributorForPartyName(distributors, sale.distributorName);
-
-            if (!distributor) {
-              console.warn(`⚠️ Distributor not found for: "${sale.distributorName}"`);
-            }
-
-            const code = distributor?.code != null ? String(distributor.code).trim() : null;
-
-            return {
-              distributorCode: code || null,
-              distributorName: sale.distributorName,
-              invoiceDate: sale.invoiceDate instanceof Date ? sale.invoiceDate : new Date(sale.invoiceDate),
-              products: sale.products || [],
-              csdPC: sale.csdPC || 0,
-              csdUC: sale.csdUC || 0,
-              waterPC: sale.waterPC || 0,
-              waterUC: sale.waterUC || 0,
-              totalUC: sale.totalUC || 0,
-              source: "excel_upload",
-            };
-          }).filter(sale => sale.distributorCode); // Only save if distributor found
-          
-          console.log(`✅ Matched ${salesDataToSave.length} out of ${salesData.length} sales records with distributors`);
-          const unmatchedSalesRows = salesData.length - salesDataToSave.length;
-          if (unmatchedSalesRows > 0 && salesDataToSave.length > 0) {
-            showEmailToast(
-              `Your file has ${salesData.length} invoice row(s). We saved ${salesDataToSave.length} row(s) that matched a distributor.\n\n` +
-                `${unmatchedSalesRows} row(s) were skipped because Party Name / Address did not match anyone in Manage Distributors.\n\n` +
-                `Fix spelling or add missing distributors, then upload again.`,
-              "warning",
-              14000,
-              "Some rows were not saved"
+  const salesBackfillRanRef = useRef(false);
+  useEffect(() => {
+    if (!isSupabaseConfigured || !allOrders?.length || salesBackfillRanRef.current) return;
+    if (readTenantJson(SKIP_DISPATCH_BACKFILL_KEY)) return;
+    salesBackfillRanRef.current = true;
+    void backfillDispatchedOrdersToSalesData(allOrders, 50).then(async ({ applied, errors }) => {
+      if (applied > 0) {
+        console.log(`Synced ${applied} dispatched order(s) to sales_data in Supabase`);
+        try {
+          const salesData = await getAllSalesData();
+          if (Array.isArray(salesData)) {
+            setAllSalesData(
+              salesData.map((record) => {
+                const invoiceRaw = record.invoiceDate ?? record.invoice_date ?? Date.now();
+                const invoiceDate =
+                  invoiceRaw instanceof Date ? invoiceRaw : new Date(invoiceRaw);
+                return {
+                  ...record,
+                  distributorCode:
+                    record.distributorCode ?? record.distributor_code ?? record.code ?? null,
+                  csdPC: Number(record.csdPC ?? record.csd_pc ?? 0) || 0,
+                  csdUC: Number(record.csdUC ?? record.csd_uc ?? 0) || 0,
+                  waterPC: Number(record.waterPC ?? record.water_pc ?? 0) || 0,
+                  waterUC: Number(record.waterUC ?? record.water_uc ?? 0) || 0,
+                  source: record.source || "",
+                  invoiceDate: Number.isNaN(invoiceDate.getTime()) ? new Date() : invoiceDate,
+                };
+              })
             );
           }
-          if (salesDataToSave.length === 0) {
-            console.warn("⚠️ No sales rows matched existing distributors. Nothing will be saved to Supabase sales_data.");
-            showEmailToast(
-              "None of the party names in this file matched your distributors, so no sales rows were written to the database.\n\n" +
-                "Compare the Party Name / Address column with names in Manage Distributors (including spelling and branches).",
-              "warning",
-              12000,
-              "No sales data saved"
-            );
-          }
-          
-          if (salesDataToSave.length > 0) {
-            // 1. DELETE previous data from Supabase (if configured)
-            if (isSupabaseConfigured) {
-              try {
-                // Delete all previous sales data with source "excel_upload"
-                try {
-                  await deleteAllSalesDataFromAdmin();
-                  console.log("✅ Deleted previous sales data from Supabase");
-                } catch (deleteError) {
-                  console.warn("Warning: Could not delete previous Supabase data:", deleteError);
-                  // Continue with save even if delete fails
-                }
-                
-                // 2. SAVE new data to Supabase
-                const salesDataForSupabase = salesDataToSave.map(sale => ({
-                  ...sale,
-                  invoiceDate: sale.invoiceDate instanceof Date ? sale.invoiceDate.toISOString() : sale.invoiceDate,
-                }));
-                
-                console.log(`💾 Saving ${salesDataForSupabase.length} sales data records to Supabase...`);
-                console.log(`📋 Sample sales data being saved:`, salesDataForSupabase.slice(0, 2));
-                
-                const savedRecords = await saveSalesDataBatch(salesDataForSupabase);
-                console.log(`✅ Successfully saved ${savedRecords.length} sales data records to Supabase`);
-                console.log(`📋 Sample saved records (with IDs):`, savedRecords.slice(0, 2));
-                
-                // Verify the save by checking if we got IDs back
-                if (savedRecords.length !== salesDataForSupabase.length) {
-                  console.warn(`⚠️ Warning: Expected to save ${salesDataForSupabase.length} records, but got ${savedRecords.length} back`);
-                } else {
-                  console.log(`✅ All ${savedRecords.length} sales data records saved successfully to Supabase table 'sales_data'`);
-                }
-                
-                // Update state immediately with the new data (convert timestamps to Date objects)
-                const salesDataWithDates = salesDataToSave.map(sale => ({
-                  ...sale,
-                  invoiceDate: sale.invoiceDate instanceof Date 
-                    ? sale.invoiceDate 
-                    : new Date(sale.invoiceDate)
-                }));
-                setAllSalesData(salesDataWithDates);
-                console.log(`✅ Updated state with ${salesDataWithDates.length} sales data records`);
-                await applySalesPerformanceUpdatedAt(new Date(), { persistCloud: true });
-              } catch (firebaseError) {
-                console.error("❌ Error saving sales data to Supabase:", firebaseError);
-                console.error("Error details:", {
-                  message: firebaseError.message,
-                  code: firebaseError.code,
-                  stack: firebaseError.stack
-                });
-                console.error("Sales data that failed to save:", salesDataToSave.slice(0, 2)); // Log first 2 for debugging
-                showEmailToast(
-                  `Sales rows are stored in this browser for now, but the cloud save failed.\n\nDetails: ${firebaseError.message}\n\nCheck Supabase connection, RLS policies, and the sales_data table.`,
-                  "warning",
-                  14000,
-                  "Cloud save failed"
-                );
-                // Continue even if Firebase save fails, but still update state
-                const salesDataWithDates = salesDataToSave.map(sale => ({
-                  ...sale,
-                  invoiceDate: sale.invoiceDate instanceof Date 
-                    ? sale.invoiceDate 
-                    : new Date(sale.invoiceDate)
-                }));
-                setAllSalesData(salesDataWithDates);
-                await applySalesPerformanceUpdatedAt(new Date(), { persistCloud: false });
-              }
-            } else {
-              // Supabase not configured - still update state
-              const salesDataWithDates = salesDataToSave.map(sale => ({
-                ...sale,
-                invoiceDate: sale.invoiceDate instanceof Date 
-                  ? sale.invoiceDate 
-                  : new Date(sale.invoiceDate)
-              }));
-              setAllSalesData(salesDataWithDates);
-            }
-            
-            // 3. DELETE previous data from localStorage and SAVE new data
-            try {
-              // Remove old data from localStorage
-              localStorage.removeItem("admin_sales_data");
-              
-              // Save new data to localStorage (convert dates to ISO strings)
-              const serializableData = salesDataToSave.map(sale => ({
-                ...sale,
-                invoiceDate: sale.invoiceDate instanceof Date 
-                  ? sale.invoiceDate.toISOString() 
-                  : sale.invoiceDate
-              }));
-              
-              localStorage.setItem("admin_sales_data", JSON.stringify(serializableData));
-              console.log(`✅ Saved ${salesDataToSave.length} sales data records to localStorage`);
-              
-              // Log activity
-              const currentUser = await getCurrentUser();
-              await logActivity(
-                ACTIVITY_TYPES.SALES_DATA_UPDATED,
-                `Uploaded sales data: ${salesDataToSave.length} records from file ${file.name}`,
-                {
-                  fileName: file.name,
-                  recordCount: salesDataToSave.length,
-                  userEmail: currentUser?.email,
-                  userName: currentUser?.email?.split('@')[0] || 'Admin',
-                }
-              );
-              if (!isSupabaseConfigured) {
-                await applySalesPerformanceUpdatedAt(new Date(), { persistCloud: false });
-              }
-            } catch (localStorageError) {
-              console.error("Error saving sales data to localStorage:", localStorageError);
-              // Continue even if localStorage save fails
-            }
-          }
+        } catch (e) {
+          console.warn("Could not refresh sales data after dispatch backfill:", e);
         }
-        
-        // Automatically apply achievements if aggregated totals exist (CSD/Water from known SKUs).
-        // Note: salesData can be non-empty while achievements is empty (e.g. unrecognized product columns);
-        // do not treat that as "no sales in file".
-        if (achievements && Object.keys(achievements).length > 0) {
-          console.log("📊 Parsed achievements:", achievements);
-          console.log("📋 Current distributors in app:", distributors.map(d => d.name));
-          
-          const distributorCount = Object.keys(achievements).length;
-          const distributorNames = Object.values(achievements).map(a => a.name).slice(0, 10).join(", ");
-          const moreCount = distributorCount > 10 ? ` and ${distributorCount - 10} more` : "";
-          const saveTarget = isSupabaseConfigured ? "Supabase" : "this device (local storage)";
-          
-          // Show confirmation dialog with detailed info
-          const confirmed = window.confirm(
-            `Found Excel totals for ${distributorCount} outlet / party group(s):\n${distributorNames}${moreCount}\n\n` +
-            `Current distributors in app: ${distributors.length}\n` +
-            (salesData.length > 0
-              ? `\n${salesData.length} invoice row(s) were parsed from the file (matched sales are saved before this step).\n`
-              : "") +
-            `\nThis will update Achieved values on the performance table and save distributors to ${saveTarget}. Continue?`
-          );
-          
-          if (confirmed) {
-            console.log("✅ User confirmed. Applying achievements and saving distributors...");
-            handleUpdateAchieved(achievements);
-            setParsedAchievements(null);
-            setExcelFile(null);
-          } else {
-            console.log("❌ User cancelled. Storing achievements for manual application.");
-            // Store for manual application
-            setParsedAchievements(achievements);
-            setExcelFile(file);
-            showEmailToast(
-              "Achievements from this file were not applied. You can still use the Apply Achievements button after reviewing the parsed data.",
-              "info",
-              7000,
-              "Apply canceled"
-            );
-          }
-        } else if (!salesData || salesData.length === 0) {
-          console.warn("⚠️ No distributor sales rows or totals found in Excel file");
-          showEmailToast(
-            "We could not find distributor sales in this sheet.\n\nCheck that you have a Party Name / Address column, product quantity columns, and that layout matches your usual upload template.",
-            "warning",
-            11000,
-            "No sales data in file"
-          );
-        }
-      } catch (parseErr) {
-        console.error("Error parsing achievements:", parseErr);
-        showEmailToast(
-          `The file could not be read as expected.\n\n${parseErr.message}\n\nTry re-saving the workbook from Excel or use the same column layout as a file that worked before.`,
-          "error",
-          12000,
-          "Could not read Excel"
-        );
-        setParsedAchievements(null);
-        setExcelFile(null);
       }
-    } catch (err) {
-      const errorMessage =
-        err.message || "The upload could not be completed. Make sure the file is a valid Excel workbook.";
-      showEmailToast(errorMessage, "error", 8000, "Upload failed");
-      setParsedAchievements(null);
-      setExcelFile(null);
-    } finally {
-      setLoadingFile(false);
-    }
-  };
-  
-  // hidden file input handlers
-  const onUpdateFileChange = (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (f) handleLoadFile(f);
-    e.target.value = null;
-  };
+      if (errors > 0) {
+        console.warn(`${errors} dispatched order(s) could not be synced to sales_data`);
+      }
+    });
+  }, [isSupabaseConfigured, allOrders]);
 
   // Download Excel function
   const handleDownloadExcel = async () => {
@@ -1723,7 +1423,12 @@ function AdminDashboard({ onLogout }) {
       const exportCodes = new Set(
         filteredDistributors.map((d) => String(d.code ?? "").trim()).filter(Boolean)
       );
-      const skuDetailRows = buildDistributorPerformanceSkuDetailRows(allSalesData, distributors, exportCodes);
+      const skuDetailRows = buildDistributorPerformanceSkuDetailRows(
+        allSalesData,
+        distributors,
+        exportCodes,
+        productRates
+      );
       const wsSku = XLSX.utils.json_to_sheet(skuDetailRows);
       wsSku["!cols"] = [
         { wch: 28 },
@@ -1981,7 +1686,7 @@ function AdminDashboard({ onLogout }) {
       "Are you sure you want to DELETE ALL achieved data?\n\n" +
       "This will:\n" +
       "- Reset all achieved values to 0 for every distributor\n" +
-      "- Delete all uploaded sales data from Supabase\n" +
+      "- Delete all dispatch achievement records from Supabase\n" +
       "- Clear local sales data cache\n\n" +
       "Targets and distributor info will be kept.\n\n" +
       "This action cannot be undone!"
@@ -2004,21 +1709,7 @@ function AdminDashboard({ onLogout }) {
       if (isSupabaseConfigured && supabase) {
         const updatePromises = distributorCodes.map(async (code) => {
           try {
-            // Reset ALL rows sharing this code (handles legacy duplicates).
-            const { error: byCodeError } = await supabase
-              .from("distributors")
-              .update({ achieved: zeroAchieved, updated_at: nowIso })
-              .eq("code", code);
-
-            // Backward-compatibility: also try id match.
-            const { error: byIdError } = await supabase
-              .from("distributors")
-              .update({ achieved: zeroAchieved, updated_at: nowIso })
-              .eq("id", code);
-
-            if (byCodeError && byIdError) {
-              throw byCodeError || byIdError;
-            }
+            await updateDistributor(code, { achieved: zeroAchieved });
           } catch (err) {
             resetFailures.push(code);
             console.error(`Failed to reset achieved for ${code}:`, err);
@@ -2039,7 +1730,7 @@ function AdminDashboard({ onLogout }) {
       }
       console.log("✅ Reset achieved values for all distributors in Supabase/local");
 
-      // 2. Delete all uploaded sales data from Supabase
+      // 2. Delete all delivery achievement rows from Supabase sales_data
       try {
         await deleteAllSalesDataFromAdmin();
         console.log("✅ Deleted all sales_data rows from Supabase");
@@ -2060,8 +1751,10 @@ function AdminDashboard({ onLogout }) {
       setDistributors(cleaned);
       setAllSalesData([]);
 
-      // 4. Clear localStorage sales cache
-      localStorage.removeItem("admin_sales_data");
+      // 4. Clear localStorage sales cache; block dispatch backfill from restoring old lifts
+      removeTenantJson(SALES_DATA_STORAGE_KEY);
+      writeTenantJson(SKIP_DISPATCH_BACKFILL_KEY, { clearedAt: nowIso });
+      salesBackfillRanRef.current = true;
 
       // 5. Save cleaned distributors to localStorage
       saveDistributors(cleaned.map(({ balance, ...rest }) => rest));
@@ -2115,10 +1808,10 @@ function AdminDashboard({ onLogout }) {
         );
       } else {
         showEmailToast(
-          "Every distributor’s achieved values are set back to zero and uploaded sales rows are removed from the database (and this browser’s cache). Targets are unchanged.",
+          "Every distributor’s achieved values are set back to zero and dispatch achievement records are removed from the database (and this browser’s cache). Targets are unchanged.",
           "success",
           9000,
-          "Sales data cleared"
+          "Achievement data cleared"
         );
       }
     } catch (error) {
@@ -2168,79 +1861,26 @@ function AdminDashboard({ onLogout }) {
     }
   }, []);
 
+  /** Achieved per distributor for the viewed target period; late dispatches roll to next period. */
+  const achievedByDistributorCode = useMemo(() => {
+    if (!isSupabaseConfigured || !salesDataHydrated) return null;
+    return buildPerformanceAchievedByDistributor(allSalesData, allOrders, {
+      viewPeriod: targetPeriod,
+    });
+  }, [isSupabaseConfigured, salesDataHydrated, allSalesData, allOrders, targetPeriod]);
+
   const performanceDistributors = useMemo(() => {
     const toNumber = (value) => {
       const n = Number(value);
       return Number.isFinite(n) ? n : 0;
     };
-    const readField = (obj, keys, fallback = undefined) => {
-      for (const key of keys) {
-        if (obj && Object.prototype.hasOwnProperty.call(obj, key) && obj[key] !== undefined && obj[key] !== null) {
-          return obj[key];
-        }
-      }
-      return fallback;
-    };
+    const useDispatchAchieved = Boolean(achievedByDistributorCode);
 
-    const salesAggByCode = new Map();
-
-    const addSale = (container, key, sale) => {
-      if (!key) return;
-      const prev = container.get(key) || { CSD_PC: 0, CSD_UC: 0, Water_PC: 0, Water_UC: 0 };
-      prev.CSD_PC += toNumber(readField(sale, ["csdPC", "csd_pc", "CSD_PC"], 0));
-      prev.CSD_UC += toNumber(readField(sale, ["csdUC", "csd_uc", "CSD_UC"], 0));
-      prev.Water_PC += toNumber(readField(sale, ["waterPC", "water_pc", "Water_PC"], 0));
-      prev.Water_UC += toNumber(readField(sale, ["waterUC", "water_uc", "Water_UC"], 0));
-      container.set(key, prev);
-    };
-
-    allSalesData.forEach((sale) => {
-      if (!sale) return;
-      const rawCode = readField(sale, ["distributorCode", "distributor_code"], null);
-      const codeStr = rawCode != null && rawCode !== "" ? String(rawCode).trim() : "";
-      let resolvedCode = null;
-      // Prefer explicit distributor code from uploaded sales rows.
-      // Name matching is fallback-only to avoid mis-attribution between similar names.
-      if (codeStr && distributors.some((d) => String(d.code ?? "").trim() === codeStr)) {
-        resolvedCode = codeStr;
-      } else {
-        const partyName = readField(sale, ["distributorName", "distributor_name", "distributor", "name"], "");
-        const matched = findDistributorForPartyName(distributors, partyName);
-        resolvedCode = matched?.code != null ? String(matched.code).trim() : null;
-      }
-
-      if (resolvedCode) {
-        addSale(salesAggByCode, resolvedCode, sale);
-      }
-    });
-
-    const hasSalesDataLoaded = allSalesData.length > 0;
-    const zeroAchievedDisplay = {
-      CSD_PC: 0,
-      CSD_UC: 0,
-      Water_PC: 0,
-      Water_UC: 0,
-    };
     return distributors.map((d) => {
-      const achievedFromSales = d?.code ? salesAggByCode.get(d.code) : null;
-      const achieved = achievedFromSales
-        ? {
-            CSD_PC: toNumber(achievedFromSales.CSD_PC),
-            CSD_UC: toNumber(achievedFromSales.CSD_UC),
-            Water_PC: toNumber(achievedFromSales.Water_PC),
-            Water_UC: toNumber(achievedFromSales.Water_UC),
-          }
-        : hasSalesDataLoaded
-        ? {
-            // Sales file loaded but no matching rows for this distributor
-            ...zeroAchievedDisplay,
-          }
-        : {
-            // No sales_data in memory: show 0 here (do not use d.achieved).
-            // Otherwise after "delete all", stale React/localStorage/late realtime rows
-            // make achieved totals reappear even though Supabase was cleared.
-            ...zeroAchievedDisplay,
-          };
+      const code = String(d.code || "").trim();
+      const achieved = useDispatchAchieved
+        ? normalizeAchievedShape(achievedByDistributorCode.get(code) || EMPTY_ACHIEVED)
+        : normalizeAchievedShape(d.achieved);
 
       const target = {
         CSD_PC: toNumber(d.target?.CSD_PC),
@@ -2248,7 +1888,6 @@ function AdminDashboard({ onLogout }) {
         Water_PC: toNumber(d.target?.Water_PC),
         Water_UC: toNumber(d.target?.Water_UC),
       };
-
       return {
         ...d,
         achieved,
@@ -2260,7 +1899,7 @@ function AdminDashboard({ onLogout }) {
         },
       };
     });
-  }, [distributors, allSalesData]);
+  }, [distributors, achievedByDistributorCode]);
 
   const filteredDistributorsFromPerformance = useMemo(() => {
     const map = { South: "Southern", West: "Western", East: "Eastern", PLING: "PLING", THIM: "THIM" };
@@ -2777,268 +2416,6 @@ function AdminDashboard({ onLogout }) {
     alert("Targets updated successfully!");
   };
 
-  // Handler for updating achievements from Excel upload
-  const handleUpdateAchieved = async (aggregatedMap) => {
-    // Allow all admins and viewers to update achieved values
-    
-    // Set flag to skip auto-save during bulk update
-    isBulkUpdatingRef.current = true;
-    isApplyingAchievementsRef.current = true;
-    
-    // Log activity
-    const currentUser = await getCurrentUser();
-    const totalDistributors = Object.keys(aggregatedMap).length;
-    logActivity(
-      ACTIVITY_TYPES.SALES_DATA_UPDATED,
-      `Updated achieved values for ${totalDistributors} distributor(s)`,
-      {
-        distributorCount: totalDistributors,
-        distributors: Object.values(aggregatedMap).map(d => d.name),
-        userEmail: currentUser?.email,
-        userName: currentUser?.email?.split('@')[0] || 'Admin',
-      }
-    );
-    
-    // aggregatedMap: keys from partyNameAggregationKey (Excel) → { name, CSD_PC, CSD_UC, Water_PC, Water_UC }
-    const normalize = (s) => (s || "").toString().trim().toLowerCase().replace(/\s+/g, " ");
-    const normalizeCanonical = (s) =>
-      normalize(s)
-        .replace(/\(.*?\)/g, " ")
-        .split(",")[0]
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    console.log("🔄 handleUpdateAchieved called with:", aggregatedMap);
-    console.log("📋 Current distributors:", distributors.map(d => d.name));
-    
-    if (distributors.length === 0) {
-      isBulkUpdatingRef.current = false; // Reset flag
-      isApplyingAchievementsRef.current = false;
-      showEmailToast(
-        "Add at least one distributor under Distributors before uploading sales or achievements from Excel.",
-        "warning",
-        7000,
-        "No distributors yet"
-      );
-      return;
-    }
-    
-    let updatedCount = 0;
-    let clearedCount = 0;
-    const notFoundDistributors = [];
-    const savePromises = []; // Track all save promises
-    
-    console.log("🔄 Updating achieved values for distributors in the new data.");
-    
-    // Store updated distributors to save to localStorage
-    let distributorsToSave = null;
-    
-    setDistributors(prev => {
-      // STEP 1: Check for distributors in Excel that weren't found in app
-      Object.keys(aggregatedMap).forEach((mapKey) => {
-        const excelName = aggregatedMap[mapKey].name;
-        const excelFp = partyNameAggregationKey(excelName);
-        const excelCanonical = normalizeCanonical(excelName);
-        const found = prev.some((d) => {
-          if (partyNameAggregationKey(d.name) === excelFp) return true;
-          if (excelCanonical && normalizeCanonical(d.name) === excelCanonical) return true;
-          return false;
-        });
-        if (!found) {
-          notFoundDistributors.push(excelName);
-        }
-      });
-      
-      // STEP 2: Update distributors in new upload, or check/clear old data for others
-      const updated = prev.map(d => {
-        const fp = partyNameAggregationKey(d.name);
-        let updates = fp ? aggregatedMap[fp] : null;
-
-        // Legacy maps keyed by old normalize(name) only (pre fingerprint keys)
-        if (!updates) {
-          const legacyKey = normalize(d.name);
-          updates = aggregatedMap[legacyKey];
-        }
-        if (!updates && fp) {
-          const fpMatches = Object.values(aggregatedMap).filter(
-            (value) => partyNameAggregationKey(value.name) === fp
-          );
-          if (fpMatches.length === 1) {
-            updates = fpMatches[0];
-            console.log(`Fingerprint matched "${d.name}" with Excel name "${updates.name}"`);
-          }
-        }
-        if (!updates) {
-          const canonicalName = normalizeCanonical(d.name);
-          const canonicalMatches = Object.values(aggregatedMap).filter(
-            (value) => canonicalName && normalizeCanonical(value.name) === canonicalName
-          );
-          if (canonicalMatches.length === 1) {
-            updates = canonicalMatches[0];
-            console.log(`Canonical matched "${d.name}" with Excel name "${updates.name}"`);
-          }
-        }
-
-        // If distributor is in new upload, update with new data
-        if (updates) {
-          updatedCount++;
-          // Apply new achieved values from Excel upload
-          const updated = {
-            ...d,
-            achieved: {
-              CSD_PC: Number(updates.CSD_PC || 0),
-              CSD_UC: Number(updates.CSD_UC || 0),
-              Water_PC: Number(updates.Water_PC || 0),
-              Water_UC: Number(updates.Water_UC || 0),
-            },
-          };
-          const balance = {
-            CSD_PC: (updated.target?.CSD_PC||0) - (updated.achieved?.CSD_PC||0),
-            CSD_UC: (updated.target?.CSD_UC||0) - (updated.achieved?.CSD_UC||0),
-            Water_PC: (updated.target?.Water_PC||0) - (updated.achieved?.Water_PC||0),
-            Water_UC: (updated.target?.Water_UC||0) - (updated.achieved?.Water_UC||0),
-          };
-          
-          // Save updated distributor to Supabase
-          if (isSupabaseConfigured && d.code) {
-            // Remove balance (calculated field) but keep target and achieved
-            const { balance: _, ...toSave } = { ...updated, balance };
-            console.log(`💾 Saving distributor ${d.code} (${d.name}) to Supabase with new achieved values:`, {
-              target: toSave.target,
-              achieved: toSave.achieved
-            });
-            
-            // Ensure achieved values are numbers, not undefined
-            const distributorToSave = {
-              ...toSave,
-              achieved: {
-                CSD_PC: Number(toSave.achieved?.CSD_PC || 0),
-                CSD_UC: Number(toSave.achieved?.CSD_UC || 0),
-                Water_PC: Number(toSave.achieved?.Water_PC || 0),
-                Water_UC: Number(toSave.achieved?.Water_UC || 0),
-              },
-              target: toSave.target || {
-                CSD_PC: 0,
-                CSD_UC: 0,
-                Water_PC: 0,
-                Water_UC: 0,
-              }
-            };
-            
-            // Save to Supabase and track the promise
-            const savePromise = updateDistributor(d.code, distributorToSave)
-              .then(() => {
-                console.log(`✅ Successfully saved distributor ${d.code} (${d.name}) to Supabase with new achieved values:`, distributorToSave.achieved);
-              })
-              .catch(error => {
-                const errorMsg = serializeError(error);
-                console.error(`❌ Error saving distributor ${d.code} to Supabase:`, errorMsg);
-                console.error(`Failed distributor data:`, distributorToSave);
-                throw error; // Re-throw to track failures
-              });
-            savePromises.push(savePromise);
-          }
-          
-          return { ...updated, balance };
-        }
-        
-        // Distributor not included in this upload:
-        // keep existing achieved values to avoid accidental clearing/fluctuation.
-        const balance = {
-          CSD_PC: (d.target?.CSD_PC||0) - (d.achieved?.CSD_PC||0),
-          CSD_UC: (d.target?.CSD_UC||0) - (d.achieved?.CSD_UC||0),
-          Water_PC: (d.target?.Water_PC||0) - (d.achieved?.Water_PC||0),
-          Water_UC: (d.target?.Water_UC||0) - (d.achieved?.Water_UC||0),
-        };
-        return { ...d, balance };
-      });
-      
-      // Store updated distributors for localStorage save
-      distributorsToSave = updated.map(({ balance, ...rest }) => rest);
-      return updated;
-    });
-    
-    // Save to localStorage immediately after state update (since auto-save is skipped during bulk update)
-    if (distributorsToSave && distributorsToSave.length > 0) {
-      try {
-        saveDistributors(distributorsToSave);
-        console.log('✅ Saved updated distributors (with achieved values) to localStorage');
-      } catch (error) {
-        console.error('⚠️ Error saving to localStorage after bulk update:', error);
-      }
-    }
-    
-    // Wait for all saves to complete, then reset flag and show message
-    Promise.allSettled(savePromises).then(results => {
-      const successful = results.filter(r => r.status === 'fulfilled').length;
-      const failed = results.filter(r => r.status === 'rejected').length;
-      
-      console.log(`💾 Save results: ${successful} successful, ${failed} failed`);
-      console.log(`📊 Summary: Updated ${updatedCount} distributor(s) with new achieved values.`);
-      if (clearedCount > 0) {
-        console.log(`🗑️ Cleared old achieved data for ${clearedCount} distributor(s) (no sales in current target period).`);
-      }
-      
-      if (successful > 0) {
-        console.log(`✅ ${successful} distributor(s) successfully saved to Supabase 'distributors' collection`);
-      }
-      if (failed > 0) {
-        console.error(`❌ ${failed} distributor(s) failed to save to Supabase`);
-        results.filter(r => r.status === 'rejected').forEach((result, idx) => {
-          console.error(`  Failed save ${idx + 1}:`, result.reason);
-        });
-      }
-      
-      // Reset flag after a short delay to ensure state is updated
-      setTimeout(() => {
-        isBulkUpdatingRef.current = false;
-        isApplyingAchievementsRef.current = false;
-        console.log('✅ Bulk update complete, auto-save re-enabled');
-        console.log(`📋 Distributors state updated. ${updatedCount} updated, ${clearedCount} cleared (old data from previous period).`);
-      }, 1000);
-      
-      // Show message after state update
-      setTimeout(() => {
-        const parts = [
-          `Achieved values were updated from Excel for ${updatedCount} distributor(s). The performance table should reflect the new numbers.`,
-        ];
-        if (clearedCount > 0) {
-          parts.push(
-            `Old achieved figures were cleared for ${clearedCount} distributor(s) (no sales in the current target period).`
-          );
-        }
-        if (successful > 0 && isSupabaseConfigured) {
-          parts.push(`${successful} distributor record(s) were saved to the database.`);
-        }
-        if (failed > 0) {
-          parts.push(
-            `${failed} distributor(s) failed to save to the database. Open the browser console (F12) for details and retry if needed.`
-          );
-        }
-        if (notFoundDistributors.length > 0) {
-          const sample = notFoundDistributors.slice(0, 12).join(", ");
-          const more =
-            notFoundDistributors.length > 12
-              ? ` (+${notFoundDistributors.length - 12} more)`
-              : "";
-          parts.push(
-            `These names from Excel did not match any distributor in the app: ${sample}${more}. Add or correct them in Manage Distributors.`
-          );
-        }
-        const message = parts.join("\n\n");
-        const severity = failed > 0 ? "warning" : "success";
-        const title =
-          failed > 0
-            ? "Achievements applied with errors"
-            : notFoundDistributors.length > 0
-              ? "Achievements applied (see notes)"
-              : "Achievements applied";
-        showEmailToast(message, severity, Math.min(20000, 9000 + message.length * 8), title);
-      }, 100);
-    });
-  };
-
   // Get unique order ID
   const getOrderId = useCallback((order) => {
     // Prioritize order number for tracking (most reliable)
@@ -3323,7 +2700,7 @@ function AdminDashboard({ onLogout }) {
       if (now === ORDER_STATUS.APPROVED && was !== ORDER_STATUS.APPROVED) {
         pushNotification(`Order ${id} approved.`, "success");
       } else if (now === ORDER_STATUS.DELIVERED && was !== ORDER_STATUS.DELIVERED) {
-        pushNotification(`Order ${id} was delivered from shipping.`, "success");
+        pushNotification(`Order ${id} was dispatched from shipping.`, "success");
       } else if (now === ORDER_STATUS.REJECTED && was !== ORDER_STATUS.REJECTED) {
         pushNotification(`Order ${id} rejected.`, "error");
       } else if (was !== undefined) {
@@ -3386,9 +2763,8 @@ function AdminDashboard({ onLogout }) {
     const orderHistory = appendOrderStatusHistory(order, nextStatus, meta);
 
     try {
-      const stored = localStorage.getItem("coke_orders");
-      if (stored) {
-        const orders = JSON.parse(stored);
+      const orders = readOrdersCache();
+      if (orders.length > 0) {
         const updatedOrders = orders.map((o) =>
           getOrderId(o) === orderId
             ? {
@@ -3400,7 +2776,7 @@ function AdminDashboard({ onLogout }) {
               }
             : o
         );
-        localStorage.setItem("coke_orders", JSON.stringify(updatedOrders));
+        writeOrdersCache(updatedOrders);
       }
     } catch (error) {
       console.warn("Error saving order status to localStorage:", error);
@@ -3469,9 +2845,8 @@ function AdminDashboard({ onLogout }) {
     const currentHistory = appendOrderStatusHistory(currentOrder || {}, nextStatus, meta);
 
     try {
-      const stored = localStorage.getItem("coke_orders");
-      if (stored) {
-        const orders = JSON.parse(stored);
+      const orders = readOrdersCache();
+      if (orders.length > 0) {
         const updatedOrders = orders.map((order) =>
           getOrderId(order) === orderId
             ? {
@@ -3483,7 +2858,7 @@ function AdminDashboard({ onLogout }) {
               }
             : order
         );
-        localStorage.setItem("coke_orders", JSON.stringify(updatedOrders));
+        writeOrdersCache(updatedOrders);
       }
     } catch (error) {
       console.warn("Error persisting order status to localStorage:", error);
@@ -3571,14 +2946,13 @@ function AdminDashboard({ onLogout }) {
       );
 
       try {
-        const stored = localStorage.getItem("coke_orders");
-        if (stored) {
-          const orders = JSON.parse(stored);
+        const orders = readOrdersCache();
+        if (orders.length > 0) {
           const updated = orders.map((o) => {
             const p = patches.find((x) => x.id === getOrderId(o));
             return p ? { ...o, ...p.patch } : o;
           });
-          localStorage.setItem("coke_orders", JSON.stringify(updated));
+          writeOrdersCache(updated);
         }
       } catch (e) {
         console.warn("Error persisting reminder fields to localStorage:", e);
@@ -3633,11 +3007,10 @@ function AdminDashboard({ onLogout }) {
       
       // 2. Remove from localStorage
       try {
-        const stored = localStorage.getItem("coke_orders");
-        if (stored) {
-          const orders = JSON.parse(stored);
+        const orders = readOrdersCache();
+        if (orders.length > 0) {
           const filteredOrders = orders.filter(o => getOrderId(o) !== orderId);
-          localStorage.setItem("coke_orders", JSON.stringify(filteredOrders));
+          writeOrdersCache(filteredOrders);
           console.log('✅ Order deleted from localStorage');
         }
       } catch (localStorageError) {
@@ -3838,13 +3211,12 @@ function AdminDashboard({ onLogout }) {
                 );
 
                 try {
-                  const stored = localStorage.getItem("coke_orders");
-                  if (stored) {
-                    const orders = JSON.parse(stored);
+                  const orders = readOrdersCache();
+                  if (orders.length > 0) {
                     const updatedOrders = orders.map((o) =>
                       getOrderId(o) === orderId ? { ...o, approvedAt: Date.now() } : o
                     );
-                    localStorage.setItem("coke_orders", JSON.stringify(updatedOrders));
+                    writeOrdersCache(updatedOrders);
                     console.log('✅ Order updated in localStorage with approvedAt timestamp');
                   }
                 } catch (error) {
@@ -4001,13 +3373,12 @@ function AdminDashboard({ onLogout }) {
       );
 
       try {
-        const stored = localStorage.getItem("coke_orders");
-        if (stored) {
-          const orders = JSON.parse(stored);
+        const orders = readOrdersCache();
+        if (orders.length > 0) {
           const updatedOrders = orders.map((o) =>
             getOrderId(o) === orderId ? { ...o, approvedAt: Date.now() } : o
           );
-          localStorage.setItem("coke_orders", JSON.stringify(updatedOrders));
+          writeOrdersCache(updatedOrders);
           console.log('✅ Order updated in localStorage with approvedAt timestamp');
         }
       } catch (error) {
@@ -4029,7 +3400,7 @@ function AdminDashboard({ onLogout }) {
       );
 
       alert(
-        "Order approved! Delivered orders move to History after the retention period (Settings in Orders view). Data stays in the database until you delete an order."
+        "Order approved! Dispatched orders move to History after the retention period (Settings in Orders view). Data stays in the database until you delete an order."
       );
     }
   };
@@ -4240,36 +3611,19 @@ function AdminDashboard({ onLogout }) {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [closeTopAdminDialog]);
 
-  const dashboardSurfaceBg =
-    theme.palette.mode === "dark"
-      ? `radial-gradient(circle at top left, ${alpha(theme.palette.primary.main, 0.16)}, transparent 30%), linear-gradient(180deg, ${alpha(theme.palette.background.paper, 0.22)} 0%, ${theme.palette.background.default} 44%)`
-      : `radial-gradient(circle at top left, ${alpha(theme.palette.primary.main, 0.08)}, transparent 30%), linear-gradient(180deg, #fff 0%, ${alpha(theme.palette.grey[50], 0.98)} 46%, #fff 100%)`;
-
   return (
     <Box sx={{ display: "flex", height: "100vh", bgcolor: "background.default" }}>
-      <AppBar
-        position="fixed"
-        elevation={0}
-        sx={{
-          zIndex: 1201,
-          bgcolor: alpha(theme.palette.primary.main, 0.96),
-          backdropFilter: "blur(14px)",
-          borderBottom: `1px solid ${alpha(theme.palette.primary.contrastText, 0.12)}`,
-          boxShadow: `0 10px 30px ${alpha(theme.palette.common.black, theme.palette.mode === "dark" ? 0.35 : 0.12)}`,
-        }}
-      >
-        <Toolbar sx={{ minHeight: { xs: 52, sm: 64 }, px: { xs: 1, sm: 2 }, gap: 1 }}>
+      <AppBar elevation={0} sx={{ ...saasAppBarSx(theme), zIndex: (t) => t.zIndex.drawer + 1 }}>
+        <Toolbar sx={saasAppBarToolbarSx()}>
           <IconButton color="inherit" onClick={toggleSidebar} aria-label="toggle menu" sx={{ p: { xs: 0.75, sm: 1 } }}>
             <MenuIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />
           </IconButton>
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography variant="h6" noWrap sx={{ fontWeight: 850, fontSize: { xs: "0.95rem", sm: "1.15rem", md: "1.25rem" }, lineHeight: 1.15 }}>
-              Admin Dashboard
-            </Typography>
-            <Typography variant="caption" sx={{ opacity: 0.82, display: { xs: "none", sm: "block" }, fontWeight: 600 }}>
-              Sales performance and distributor operations
-            </Typography>
-          </Box>
+          <SaasAppBarTitle
+            title="Admin Dashboard"
+            subtitle="Sales performance and distributor operations"
+          />
+          <WorkspaceSwitcher sx={{ display: { xs: "none", sm: "flex" } }} />
+          <WorkspaceChip sx={{ display: { xs: "none", md: "flex" } }} />
           <DayNightThemeToggle />
           <Tooltip title="Notifications">
             <IconButton
@@ -4291,7 +3645,6 @@ function AdminDashboard({ onLogout }) {
           </IconButton>
           </Tooltip>
         </Toolbar>
-        {loadingFile ? <LinearProgress color="warning" sx={{ height: 2 }} /> : null}
       </AppBar>
 
       <Drawer
@@ -4299,102 +3652,97 @@ function AdminDashboard({ onLogout }) {
         open={sidebarOpen}
         onClose={toggleSidebar}
         sx={{
-          [`& .MuiDrawer-paper`]: {
-            width: { xs: 200, sm: 220 },
-            boxSizing: "border-box",
-            bgcolor: theme.palette.mode === "dark" ? alpha(theme.palette.secondary.dark, 0.96) : "secondary.main",
-            color: DRAWER_FOREGROUND,
-            borderRight: isMobile ? "none" : "1px solid rgba(0,0,0,0.12)",
-            px: { xs: 0.5, sm: 1 },
-            display: "flex",
-            flexDirection: "column",
-            boxShadow: `12px 0 34px ${alpha(theme.palette.common.black, theme.palette.mode === "dark" ? 0.28 : 0.12)}`,
-          },
+          [`& .MuiDrawer-paper`]: navDrawerPaperSx(theme, { isMobile }),
         }}
       >
         <Box sx={{ display: "flex", justifyContent: "flex-end", p: 1 }}>
-          <IconButton onClick={toggleSidebar} sx={{ color: DRAWER_FOREGROUND }}>
+          <IconButton onClick={toggleSidebar} sx={{ color: "text.primary" }}>
             <CloseIcon />
           </IconButton>
         </Box>
         <List sx={{ px: 0.75, pb: 1, flex: 1, overflowY: "auto" }}>
-            {(() => {
-              const menuItems = [
-                { text: "Dashboard", icon: <DashboardIcon />, action: () => { setShowOrders(false); setAdminCurrentView("dashboard"); setSidebarOpen(isMobile); } },
-                {
-                  text: "Orders",
-                  icon: <AssignmentIcon />,
-                  badgeCount: adminActionableOrdersCount,
-                  action: () => { setShowOrders(true); setAdminCurrentView("orders"); setSidebarOpen(isMobile); },
-                },
-                { text: "Calculator", icon: <CalculateIcon />, action: () => { setShowCalculator(true); setAdminCurrentView("calculator"); setSidebarOpen(isMobile); } },
-                { text: "Targets", icon: <TrackChangesIcon />, action: () => { setTargetsOpen(true); setAdminCurrentView("targets"); setSidebarOpen(isMobile); } },
-                { text: "Scheme & Discount", icon: <LocalOfferIcon />, action: () => { setSchemeDiscountOpen(true); setAdminCurrentView("scheme_discount"); setSidebarOpen(isMobile); } },
-                {
-                  text: "Product & Rate Master",
-                  icon: (
-                    <NuProductRateIcon
-                      sx={{
-                        minWidth: 24,
-                        height: 24,
-                        fontSize: "0.75rem",
-                        borderRadius: "6px",
-                        bgcolor: "rgba(228, 5, 33, 0.14)",
-                        color: "#b71c1c",
-                      }}
-                    />
-                  ),
-                  action: () => {
-                    setRateMasterOpen(true);
-                    setAdminCurrentView("rate_master");
-                    setSidebarOpen(isMobile);
+            {[
+              {
+                label: "Operations",
+                items: [
+                  { text: "Dashboard", icon: <DashboardIcon />, action: () => { setShowOrders(false); setAdminCurrentView("dashboard"); setSidebarOpen(isMobile); } },
+                  {
+                    text: "Orders",
+                    icon: <AssignmentIcon />,
+                    badgeCount: adminActionableOrdersCount,
+                    action: () => { setShowOrders(true); setAdminCurrentView("orders"); setSidebarOpen(isMobile); },
                   },
-                },
-                {
-                  text: "Physical Stock",
-                  icon: <WarehouseIcon />,
-                  badgeCount: pendingPhysicalStockUpdatesCount,
-                  action: () => {
-                    setPhysicalStockAdminOpen(true);
-                    setAdminCurrentView("physical_stock");
-                    setSidebarOpen(isMobile);
+                  { text: "Calculator", icon: <CalculateIcon />, action: () => { setShowCalculator(true); setAdminCurrentView("calculator"); setSidebarOpen(isMobile); } },
+                  { text: "Targets", icon: <TrackChangesIcon />, action: () => { setTargetsOpen(true); setAdminCurrentView("targets"); setSidebarOpen(isMobile); } },
+                  { text: "Scheme & Discount", icon: <LocalOfferIcon />, action: () => { setSchemeDiscountOpen(true); setAdminCurrentView("scheme_discount"); setSidebarOpen(isMobile); } },
+                  {
+                    text: "Product & Rate Master",
+                    icon: (
+                      <NuProductRateIcon
+                        sx={{
+                          minWidth: 24,
+                          height: 24,
+                          fontSize: "0.75rem",
+                          borderRadius: "6px",
+                          bgcolor: "rgba(228, 5, 33, 0.14)",
+                          color: "#0d47a1",
+                        }}
+                      />
+                    ),
+                    action: () => {
+                      setRateMasterOpen(true);
+                      setAdminCurrentView("rate_master");
+                      setSidebarOpen(isMobile);
+                    },
                   },
-                },
-                {
-                  text: "Stock lifting records",
-                  icon: <TableChartIcon />,
-                  action: () => {
-                    setStockLiftingRecordsOpen(true);
-                    setAdminCurrentView("stock_lifting_records");
-                    setSidebarOpen(isMobile);
+                  {
+                    text: "Physical Stock",
+                    icon: <WarehouseIcon />,
+                    badgeCount: pendingPhysicalStockUpdatesCount,
+                    action: () => {
+                      setPhysicalStockAdminOpen(true);
+                      setAdminCurrentView("physical_stock");
+                      setSidebarOpen(isMobile);
+                    },
                   },
-                },
-                { text: "Distributors", icon: <PeopleIcon />, action: () => { setDistributorsOpen(true); setAdminCurrentView("distributors"); setSidebarOpen(isMobile); } },
-                { text: "Reports", icon: <BarChartIcon />, action: () => { setReportsOpen(true); setAdminCurrentView("reports"); setSidebarOpen(isMobile); } },
-                { text: "Activity", icon: <HistoryIcon />, action: () => { setActivityOpen(true); setAdminCurrentView("activity"); setSidebarOpen(isMobile); } },
-                { text: "Gmail Settings", icon: <SettingsIcon />, action: () => { setGmailSettingsOpen(true); setAdminCurrentView("gmail_settings"); setSidebarOpen(isMobile); } },
-                { text: "GST Settings", icon: <LocalOfferIcon />, action: () => { setGstSettingsOpen(true); setAdminCurrentView("gst_settings"); setSidebarOpen(isMobile); } },
-                { text: "User & Permissions", icon: <AdminPanelSettingsIcon />, action: () => { setUserManagementOpen(true); setAdminCurrentView("user_permissions"); setSidebarOpen(isMobile); } },
-              ];
-              
-              // All menu items are always accessible
-              return menuItems.map(item => ({
-                ...item,
-                disabled: false
-              }));
-            })().map((item) => (
+                  {
+                    text: "Stock lifting records",
+                    icon: <TableChartIcon />,
+                    action: () => {
+                      setStockLiftingRecordsOpen(true);
+                      setAdminCurrentView("stock_lifting_records");
+                      setSidebarOpen(isMobile);
+                    },
+                  },
+                  { text: "Distributors", icon: <PeopleIcon />, action: () => { setDistributorsOpen(true); setAdminCurrentView("distributors"); setSidebarOpen(isMobile); } },
+                  { text: "Reports", icon: <BarChartIcon />, action: () => { setReportsOpen(true); setAdminCurrentView("reports"); setSidebarOpen(isMobile); } },
+                  { text: "Activity", icon: <HistoryIcon />, action: () => { setActivityOpen(true); setAdminCurrentView("activity"); setSidebarOpen(isMobile); } },
+                  { text: "Gmail Settings", icon: <SettingsIcon />, action: () => { setGmailSettingsOpen(true); setAdminCurrentView("gmail_settings"); setSidebarOpen(isMobile); } },
+                  { text: "GST Settings", icon: <LocalOfferIcon />, action: () => { setGstSettingsOpen(true); setAdminCurrentView("gst_settings"); setSidebarOpen(isMobile); } },
+                ],
+              },
+              {
+                label: "Workspace",
+                items: [
+                  { text: "Workspace", icon: <BusinessOutlinedIcon />, action: () => { setWorkspaceSettingsOpen(true); setAdminCurrentView("workspace"); setSidebarOpen(isMobile); } },
+                  { text: "Team & invites", icon: <GroupAddOutlinedIcon />, action: () => { setTeamOpen(true); setAdminCurrentView("team"); setSidebarOpen(isMobile); } },
+                  { text: "User & Permissions", icon: <AdminPanelSettingsIcon />, action: () => { setUserManagementOpen(true); setAdminCurrentView("user_permissions"); setSidebarOpen(isMobile); } },
+                ],
+              },
+            ].map((section) => (
+              <React.Fragment key={section.label}>
+                <Typography component="div" sx={navDrawerSectionLabelSx()}>
+                  {section.label}
+                </Typography>
+                {section.items.map((item) => (
             <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton 
                 onClick={item.action}
                 sx={{
-                  borderRadius: 2,
+                  ...navDrawerItemSx(theme),
                   py: { xs: 1, sm: 0.85 },
                   px: { xs: 1, sm: 1.25 },
                   cursor: "pointer",
-                  color: DRAWER_FOREGROUND,
-                  "&:hover": {
-                    bgcolor: alpha(theme.palette.common.black, 0.1),
-                  },
                 }}
               >
                 <Box sx={{ mr: 1.25, display: "flex", alignItems: "center", color: "inherit" }}>
@@ -4411,7 +3759,7 @@ function AdminDashboard({ onLogout }) {
                         minWidth: 18,
                         height: 18,
                         border: "2px solid",
-                        borderColor: "secondary.dark",
+                        borderColor: "background.paper",
                         right: 4,
                         top: 4,
                       },
@@ -4437,7 +3785,7 @@ function AdminDashboard({ onLogout }) {
                   }
                   primaryTypographyProps={{
                     sx: {
-                      color: DRAWER_FOREGROUND,
+                      color: "text.primary",
                       fontWeight: 600,
                       fontSize: { xs: "0.85rem", sm: "0.9rem" },
                       lineHeight: 1.35,
@@ -4459,7 +3807,9 @@ function AdminDashboard({ onLogout }) {
                 />
               </ListItemButton>
             </ListItem>
-          ))}
+                ))}
+              </React.Fragment>
+            ))}
         </List>
         <Box
           sx={{
@@ -4468,18 +3818,18 @@ function AdminDashboard({ onLogout }) {
             mb: 1,
             p: 1,
             borderRadius: 1.5,
-            bgcolor: alpha(DRAWER_FOREGROUND, 0.07),
+            bgcolor: alpha(theme.palette.text.primary, 0.04),
             border: 1,
-            borderColor: alpha(DRAWER_FOREGROUND, 0.2),
+            borderColor: "divider",
           }}
         >
-          <Typography sx={{ fontSize: "0.7rem", fontWeight: 800, color: DRAWER_FOREGROUND, mb: 0.25 }}>
+          <Typography sx={{ fontSize: "0.7rem", fontWeight: 800, color: "text.secondary", mb: 0.25 }}>
             Logged In
           </Typography>
-          <Typography sx={{ fontSize: "0.72rem", fontWeight: 600, color: DRAWER_FOREGROUND, wordBreak: "break-word" }}>
+          <Typography sx={{ fontSize: "0.72rem", fontWeight: 600, color: "text.primary", wordBreak: "break-word" }}>
             {localStorage.getItem("admin_email") || "Unknown user"}
           </Typography>
-          <Typography sx={{ fontSize: "0.68rem", color: DRAWER_FOREGROUND, fontWeight: 600, mt: 0.25 }}>
+          <Typography sx={{ fontSize: "0.68rem", color: "text.secondary", fontWeight: 600, mt: 0.25 }}>
             Role: {(userRole || localStorage.getItem("userRole") || "admin").toString().toUpperCase()}
           </Typography>
         </Box>
@@ -4488,11 +3838,8 @@ function AdminDashboard({ onLogout }) {
         <Box
         component="main" 
           sx={{
-          flexGrow: 1, 
-          background: dashboardSurfaceBg,
-          p: { xs: 1, sm: 2, md: 3 },
+          ...saasDashboardMainSx(theme),
           overflowX: "hidden",
-          overflowY: "auto",
           ml: { xs: 0, md: sidebarOpen ? "220px" : 0 },
           transition: "margin-left 0.3s ease",
           width: { xs: "100%", md: sidebarOpen ? "calc(100% - 220px)" : "100%" },
@@ -4570,17 +3917,13 @@ function AdminDashboard({ onLogout }) {
           >
             <PerformanceToolbar
               isMobile={isMobile}
-              loadingFile={loadingFile}
-              onFileChange={onUpdateFileChange}
               onDownloadExcel={handleDownloadExcel}
               onDownloadPDF={handleDownloadPDF}
               onDeleteAll={handleDeleteAllData}
               deleting={deletingAll}
               canDelete={!!userPermissions?.delete}
-              fileInputRef={hiddenFileRef}
               selectedRegion={selectedRegion}
               onRegionChange={handleRegionChange}
-              updatedDate={updatedDate}
             />
 
             {/* Distributor Performance Table */}
@@ -4680,7 +4023,6 @@ function AdminDashboard({ onLogout }) {
           onApplyTargets={handleApplyTargets}
           onDeleteTargets={handleDeleteTargets}
           canWrite={true}
-          onUpdateAchieved={handleUpdateAchieved}
           onUpdatePeriod={handleUpdatePeriod}
         />
         <DistributorsDialog
@@ -4704,9 +4046,8 @@ function AdminDashboard({ onLogout }) {
             setAdminCurrentView("dashboard");
           }}
           distributors={distributors}
-          orders={allOrders}
           salesData={allSalesData}
-          canWrite={true}
+          productRates={productRates}
         />
 
         <OrderEmailDialog
@@ -4752,6 +4093,36 @@ function AdminDashboard({ onLogout }) {
           }}
         />
 
+        <WorkspaceSettingsDialog
+          open={workspaceSettingsOpen}
+          onClose={() => setWorkspaceSettingsOpen(false)}
+        />
+
+        <TeamManagementDialog
+          open={teamOpen}
+          onClose={() => {
+            setTeamOpen(false);
+            setAdminCurrentView("dashboard");
+          }}
+        />
+
+        <OnboardingWizardDialog
+          open={onboardingOpen}
+          onClose={() => setOnboardingOpen(false)}
+          onOpenWorkspaceSettings={() => {
+            setOnboardingOpen(false);
+            setWorkspaceSettingsOpen(true);
+          }}
+          onOpenDistributors={() => {
+            setOnboardingOpen(false);
+            setDistributorsOpen(true);
+          }}
+          onOpenRateMaster={() => {
+            setOnboardingOpen(false);
+            setRateMasterOpen(true);
+          }}
+        />
+
         <GstSettingsDialog
           open={gstSettingsOpen}
           policy={globalGstPolicy}
@@ -4777,7 +4148,12 @@ function AdminDashboard({ onLogout }) {
           schemes={schemes}
           onSaveScheme={handleSaveScheme}
           onDeleteScheme={handleDeleteScheme}
-          isSupabaseConfigured={isSupabaseConfigured}
+          productRates={productRates}
+          onOpenRateMaster={() => {
+            setSchemeDiscountOpen(false);
+            setRateMasterOpen(true);
+            setAdminCurrentView("rate_master");
+          }}
         />
 
         <RateMasterDialog
@@ -4798,6 +4174,7 @@ function AdminDashboard({ onLogout }) {
           }}
           distributors={distributors}
           onOpened={handlePhysicalStockAdminDialogOpened}
+          productRates={productRates}
         />
 
         <AdminStockLiftingRecordsDialog

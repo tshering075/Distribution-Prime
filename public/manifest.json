@@ -1,29 +1,29 @@
 {
   "id": "/",
-  "short_name": "CokeSales",
-  "name": "CokeSales Management System",
-  "description": "Distributor sales, targets, orders, and admin workflow for Tashi Beverages Ltd.",
+  "short_name": "Dist Prime",
+  "name": "Distribution Prime",
+  "description": "Professional distribution management — sales, targets, orders, and shipping for your workspace.",
   "icons": [
     {
-      "src": "coke-sales-icon-192.png",
+      "src": "distribution-prime-icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "coke-sales-icon-512.png",
+      "src": "distribution-prime-icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any"
     },
     {
-      "src": "coke-sales-icon-512.png",
+      "src": "distribution-prime-icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "maskable"
     },
     {
-      "src": "coke-sales-icon-1024.png",
+      "src": "distribution-prime-icon-1024.png",
       "type": "image/png",
       "sizes": "1024x1024",
       "purpose": "any maskable"
@@ -34,8 +34,8 @@
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "any",
-  "theme_color": "#E40521",
-  "background_color": "#ffffff",
+  "theme_color": "#0d47a1",
+  "background_color": "#e4e8ec",
   "categories": ["business", "productivity"],
   "prefer_related_applications": false
 }

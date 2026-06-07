@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Dialog,
   Button,
@@ -22,6 +22,7 @@ import CalendarTodayOutlinedIcon from "@mui/icons-material/CalendarTodayOutlined
 import PhysicalStockMatrix from "./PhysicalStockMatrix";
 import {
   normalizePhysicalStockPayload,
+  resolvePhysicalStockProductLines,
   getRawPhysicalStockFromDistributor,
   aggregatePhysicalStockTotals,
   localIsoDate,
@@ -51,10 +52,17 @@ export default function DistributorPhysicalStockDialog({
   showToast,
   onDialogOpened,
   onPhysicalStockAcknowledged,
+  productRates = null,
 }) {
   const theme = useTheme();
+  const productLines = useMemo(
+    () => resolvePhysicalStockProductLines(productRates),
+    [productRates]
+  );
+  const productLinesKey = productLines.join("\u0001");
+  const prevProductLinesKeyRef = useRef(productLinesKey);
   const [reportDate, setReportDate] = useState(() => localIsoDate());
-  const [rows, setRows] = useState(() => normalizePhysicalStockPayload(null).rows);
+  const [rows, setRows] = useState(() => normalizePhysicalStockPayload(null, productLines).rows);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingRows, setLoadingRows] = useState(false);
@@ -120,13 +128,13 @@ export default function DistributorPhysicalStockDialog({
       if (!isSupabaseConfigured) return null;
       try {
         const payload = await fetchLatestDistributorPhysicalStockSnapshot(code, excludeReportDate);
-        return payload ? normalizePhysicalStockPayload(payload) : null;
+        return payload ? normalizePhysicalStockPayload(payload, productLines) : null;
       } catch (err) {
         console.warn("Could not load latest physical stock snapshot:", err);
         return null;
       }
     },
-    [isSupabaseConfigured]
+    [isSupabaseConfigured, productLines]
   );
 
   const loadRowsForReportDate = useCallback(
@@ -141,6 +149,7 @@ export default function DistributorPhysicalStockDialog({
           savedRaw: raw,
           distributorCode,
           fetchLatestSnapshot: isSupabaseConfigured ? fetchLatestSnapshot : undefined,
+          productRates,
         });
         if (reqId !== loadRequestIdRef.current) return;
         setReportDate(date);
@@ -151,7 +160,7 @@ export default function DistributorPhysicalStockDialog({
         if (reqId === loadRequestIdRef.current) setLoadingRows(false);
       }
     },
-    [distributorCode, fetchLatestSnapshot, isSupabaseConfigured]
+    [distributorCode, fetchLatestSnapshot, isSupabaseConfigured, productRates, productLines]
   );
 
   useEffect(() => {
@@ -163,6 +172,16 @@ export default function DistributorPhysicalStockDialog({
     sessionLoadedRef.current = true;
     loadRowsForReportDate(localIsoDate());
   }, [open, dirty, loadRowsForReportDate]);
+
+  useEffect(() => {
+    if (!open || dirty) {
+      prevProductLinesKeyRef.current = productLinesKey;
+      return;
+    }
+    if (prevProductLinesKeyRef.current === productLinesKey) return;
+    prevProductLinesKeyRef.current = productLinesKey;
+    loadRowsForReportDate(reportDate);
+  }, [open, dirty, productLinesKey, reportDate, loadRowsForReportDate]);
 
   const handleRowsChange = useCallback((next) => {
     setDirty(true);
@@ -208,10 +227,13 @@ export default function DistributorPhysicalStockDialog({
 
   const handleSave = async () => {
     if (!distributorCode) return;
-    const payload = normalizePhysicalStockPayload({
-      reportDate,
-      rows,
-    });
+    const payload = normalizePhysicalStockPayload(
+      {
+        reportDate,
+        rows,
+      },
+      productLines
+    );
     payload.updatedAt = new Date().toISOString();
     setSaving(true);
     try {
@@ -311,7 +333,8 @@ export default function DistributorPhysicalStockDialog({
       <Box
         sx={{
           flexShrink: 0,
-          background: "linear-gradient(135deg, #e53935 0%, #c62828 100%)",
+          background: (t) =>
+            `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
           color: "#fff",
           px: { xs: 1.5, sm: 2.5 },
           py: { xs: 1.25, sm: 1.5 },
@@ -393,6 +416,13 @@ export default function DistributorPhysicalStockDialog({
         </Box>
       </Paper>
 
+      {productLines.length === 0 ? (
+        <Alert severity="warning" sx={{ mx: { xs: 1, sm: 2 }, mt: 1, flexShrink: 0, borderRadius: 2 }}>
+          No products in Rate Master yet. Ask your admin to add products in <strong>Rate Master</strong> — physical
+          stock rows follow that catalogue (legacy KO / FX / SP lines are not used).
+        </Alert>
+      ) : null}
+
       {carriedFromDate ? (
         <Alert severity="info" sx={{ mx: { xs: 1, sm: 2 }, mt: 1, flexShrink: 0, borderRadius: 2 }}>
           MFG date, batch no., BBD, and opening stock were filled from your <strong>last saved</strong> stock
@@ -420,6 +450,10 @@ export default function DistributorPhysicalStockDialog({
               {loadingRows ? "Applying previous day stock…" : "Loading stock grid…"}
             </Typography>
           </Box>
+        ) : productLines.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 4 }}>
+            Stock grid will appear after Rate Master products are configured.
+          </Typography>
         ) : (
           <PhysicalStockMatrix
             rows={rows}
@@ -457,7 +491,7 @@ export default function DistributorPhysicalStockDialog({
           size="large"
           startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
           onClick={handleSave}
-          disabled={saving || loadingRows || !distributorCode}
+          disabled={saving || loadingRows || !distributorCode || productLines.length === 0}
           sx={{
             minWidth: 140,
             borderRadius: 2,

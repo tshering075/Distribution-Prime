@@ -28,6 +28,7 @@ import {
   getRawPhysicalStockFromDistributor,
   aggregatePhysicalStockTotals,
   flattenPhysicalStockRowsForExport,
+  resolvePhysicalStockProductLines,
 } from "../utils/physicalStockTemplate";
 import { getAdminPhysicalStockLastSeenAt, getPhysicalStockUpdatesSince } from "../utils/adminPhysicalStockSignals";
 import { alpha, useTheme } from "@mui/material/styles";
@@ -52,8 +53,18 @@ function distributorRowKey(d) {
   return String(d?.code ?? d?.id ?? d?.name ?? "").trim() || d?.name || "—";
 }
 
-export default function PhysicalStockAdminDialog({ open, onClose, distributors, onOpened }) {
+export default function PhysicalStockAdminDialog({
+  open,
+  onClose,
+  distributors,
+  onOpened,
+  productRates = null,
+}) {
   const theme = useTheme();
+  const productLines = useMemo(
+    () => resolvePhysicalStockProductLines(productRates),
+    [productRates]
+  );
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(null);
   const [recentUpdates, setRecentUpdates] = useState([]);
@@ -188,7 +199,7 @@ export default function PhysicalStockAdminDialog({ open, onClose, distributors, 
             for (const s of snaps) {
               const code = String(s.distributor_code || "").trim();
               const dist = resolveDistributor(code);
-              const norm = normalizePhysicalStockPayload(s.payload || {});
+              const norm = normalizePhysicalStockPayload(s.payload || {}, productRates);
               const reportDate =
                 typeof s.report_date === "string"
                   ? s.report_date.slice(0, 10)
@@ -242,7 +253,7 @@ export default function PhysicalStockAdminDialog({ open, onClose, distributors, 
 
         summaryRows = distributorsForExport.map((d) => {
           const raw = getRawPhysicalStockFromDistributor(d);
-          const norm = normalizePhysicalStockPayload(raw || {});
+          const norm = normalizePhysicalStockPayload(raw || {}, productRates);
           const totals = aggregatePhysicalStockTotals(norm.rows);
           return {
             distributor_name: d.name || "",
@@ -260,7 +271,7 @@ export default function PhysicalStockAdminDialog({ open, onClose, distributors, 
         detailRows = [];
         for (const d of distributorsForExport) {
           const raw = getRawPhysicalStockFromDistributor(d);
-          const norm = normalizePhysicalStockPayload(raw || {});
+          const norm = normalizePhysicalStockPayload(raw || {}, productRates);
           const reportDate = norm.reportDate || "";
           for (const line of flattenPhysicalStockRowsForExport(norm.rows)) {
             detailRows.push({
@@ -328,7 +339,8 @@ export default function PhysicalStockAdminDialog({ open, onClose, distributors, 
       <Box
         sx={{
           flexShrink: 0,
-          background: "linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%)",
+          background: (t) =>
+            `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
           color: "#fff",
           px: { xs: 1.5, sm: 2.5 },
           py: { xs: 1.25, sm: 1.5 },
@@ -434,6 +446,13 @@ export default function PhysicalStockAdminDialog({ open, onClose, distributors, 
           py: 2,
         }}
       >
+        {productLines.length === 0 ? (
+          <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
+            Physical stock rows follow <strong>Rate Master</strong> products. Add products there first — legacy KO / FX /
+            SP lines are no longer shown automatically.
+          </Alert>
+        ) : null}
+
         {recentUpdates.length > 0 ? (
           <Alert
             icon={<NotificationsActiveOutlinedIcon fontSize="inherit" />}
@@ -473,7 +492,7 @@ export default function PhysicalStockAdminDialog({ open, onClose, distributors, 
         ) : (
           displayed.map((d) => {
             const raw = getRawPhysicalStockFromDistributor(d);
-            const norm = normalizePhysicalStockPayload(raw || {});
+            const norm = normalizePhysicalStockPayload(raw || {}, productRates);
             const distTotals = aggregatePhysicalStockTotals(norm.rows);
             const code = d.code || d.id || "";
             const rowKey = distributorRowKey(d);

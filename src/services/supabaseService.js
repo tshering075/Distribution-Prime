@@ -7,9 +7,45 @@
 import { supabase } from '../supabase';
 import { hashPasswordSync } from '../utils/distributorAuth';
 import { resolvePermissionsForRole } from '../utils/permissions';
+import {
+  getActiveOrganizationId,
+  getActiveOrganizationSlug,
+  setActiveOrganization,
+  withOrgPayload,
+  wrapTenantTableQuery,
+} from './tenantScope';
+import { loadOrganizationContext, fetchOrganizationById } from './organizationService';
+import { firstRow, isSingleRowCoerceError } from '../utils/supabaseRows';
+import {
+  readTenantJson,
+  writeTenantJson,
+} from '../utils/tenantLocalStorage';
+import {
+  setDistributorSessionToken,
+  getDistributorSessionToken,
+  clearDistributorSessionToken,
+} from '../utils/distributorSession';
+import { ensureProductCatalog } from '../utils/productCatalog';
 
 // Re-export supabase so other files can check if Supabase is configured
 export { supabase };
+
+/** Tenant-scoped table query (organization_id after .select / in insert payloads). */
+export function fromTenant(table, organizationId) {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const orgId = organizationId ?? getActiveOrganizationId();
+  if (!orgId) {
+    console.warn(
+      `fromTenant('${table}'): no active organization — rely on Supabase RLS or set workspace before querying`
+    );
+  }
+  return wrapTenantTableQuery(supabase.from(table), organizationId);
+}
+
+/** Upsert conflict target: composite (organization_id, id) when tenant context is set. */
+function tenantUpsertConflict(idColumn = 'id') {
+  return getActiveOrganizationId() ? `organization_id,${idColumn}` : idColumn;
+}
 
 function getLinkedEmailFromDistributorRow(row) {
   const e = row?.email ?? row?.Email;
@@ -53,6 +89,118 @@ function isSupabasePermissionError(error) {
   );
 }
 
+function isMissingRpcError(error) {
+  const code = error?.code;
+  const msg = String(error?.message || '');
+  return (
+    code === 'PGRST202' ||
+    code === '42883' ||
+    /function.*does not exist/i.test(msg)
+  );
+}
+
+async function hasSupabaseAuthSession() {
+  if (!supabase) return false;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    return Boolean(session?.user?.id);
+  } catch {
+    return false;
+  }
+}
+
+function distributorRpcContext(distributorCode) {
+  const slug = getActiveOrganizationSlug();
+  const code = String(distributorCode || '').trim();
+  const sessionToken = getDistributorSessionToken();
+  if (!slug || !code || !sessionToken) return null;
+  return { slug, code, sessionToken };
+}
+
+async function insertDistributorOrderRpc(orderDoc) {
+  const ctx = distributorRpcContext(orderDoc?.distributorCode);
+  if (!ctx) {
+    throw new Error('Workspace and distributor code are required to place an order');
+  }
+  const payload = {
+    ...orderDoc,
+    id:
+      orderDoc?.id ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `ord-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`),
+  };
+  const { data, error } = await supabase.rpc('insert_distributor_order', {
+    p_slug: ctx.slug,
+    p_distributor_code: ctx.code,
+    p_session_token: ctx.sessionToken,
+    p_order: payload,
+  });
+  if (error) throw error;
+  return firstRow(data) || data;
+}
+
+async function getDistributorOrdersRpc(distributorCode) {
+  const ctx = distributorRpcContext(distributorCode);
+  if (!ctx) return [];
+  const { data, error } = await supabase.rpc('get_distributor_orders', {
+    p_slug: ctx.slug,
+    p_distributor_code: ctx.code,
+    p_session_token: ctx.sessionToken,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
+async function updateDistributorOrderRpc(orderId, patch, status, distributorCode) {
+  const ctx = distributorRpcContext(distributorCode || patch?.distributorCode);
+  if (!ctx || !orderId) {
+    throw new Error('Workspace, distributor code, and order id are required');
+  }
+  const { data, error } = await supabase.rpc('update_distributor_order', {
+    p_slug: ctx.slug,
+    p_distributor_code: ctx.code,
+    p_session_token: ctx.sessionToken,
+    p_order_id: orderId,
+    p_patch: patch || {},
+    p_status: status || null,
+  });
+  if (error) throw error;
+  return firstRow(data) || data;
+}
+
+async function deleteDistributorOrderRpc(orderId, distributorCode) {
+  const ctx = distributorRpcContext(distributorCode);
+  if (!ctx || !orderId) {
+    throw new Error('Workspace, distributor code, and order id are required');
+  }
+  const { data, error } = await supabase.rpc('delete_distributor_order', {
+    p_slug: ctx.slug,
+    p_distributor_code: ctx.code,
+    p_session_token: ctx.sessionToken,
+    p_order_id: orderId,
+  });
+  if (error) throw error;
+  return Boolean(data);
+}
+
+async function fetchWorkspaceOrderNumbersRpc(distributorCode) {
+  const ctx = distributorRpcContext(distributorCode);
+  if (!ctx) return [];
+  const { data, error } = await supabase.rpc('get_workspace_order_numbers', {
+    p_slug: ctx.slug,
+    p_distributor_code: ctx.code,
+    p_session_token: ctx.sessionToken,
+  });
+  if (error) {
+    if (isMissingRpcError(error)) return [];
+    throw error;
+  }
+  return (data || [])
+    .map((row) => row?.order_number ?? row)
+    .filter((n) => n != null && String(n).trim() !== '');
+}
+
 /**
  * Resolve a distributor row for login using code, username column, or credentials.username.
  * @param {string} loginId - Code or username entered on login screen
@@ -62,6 +210,31 @@ async function findDistributorForLogin(loginId) {
 
   const variants = distributorLoginIdVariants(loginId);
   if (variants.length === 0) return null;
+
+  const slug = getActiveOrganizationSlug();
+  if (slug) {
+    for (const variant of variants) {
+      try {
+        const { data, error } = await supabase.rpc('lookup_distributor_for_login', {
+          p_slug: slug,
+          p_code: variant,
+        });
+        if (error) {
+          const missingRpc =
+            error.code === 'PGRST202' ||
+            error.code === '42883' ||
+            /function.*does not exist/i.test(String(error.message || ''));
+          if (!missingRpc && isSupabasePermissionError(error)) throw error;
+          if (!missingRpc) continue;
+          break;
+        }
+        const row = firstRow(data);
+        if (row) return row;
+      } catch (e) {
+        if (isSupabasePermissionError(e)) throw e;
+      }
+    }
+  }
 
   for (const variant of variants) {
     const byCode = await getDistributorByCode(variant);
@@ -75,8 +248,7 @@ async function findDistributorForLogin(loginId) {
 
   for (const variant of variants) {
     try {
-      const { data, error } = await supabase
-        .from('distributors')
+      const { data, error } = await fromTenant('distributors')
         .select('*')
         .eq('credentials->>username', variant);
       if (error) {
@@ -91,7 +263,7 @@ async function findDistributorForLogin(loginId) {
 
   const id = variants[0];
   try {
-    const { data, error } = await supabase.from('distributors').select('*').ilike('code', id);
+    const { data, error } = await fromTenant('distributors').select('*').ilike('code', id);
     if (error) {
       if (isSupabasePermissionError(error)) throw error;
       return null;
@@ -116,28 +288,49 @@ export async function signInDistributor(distributorCode, password) {
       throw new Error('Distributor code and password are required');
     }
 
-    let byCode;
-    try {
-      byCode = await findDistributorForLogin(code);
-    } catch (lookupError) {
-      if (isSupabasePermissionError(lookupError)) {
+    const slug = getActiveOrganizationSlug();
+    if (!slug) {
+      throw new Error('Workspace is required. Open your workspace sign-in link (/w/your-workspace/login).');
+    }
+
+    const { data, error } = await supabase.rpc('authenticate_distributor', {
+      p_slug: slug,
+      p_code: code,
+      p_password: pass,
+    });
+
+    if (error) {
+      if (isMissingRpcError(error)) {
         throw new Error(
-          'Cannot read distributors from the database (security policy). In Supabase SQL Editor, run FIX_DISTRIBUTORS_ANON_LOGIN.sql, or ask your admin to allow anonymous SELECT on the distributors table for login.'
+          'Distributor login RPC missing. In Supabase SQL Editor, run supabase/distributor_orders_rpc.sql (authenticate_distributor).'
         );
       }
-      throw lookupError;
+      const msg = String(error.message || '');
+      if (/no distributor found/i.test(msg)) {
+        throw new Error(
+          'No distributor found with this code. Check the code or ask your admin. (Admins: sign in with your email in the same field.)'
+        );
+      }
+      if (/wrong password/i.test(msg)) {
+        throw new Error(
+          'Wrong password for this distributor code. The password must match the credentials saved on your distributor row in Supabase.'
+        );
+      }
+      throw error;
     }
 
+    const payload = data && typeof data === 'object' ? data : null;
+    const byCode = payload?.distributor;
     if (!byCode) {
-      throw new Error(
-        'No distributor found with this code. Check the code or ask your admin. (Admins: sign in with your email in the same field.)'
-      );
+      throw new Error('Distributor login failed. Please try again.');
     }
 
-    if (!distributorRowPasswordMatches(byCode, pass)) {
-      throw new Error(
-        'Wrong password for this distributor code. The password must match the credentials saved on your distributor row in Supabase (credentials.passwordHash or credentials.password).'
-      );
+    if (payload?.session_token) {
+      setDistributorSessionToken(payload.session_token);
+    }
+
+    if (byCode.organization_id) {
+      await loadOrganizationContext(byCode.organization_id);
     }
 
     const linkedEmail = getLinkedEmailFromDistributorRow(byCode);
@@ -145,7 +338,7 @@ export async function signInDistributor(distributorCode, password) {
     return {
       uid: byCode.uid || null,
       email: linkedEmail || byCode.email || null,
-      ...byCode
+      ...byCode,
     };
   } catch (error) {
     const errorMessage = error?.message || error?.error_description || error?.toString() || 'Failed to sign in distributor';
@@ -180,48 +373,45 @@ export async function signInAdmin(email, password) {
     }
     if (!authData.user) throw new Error('No user returned from authentication');
 
-    // Check if user is an admin
-    let adminDoc = await getAdminByUid(authData.user.id);
+    const loginOrgId = getActiveOrganizationId();
+    const uid = authData.user.id;
+
+    let adminQuery = supabase
+      .from('admins')
+      .select('*')
+      .or(`uid.eq.${uid},id.eq.${uid}`);
+    if (loginOrgId) {
+      adminQuery = adminQuery.eq('organization_id', loginOrgId);
+    }
+    const { data: adminRows, error: adminListError } = await adminQuery.limit(10);
+
+    if (adminListError && !isSingleRowCoerceError(adminListError)) {
+      throw adminListError;
+    }
+
+    const rows = adminRows || [];
+    let adminDoc = loginOrgId
+      ? rows.find((row) => row.organization_id === loginOrgId) || null
+      : firstRow(rows);
+
+    if (loginOrgId && rows.length > 0 && !adminDoc) {
+      const homeOrgId = rows[0]?.organization_id;
+      const homeOrg = homeOrgId ? await fetchOrganizationById(homeOrgId) : null;
+      const homeSlug = homeOrg?.slug || 'your workspace';
+      throw new Error(
+        `This account belongs to workspace "${homeSlug}". Enter that workspace ID on the sign-in screen.`
+      );
+    }
     
-    // If admin record doesn't exist but user authenticated successfully, create it automatically
     if (!adminDoc) {
-      console.log('Admin record not found, creating automatically for authenticated user:', authData.user.email);
-      
-      // Create admin document in database
-      const autoRole = authData.user.user_metadata?.role || 'admin';
-      const newAdminDoc = {
-        uid: authData.user.id,
-        id: authData.user.id, // Also set id field for compatibility
-        email: authData.user.email || email,
-        name: authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || 'Admin',
-        role: autoRole,
-        permissions: resolvePermissionsForRole(autoRole),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      const { data: insertedAdmin, error: insertError } = await supabase
-        .from('admins')
-        .insert([newAdminDoc])
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error('Error creating admin record:', insertError);
-        // If insert fails, still try to return basic user info
-        // This allows login to work even if database insert fails
-        adminDoc = {
-          uid: authData.user.id,
-          id: authData.user.id,
-          email: authData.user.email || email,
-          name: authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || 'Admin',
-          role: 'admin',
-          permissions: { read: true, write: true, delete: true, manageUsers: true }
-        };
-      } else {
-        adminDoc = insertedAdmin;
-        console.log('✅ Admin record created successfully');
+      if (loginOrgId) {
+        throw new Error(
+          'You do not have access to this workspace. Ask your workspace admin for an invite, or sign up to create your own workspace.'
+        );
       }
+      throw new Error(
+        'No admin profile found for this account. Complete workspace signup or accept a team invite first.'
+      );
     }
 
     // Update lastActive timestamp
@@ -229,6 +419,10 @@ export async function signInAdmin(email, password) {
       await updateUserLastActive(authData.user.id);
     } catch (e) {
       console.warn("Could not update lastActive:", e);
+    }
+
+    if (adminDoc?.organization_id) {
+      await loadOrganizationContext(adminDoc.organization_id);
     }
 
     return {
@@ -290,9 +484,8 @@ export async function createDistributorAccount(distributorData) {
       updated_at: new Date().toISOString()
     };
 
-    const { error: insertError } = await supabase
-      .from('distributors')
-      .insert([{ ...distributorDoc, id: code }]);
+    const { error: insertError } = await fromTenant('distributors')
+      .insert([withOrgPayload({ ...distributorDoc, id: code })]);
 
     if (insertError) throw insertError;
 
@@ -307,6 +500,7 @@ export async function createDistributorAccount(distributorData) {
  */
 export async function signOutUser() {
   try {
+    clearDistributorSessionToken();
     if (!supabase) {
       throw new Error('Supabase not initialized');
     }
@@ -457,8 +651,7 @@ export async function getAllDistributors() {
     }
 
     console.log('🔄 Fetching distributors from Supabase...');
-    const { data, error } = await supabase
-      .from('distributors')
+    const { data, error } = await fromTenant('distributors')
       .select('*')
       .order('name');
 
@@ -532,8 +725,7 @@ export async function getDistributorByCode(code) {
     }
 
     // Use array response instead of .single() to avoid 406 if multiple rows exist
-    const { data, error } = await supabase
-      .from('distributors')
+    const { data, error } = await fromTenant('distributors')
       .select('*')
       .eq('code', code);
 
@@ -580,19 +772,38 @@ export async function getDistributorByUid(uid) {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('distributors')
-      .select('*')
-      .eq('uid', uid)
-      .single();
+    const orgId = getActiveOrganizationId();
+    let query = supabase.from('distributors').select('*').eq('uid', uid);
+    if (orgId) {
+      query = query.eq('organization_id', orgId);
+    }
+    const { data, error } = await query.limit(5);
 
     if (error) {
-      if (error.code === 'PGRST116') return null; // No rows returned
+      if (isSingleRowCoerceError(error)) return firstRow(data);
       throw error;
     }
 
-    return data;
+    const row = firstRow(data);
+    if (!row) return null;
+
+    if (data.length > 1) {
+      console.warn(
+        `Multiple distributor rows matched uid ${uid}; using the first. Clean up duplicates in Supabase.`
+      );
+    }
+
+    if (row.organization_id) {
+      try {
+        await loadOrganizationContext(row.organization_id);
+      } catch (e) {
+        console.warn('Could not load organization for distributor:', e);
+      }
+    }
+
+    return row;
   } catch (error) {
+    if (isSingleRowCoerceError(error)) return null;
     console.error('Error getting distributor by UID:', error);
     return null;
   }
@@ -609,8 +820,7 @@ export async function getDistributorByUsername(username) {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('distributors')
+    const { data, error } = await fromTenant('distributors')
       .select('*')
       .eq('username', username);
 
@@ -648,17 +858,16 @@ export async function saveDistributor(distributorData) {
     }
 
     // Check if distributor already exists
-    const { data: existing, error: checkError } = await supabase
-      .from('distributors')
+    const { data: existingRows, error: checkError } = await fromTenant('distributors')
       .select('id, code, created_at')
       .eq('code', distributorData.code)
-      .maybeSingle();
+      .limit(1);
 
-    if (checkError && checkError.code !== 'PGRST116') {
-      // PGRST116 means no rows found, which is fine
+    if (checkError && !isSingleRowCoerceError(checkError)) {
       throw checkError;
     }
 
+    const existing = firstRow(existingRows);
     const isNew = !existing;
     const now = new Date().toISOString();
 
@@ -710,20 +919,27 @@ export async function saveDistributor(distributorData) {
         optionalFields.credentials = distributorData.credentials;
       }
     }
+    const gstin = distributorData.gstin ?? distributorData.gstinNo ?? distributorData.gstin_no;
+    if (gstin != null && String(gstin).trim() !== '') {
+      optionalFields.gstin = String(gstin).trim();
+    }
+    const tpn = distributorData.tpn ?? distributorData.tpnNo ?? distributorData.tpn_no;
+    if (tpn != null && String(tpn).trim() !== '') {
+      optionalFields.tpn = String(tpn).trim();
+    }
 
     let data, error;
     
     try {
       // Save core distributor data first (without phone and credentials)
-      const result = await supabase
-        .from('distributors')
+      const result = await fromTenant('distributors')
         // Use primary key (id) as the conflict target so we don't get
         // "Key (id)=(CODE) already exists" errors when the row already exists.
-        .upsert(distributorDoc, { onConflict: 'id' })
+        .upsert(withOrgPayload(distributorDoc), { onConflict: tenantUpsertConflict('id') })
         .select()
-        .single();
+        .limit(1);
       
-      data = result.data;
+      data = firstRow(result.data);
       error = result.error;
       
       // If we have optional fields (phone or credentials), try to update them
@@ -736,16 +952,16 @@ export async function saveDistributor(distributorData) {
           const distributorId = savedData?.id || distributorData.code;
           
           if (distributorId) {
-            const updateResult = await supabase
-              .from('distributors')
+            const updateResult = await fromTenant('distributors')
               .update(optionalFields)
               .eq('id', distributorId)
               .select()
-              .maybeSingle();
+              .limit(1);
             
-            if (!updateResult.error && updateResult.data) {
+            const updatedRow = firstRow(updateResult.data);
+            if (!updateResult.error && updatedRow) {
               console.log('✅ Optional fields (phone/credentials) also saved to Supabase');
-              data = updateResult.data;
+              data = updatedRow;
             } else {
               // Optional columns don't exist, that's okay
               const missingFields = Object.keys(optionalFields).join(', ');
@@ -876,16 +1092,14 @@ export async function updateDistributor(distributorId, updates) {
 
     // First, try to find the distributor by code to get its id (primary key)
     // This ensures we update by primary key which is always unique
-    const { data: existing, error: findError } = await supabase
-      .from('distributors')
+    const { data: existing, error: findError } = await fromTenant('distributors')
       .select('id, code')
       .eq('code', distributorId)
       .limit(1); // Only get one row even if duplicates exist
 
     if (findError) {
       // If find fails, try using distributorId as id directly
-      const { data: dataById, error: errorById } = await supabase
-        .from('distributors')
+      const { data: dataById, error: errorById } = await fromTenant('distributors')
         .update({
           ...updates,
           updated_at: new Date().toISOString()
@@ -903,8 +1117,7 @@ export async function updateDistributor(distributorId, updates) {
 
     // If no distributor found by code, try using distributorId as id
     if (!existing || existing.length === 0) {
-      const { data: dataById, error: errorById } = await supabase
-        .from('distributors')
+      const { data: dataById, error: errorById } = await fromTenant('distributors')
         .update({
           ...updates,
           updated_at: new Date().toISOString()
@@ -926,8 +1139,7 @@ export async function updateDistributor(distributorId, updates) {
       throw new Error(`Distributor with code "${distributorId}" found but missing id field`);
     }
     
-    const { data, error } = await supabase
-      .from('distributors')
+    const { data, error } = await fromTenant('distributors')
       .update({
         ...updates,
         updated_at: new Date().toISOString()
@@ -942,8 +1154,7 @@ export async function updateDistributor(distributorId, updates) {
         console.warn(`⚠️ Update failed for distributor ${distributorId} due to duplicate codes. Attempting to update by code with limit.`);
         // Fallback: try updating by code (only updates first matching row)
         // Note: This may still fail with 406 if multiple rows exist, but we try anyway
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from('distributors')
+        const { data: fallbackData, error: fallbackError } = await fromTenant('distributors')
           .update({
             ...updates,
             updated_at: new Date().toISOString()
@@ -1005,8 +1216,7 @@ export async function deleteDistributor(distributorId) {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('distributors')
+    const { data, error } = await fromTenant('distributors')
       .delete()
       .eq('code', distributorId)
       .select();
@@ -1165,9 +1375,13 @@ export async function upsertDistributorPhysicalStockSnapshot(distributorCode, pa
     saved_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from('distributor_physical_stock_snapshots')
-    .upsert(row, { onConflict: 'distributor_code,report_date' })
+  const orgId = getActiveOrganizationId();
+  const snapshotConflict = orgId
+    ? 'organization_id,distributor_code,report_date'
+    : 'distributor_code,report_date';
+
+  const { data, error } = await fromTenant('distributor_physical_stock_snapshots')
+    .upsert(withOrgPayload(row), { onConflict: snapshotConflict })
     .select()
     .maybeSingle();
 
@@ -1199,8 +1413,7 @@ export async function fetchDistributorPhysicalStockSnapshots({ dateFrom, dateTo,
     throw new Error('dateFrom and dateTo (YYYY-MM-DD) are required');
   }
 
-  let query = supabase
-    .from('distributor_physical_stock_snapshots')
+  let query = fromTenant('distributor_physical_stock_snapshots')
     .select('distributor_code, report_date, payload')
     .gte('report_date', from)
     .lte('report_date', to)
@@ -1259,8 +1472,7 @@ export async function fetchLatestDistributorPhysicalStockSnapshot(distributorCod
   const exclude =
     typeof excludeReportDate === 'string' ? excludeReportDate.slice(0, 10) : '';
 
-  const { data, error } = await supabase
-    .from('distributor_physical_stock_snapshots')
+  const { data, error } = await fromTenant('distributor_physical_stock_snapshots')
     .select('report_date, payload, saved_at')
     .eq('distributor_code', code)
     .order('saved_at', { ascending: false })
@@ -1314,8 +1526,7 @@ async function fetchOrdersRowByBusinessKey(fb, selectClause) {
   if (!supabase) return null;
   for (const code of distributorCodeMatchVariants(fb.distributorCode)) {
     for (const orderNum of orderNumberMatchVariants(fb.orderNumber)) {
-      const { data, error } = await supabase
-        .from('orders')
+      const { data, error } = await fromTenant('orders')
         .select(selectClause)
         .eq('distributorCode', code)
         .eq('orderNumber', orderNum)
@@ -1369,12 +1580,16 @@ export async function saveOrder(orderData) {
       updated_at: new Date().toISOString()
     };
 
-    let insertPayload = { ...orderDoc };
+    const useDistributorRpc = !(await hasSupabaseAuthSession());
+    if (useDistributorRpc) {
+      return insertDistributorOrderRpc(orderDoc);
+    }
+
+    let insertPayload = withOrgPayload({ ...orderDoc });
     // Retry by stripping unknown columns for backward-compatible schemas.
     // Prevent infinite loop with a small max attempt guard.
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const { data, error } = await supabase
-        .from('orders')
+      const { data, error } = await fromTenant('orders')
         .insert([insertPayload])
         .select()
         .single();
@@ -1393,6 +1608,10 @@ export async function saveOrder(orderData) {
         delete nextPayload[missingColumn];
         insertPayload = nextPayload;
         continue;
+      }
+
+      if (isSupabasePermissionError(error)) {
+        return insertDistributorOrderRpc(orderDoc);
       }
 
       throw error;
@@ -1491,7 +1710,41 @@ function normalizeOrderRowStatus(row) {
     'canceled',
     'pending_email_failed',
   ]);
-  return { ...row, status: allowed.has(normalized) ? normalized : 'pending' };
+
+  let data = row.data;
+  if (typeof data === 'string' && data.trim()) {
+    try {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) data = parsed;
+    } catch {
+      /* keep raw */
+    }
+  }
+
+  const distributorCode = row.distributorCode ?? row.distributor_code ?? row.distributor;
+  const orderNumber = row.orderNumber ?? row.order_number;
+
+  return {
+    ...row,
+    data,
+    distributorCode,
+    orderNumber,
+    distributor_code: row.distributor_code ?? distributorCode,
+    order_number: row.order_number ?? orderNumber,
+    csdPC: row.csdPC ?? row.csd_pc,
+    csdUC: row.csdUC ?? row.csd_uc,
+    waterPC: row.waterPC ?? row.water_pc,
+    waterUC: row.waterUC ?? row.water_uc,
+    dispatchedAt: row.dispatchedAt ?? row.dispatched_at,
+    dispatched_at: row.dispatched_at ?? row.dispatchedAt,
+    deliveredAt: row.deliveredAt ?? row.delivered_at,
+    delivered_at: row.delivered_at ?? row.deliveredAt,
+    statusUpdatedAt: row.statusUpdatedAt ?? row.status_updated_at,
+    status_updated_at: row.status_updated_at ?? row.statusUpdatedAt,
+    achievementApplied: row.achievementApplied ?? row.achievement_applied,
+    achievement_applied: row.achievement_applied ?? row.achievementApplied,
+    status: allowed.has(normalized) ? normalized : 'pending',
+  };
 }
 
 export async function getOrdersByDistributor(distributorCode) {
@@ -1503,8 +1756,14 @@ export async function getOrdersByDistributor(distributorCode) {
     const code = String(distributorCode || '').trim();
     if (!code) return [];
 
+    const useDistributorRpc = !(await hasSupabaseAuthSession());
+    if (useDistributorRpc) {
+      const rows = await getDistributorOrdersRpc(code);
+      return rows.map(normalizeOrderRowStatus);
+    }
+
     const runSelect = (c) =>
-      supabase.from('orders').select('*').eq('distributorCode', c).order('created_at', { ascending: false });
+      fromTenant('orders').select('*').eq('distributorCode', c).order('created_at', { ascending: false });
 
     const seen = new Set();
     const rows = [];
@@ -1521,6 +1780,15 @@ export async function getOrdersByDistributor(distributorCode) {
 
     return rows.map(normalizeOrderRowStatus);
   } catch (error) {
+    if (isSupabasePermissionError(error)) {
+      try {
+        const rows = await getDistributorOrdersRpc(distributorCode);
+        return rows.map(normalizeOrderRowStatus);
+      } catch (rpcError) {
+        console.error('Error getting orders by distributor (RPC fallback):', rpcError);
+        return [];
+      }
+    }
     console.error('Error getting orders by distributor:', error);
     return [];
   }
@@ -1549,8 +1817,7 @@ export async function fetchOrderShippingInvoice(orderId, identityFallback = null
     if (!hasId && !hasFb) return null;
 
     if (hasId) {
-      const { data, error } = await supabase
-        .from('orders')
+      const { data, error } = await fromTenant('orders')
         .select(ORDER_INVOICE_SELECT)
         .eq('id', orderId)
         .maybeSingle();
@@ -1682,10 +1949,15 @@ export async function clearOrderShippingInvoice(orderId, identityFallback = null
  * All order numbers in the database (for global uniqueness when placing orders).
  * @returns {Promise<string[]>}
  */
-export async function fetchAllOrderNumbers() {
+export async function fetchAllOrderNumbers(distributorCode = null) {
   try {
     if (!supabase) {
       throw new Error('Supabase not initialized');
+    }
+
+    const useDistributorRpc = !(await hasSupabaseAuthSession());
+    if (useDistributorRpc && distributorCode) {
+      return fetchWorkspaceOrderNumbersRpc(distributorCode);
     }
 
     const pageSize = 1000;
@@ -1693,8 +1965,7 @@ export async function fetchAllOrderNumbers() {
     let from = 0;
 
     while (true) {
-      const { data, error } = await supabase
-        .from('orders')
+      const { data, error } = await fromTenant('orders')
         .select('orderNumber')
         .range(from, from + pageSize - 1);
 
@@ -1711,14 +1982,21 @@ export async function fetchAllOrderNumbers() {
 
     return all;
   } catch (error) {
+    if (isSupabasePermissionError(error) && distributorCode) {
+      try {
+        return fetchWorkspaceOrderNumbersRpc(distributorCode);
+      } catch (rpcError) {
+        console.error('Error fetching order numbers (RPC fallback):', rpcError);
+      }
+    }
     console.error('Error fetching order numbers:', error);
     return [];
   }
 }
 
 /**
- * Get all orders (admin only)
- * @returns {Promise<Array>} Array of all order objects
+ * Get all orders for the active workspace (admin / shipping).
+ * @returns {Promise<Array>} Array of order objects for the current organization
  */
 export async function getAllOrders() {
   try {
@@ -1726,39 +2004,127 @@ export async function getAllOrders() {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('orders')
+    const orgId = getActiveOrganizationId();
+    if (!orgId) {
+      console.warn('getAllOrders: no active workspace — set organization before loading orders');
+      return [];
+    }
+
+    const { data, error } = await fromTenant('orders')
       .select('*')
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    return (data || []).map(normalizeOrderRowStatus);
+    return filterOrdersForOrganization(data, orgId).map(normalizeOrderRowStatus);
   } catch (error) {
     console.error('Error getting all orders:', error);
     return [];
   }
 }
 
+async function loadOrganizationDistributorCodes(organizationId) {
+  const orgId = organizationId ?? getActiveOrganizationId();
+  if (!orgId) return new Set();
+
+  const { data, error } = await fromTenant('distributors', orgId)
+    .select('code, username');
+  if (error) {
+    console.warn('Could not load distributors for order filter:', error.message);
+    return new Set();
+  }
+
+  const codes = new Set();
+  for (const row of data || []) {
+    for (const variant of distributorCodeMatchVariants(row?.code)) codes.add(variant);
+    for (const variant of distributorCodeMatchVariants(row?.username)) codes.add(variant);
+  }
+  return codes;
+}
+
+function orderRowOrganizationId(row) {
+  return row?.organization_id ?? row?.organizationId ?? null;
+}
+
+function orderRowDistributorCode(row) {
+  return String(row?.distributorCode ?? row?.distributor_code ?? '').trim();
+}
+
+/** Keep only rows for this workspace; optionally match org distributor codes. */
+function filterOrdersForOrganization(rows, organizationId, distributorCodes = null) {
+  const orgId = String(organizationId || '');
+  if (!orgId) return [];
+
+  return (rows || []).filter((row) => {
+    const rowOrg = orderRowOrganizationId(row);
+    if (rowOrg != null && String(rowOrg) !== orgId) return false;
+
+    if (!distributorCodes || distributorCodes.size === 0) return true;
+
+    const code = orderRowDistributorCode(row);
+    if (!code) return true;
+    return distributorCodeMatchVariants(code).some((variant) => distributorCodes.has(variant));
+  });
+}
+
 /**
- * Subscribe to all order changes (shipping / admin refresh).
+ * Orders for the shipping dashboard — active workspace only, distributors in that org only.
+ * @returns {Promise<Array>}
+ */
+export async function getShippingOrders() {
+  try {
+    if (!supabase) {
+      throw new Error('Supabase not initialized');
+    }
+
+    const orgId = getActiveOrganizationId();
+    if (!orgId) {
+      console.warn('getShippingOrders: no active workspace');
+      return [];
+    }
+
+    const distributorCodes = await loadOrganizationDistributorCodes(orgId);
+
+    const { data, error } = await fromTenant('orders', orgId)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return filterOrdersForOrganization(data, orgId, distributorCodes).map(normalizeOrderRowStatus);
+  } catch (error) {
+    console.error('Error getting shipping orders:', error);
+    return [];
+  }
+}
+
+/**
+ * Subscribe to order changes for the active workspace (shipping / admin refresh).
  * @param {Function} callback
+ * @param {{ organizationId?: string, fetchOrders?: () => Promise<Array> }} [options]
  * @returns {Function} Unsubscribe
  */
-export function subscribeToAllOrders(callback) {
+export function subscribeToAllOrders(callback, options = {}) {
   if (!supabase) {
     return () => {};
   }
 
+  const orgId = options.organizationId ?? getActiveOrganizationId();
+  const fetchOrders = options.fetchOrders ?? getAllOrders;
+
   try {
+    const changeFilter = orgId
+      ? { event: '*', schema: 'public', table: 'orders', filter: `organization_id=eq.${orgId}` }
+      : { event: '*', schema: 'public', table: 'orders' };
+
     const subscription = supabase
-      .channel('orders-all')
+      .channel(orgId ? `orders-org-${orgId}` : 'orders-all')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
+        changeFilter,
         async () => {
           try {
-            const orders = await getAllOrders();
+            const orders = await fetchOrders();
             callback(orders);
           } catch (error) {
             if (error.name === 'AbortError') return;
@@ -1806,8 +2172,7 @@ function normalizeDeleteFallback(identityFallback) {
 async function deleteOrdersRowByBusinessKey(fb) {
   for (const code of distributorCodeMatchVariants(fb.distributorCode)) {
     for (const orderNum of orderNumberMatchVariants(fb.orderNumber)) {
-      const { data, error } = await supabase
-        .from('orders')
+      const { data, error } = await fromTenant('orders')
         .delete()
         .eq('distributorCode', code)
         .eq('orderNumber', orderNum)
@@ -1833,11 +2198,16 @@ export async function deleteOrder(orderId, identityFallback = null) {
       throw new Error('Order id or distributorCode + orderNumber required to delete');
     }
 
+    if (!(await hasSupabaseAuthSession()) && idStr && fb?.distributorCode) {
+      const deleted = await deleteDistributorOrderRpc(idStr, fb.distributorCode);
+      if (deleted) return;
+    }
+
     // Resolve row by business key first (handles code case + orderNumber string/int mismatch).
     if (hasFb) {
       const existing = await fetchOrdersRowByBusinessKey(fb, 'id');
       if (existing?.id) {
-        const { data, error } = await supabase.from('orders').delete().eq('id', existing.id).select('id');
+        const { data, error } = await fromTenant('orders').delete().eq('id', existing.id).select('id');
         if (error) throw error;
         if (data && data.length > 0) return;
       }
@@ -1847,7 +2217,7 @@ export async function deleteOrder(orderId, identityFallback = null) {
     }
 
     if (idStr) {
-      const { data, error } = await supabase.from('orders').delete().eq('id', idStr).select('id');
+      const { data, error } = await fromTenant('orders').delete().eq('id', idStr).select('id');
       if (error) throw error;
       if (data && data.length > 0) return;
 
@@ -1862,6 +2232,10 @@ export async function deleteOrder(orderId, identityFallback = null) {
       'No matching order found in the database. Refresh the page if this order was synced from another device.'
     );
   } catch (error) {
+    if (isSupabasePermissionError(error) && identityFallback?.distributorCode && isUuidLike(orderId)) {
+      const deleted = await deleteDistributorOrderRpc(orderId, identityFallback.distributorCode);
+      if (deleted) return;
+    }
     console.error('Error deleting order:', error);
     throw new Error(error.message || 'Failed to delete order');
   }
@@ -1880,13 +2254,63 @@ const SHIPPING_INVOICE_DB_COLUMNS = new Set([
   'shipping_invoice_mime_type',
 ]);
 
+/** Drop snake_case duplicates when camelCase twin is present (orders table uses quoted camel). */
+const ORDER_PATCH_SNAKE_WHEN_CAMEL = {
+  csd_pc: 'csdPC',
+  csd_uc: 'csdUC',
+  water_pc: 'waterPC',
+  water_uc: 'waterUC',
+  total_uc: 'totalUC',
+  totaluc: 'totalUC',
+};
+
+function pruneOrderUpdatePayload(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const out = { ...payload };
+  for (const [snake, camel] of Object.entries(ORDER_PATCH_SNAKE_WHEN_CAMEL)) {
+    if (
+      Object.prototype.hasOwnProperty.call(out, snake) &&
+      Object.prototype.hasOwnProperty.call(out, camel)
+    ) {
+      delete out[snake];
+    }
+  }
+  return out;
+}
+
+/**
+ * Minimal safe fields when marking an order delivered (avoids optional columns that may not exist).
+ */
+export function buildDeliveredOrderStatusExtras(order, { deliveredAt, statusHistory, achievementTotals } = {}) {
+  const patch = {};
+  if (statusHistory != null) {
+    patch.status_history = statusHistory;
+  }
+  if (deliveredAt) {
+    patch.status_updated_at = deliveredAt;
+  }
+  if (Array.isArray(order?.data) && order.data.length > 0) {
+    patch.data = order.data;
+  }
+  const t = achievementTotals;
+  if (t && (t.csdPC || t.csdUC || t.waterPC || t.waterUC)) {
+    patch.csdPC = t.csdPC;
+    patch.csdUC = t.csdUC;
+    patch.waterPC = t.waterPC;
+    patch.waterUC = t.waterUC;
+    patch.totalUC = t.totalUC;
+  }
+  return pruneOrderUpdatePayload(patch);
+}
+
 async function updateOrdersRowMatching(matchFn, basePayload) {
-  let updatePayload = { ...basePayload };
+  let updatePayload = pruneOrderUpdatePayload(basePayload);
   const requestedInvoiceCols = [...SHIPPING_INVOICE_DB_COLUMNS].filter((col) =>
     Object.prototype.hasOwnProperty.call(basePayload, col)
   );
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    let q = supabase.from('orders').update(updatePayload);
+  const strippedColumns = [];
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    let q = fromTenant('orders').update(updatePayload);
     q = matchFn(q);
     const { data, error } = await q.select().maybeSingle();
 
@@ -1911,6 +2335,7 @@ async function updateOrdersRowMatching(matchFn, basePayload) {
       }
       const nextPayload = { ...updatePayload };
       delete nextPayload[missingColumn];
+      strippedColumns.push(missingColumn);
       updatePayload = nextPayload;
       continue;
     }
@@ -1919,6 +2344,12 @@ async function updateOrdersRowMatching(matchFn, basePayload) {
     return null;
   }
 
+  if (strippedColumns.length > 0) {
+    throw new Error(
+      `Failed to update order: your orders table is missing column(s): ${strippedColumns.join(', ')}. ` +
+        'Run supabase/add_shipping_order_columns.sql in the Supabase SQL Editor if dispatch/transport columns are missing.'
+    );
+  }
   throw new Error('Failed to update order after schema compatibility retries');
 }
 
@@ -1948,13 +2379,19 @@ export async function updateOrderStatus(orderId, status, extraFields = {}, ident
 
     const appStatus = normalizeWorkflowStatusForWrite(status);
     const statusCandidates = databaseStatusWriteCandidates(appStatus);
-    const rest = { ...(extraFields || {}) };
+    const rest = pruneOrderUpdatePayload({ ...(extraFields || {}) });
     delete rest.status;
 
     const basePayload = {
       ...rest,
       updated_at: new Date().toISOString()
     };
+
+    const distCode = String(fb.distributorCode || rest.distributorCode || '').trim();
+    if (!(await hasSupabaseAuthSession()) && hasId && distCode) {
+      const row = await updateDistributorOrderRpc(orderId, basePayload, appStatus, distCode);
+      if (row) return normalizeOrderRowStatus(row);
+    }
 
     if (hasId) {
       const byId = await updateOrdersRowMatchingWithStatusFallback(
@@ -1974,6 +2411,19 @@ export async function updateOrderStatus(orderId, status, extraFields = {}, ident
       'No matching order found in the database. Refresh the page if this order was synced from another device.'
     );
   } catch (error) {
+    if (isSupabasePermissionError(error)) {
+      const fb = identityFallback || {};
+      const distCode = String(fb.distributorCode || extraFields?.distributorCode || '').trim();
+      if (orderId && distCode) {
+        const row = await updateDistributorOrderRpc(
+          orderId,
+          { ...(extraFields || {}), updated_at: new Date().toISOString() },
+          normalizeWorkflowStatusForWrite(status),
+          distCode
+        );
+        if (row) return normalizeOrderRowStatus(row);
+      }
+    }
     console.error('Error updating order status:', error);
     throw error;
   }
@@ -2011,10 +2461,10 @@ export async function patchOrderFields(orderId, fields = {}, identityFallback = 
     }
     if (Object.keys(payload).length === 0) return null;
 
-    const basePayload = {
+    const basePayload = pruneOrderUpdatePayload({
       ...payload,
       updated_at: new Date().toISOString(),
-    };
+    });
 
     if (hasId) {
       const byId = await updateOrdersRowMatching((q) => q.eq('id', orderId), basePayload);
@@ -2092,10 +2542,6 @@ export function subscribeToOrders(distributorCode, callback) {
 
 // ==================== ADMIN MANAGEMENT ====================
 
-/**
- * Get all admins
- * @returns {Promise<Array>} Array of admin objects
- */
 export async function getAllAdmins() {
   try {
     if (!supabase) {
@@ -2103,8 +2549,7 @@ export async function getAllAdmins() {
       return [];
     }
 
-    const { data, error } = await supabase
-      .from('admins')
+    const { data, error } = await fromTenant('admins')
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -2135,29 +2580,104 @@ export async function getAllAdmins() {
 }
 
 /**
+ * Get admin row by email in the active workspace.
+ * @param {string} email
+ * @returns {Promise<Object|null>}
+ */
+export async function getAdminByEmailInActiveOrg(email) {
+  try {
+    if (!supabase || !email) return null;
+    const { data, error } = await fromTenant('admins')
+      .select('*')
+      .eq('email', String(email).trim())
+      .limit(1);
+    if (error) throw error;
+    return firstRow(data);
+  } catch (error) {
+    console.error('Error getting admin by email:', error);
+    return null;
+  }
+}
+
+/**
+ * Update admin role/permissions in the active workspace.
+ * @param {string} userId - admins.id
+ * @param {string} newRole
+ * @param {Object} [permissions]
+ */
+export async function updateAdminRole(userId, newRole, permissions) {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const perms = permissions ?? resolvePermissionsForRole(newRole);
+  const { error } = await fromTenant('admins')
+    .update({
+      role: newRole,
+      permissions: perms,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+  if (error) throw error;
+}
+
+/**
  * Get admin by UID
  * @param {string} uid - User UID
+ * @param {string} [preferredOrganizationId] - Prefer admin row for this workspace
  * @returns {Promise<Object|null>} Admin object or null
  */
-export async function getAdminByUid(uid) {
+export async function getAdminByUid(uid, preferredOrganizationId) {
   try {
     if (!supabase) {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
+    const preferred = preferredOrganizationId ?? getActiveOrganizationId();
+
+    let adminQuery = supabase
       .from('admins')
       .select('*')
-      .or(`uid.eq.${uid},id.eq.${uid}`)
-      .single();
+      .or(`uid.eq.${uid},id.eq.${uid}`);
+    if (preferred) {
+      adminQuery = adminQuery.eq('organization_id', preferred);
+    }
+    const { data, error } = await adminQuery.limit(10);
 
     if (error) {
-      if (error.code === 'PGRST116') return null; // No rows returned
+      if (isSingleRowCoerceError(error)) return firstRow(data);
       throw error;
     }
 
-    return data;
+    const rows = data || [];
+    let admin = preferred
+      ? rows.find((row) => row.organization_id === preferred) || null
+      : firstRow(rows);
+
+    if (!admin && !preferred && rows.length > 0) {
+      admin = rows[0];
+    }
+
+    if (!admin) return null;
+
+    if (rows.length > 1 && preferred && !rows.some((row) => row.organization_id === preferred)) {
+      console.warn(
+        `Multiple admin rows matched uid ${uid}; none match active workspace ${preferred}.`
+      );
+    } else if (rows.length > 1) {
+      console.warn(
+        `Multiple admin rows matched uid ${uid}; using row for workspace ${admin.organization_id || 'unknown'}.`
+      );
+    }
+
+    if (admin.organization_id) {
+      try {
+        await loadOrganizationContext(admin.organization_id);
+      } catch (e) {
+        console.warn('Could not load organization for admin:', e);
+      }
+    }
+
+    return admin;
   } catch (error) {
+    if (isSingleRowCoerceError(error)) return null;
     console.error('Error getting admin by UID:', error);
     return null;
   }
@@ -2215,17 +2735,16 @@ export async function createAdminAccount(adminData) {
     const { email, password, name, role, permissions } = adminData;
 
     // Check if admin already exists in database by email
-    const { data: existingAdmin, error: checkError } = await supabase
-      .from('admins')
+    const { data: existingAdminRows, error: checkError } = await fromTenant('admins')
       .select('id, uid, email')
       .eq('email', email)
-      .maybeSingle();
+      .limit(1);
 
-    if (checkError && checkError.code !== 'PGRST116') {
-      // PGRST116 means no rows found, which is fine
+    if (checkError && !isSingleRowCoerceError(checkError)) {
       console.warn('Error checking for existing admin:', checkError);
     }
 
+    const existingAdmin = firstRow(existingAdminRows);
     if (existingAdmin) {
       throw new Error('A user with this email already exists in the database');
     }
@@ -2261,7 +2780,7 @@ export async function createAdminAccount(adminData) {
     }
 
     // Create admin document in database
-    const adminDoc = {
+    const adminDoc = withOrgPayload({
       uid: authData.user.id,
       id: authData.user.id, // Also set id field for compatibility
       email,
@@ -2270,13 +2789,12 @@ export async function createAdminAccount(adminData) {
       permissions: permissions || resolvePermissionsForRole(role || 'admin'),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
-    };
+    });
 
-    const { data, error: insertError } = await supabase
-      .from('admins')
+    const { data: insertedRows, error: insertError } = await fromTenant('admins')
       .insert([adminDoc])
       .select()
-      .single();
+      .limit(1);
 
     if (insertError) {
       // If database insert fails but user was created in Auth, we should log this
@@ -2285,7 +2803,7 @@ export async function createAdminAccount(adminData) {
     }
 
     console.log('✅ User created successfully in both Supabase Auth and database');
-    return data;
+    return firstRow(insertedRows);
   } catch (error) {
     console.error('Error creating admin account:', error);
     const errorMessage = error?.message || error?.toString() || 'Failed to create admin account';
@@ -2401,8 +2919,7 @@ export async function updateUserLastActive(uid) {
       throw new Error('Supabase not initialized');
     }
 
-    const { error } = await supabase
-      .from('admins')
+    const { error } = await fromTenant('admins')
       .update({ last_active: new Date().toISOString() })
       .eq('uid', uid);
 
@@ -2459,8 +2976,7 @@ export async function deleteUserDocument(uid, email = null) {
     // Try deleting by uid field first (most common in Supabase)
     if (uid) {
       console.log(`Trying to delete by uid field: ${uid}`);
-      const { data: deleteByUidData, error: deleteByUidError } = await supabase
-        .from('admins')
+      const { data: deleteByUidData, error: deleteByUidError } = await fromTenant('admins')
         .delete()
         .eq('uid', uid)
         .select();
@@ -2476,8 +2992,7 @@ export async function deleteUserDocument(uid, email = null) {
       // If not deleted by uid, try by id field
       if (!deleted) {
         console.log(`Trying to delete by id field: ${uid}`);
-        const { data: deleteByIdData, error: deleteByIdError } = await supabase
-          .from('admins')
+        const { data: deleteByIdData, error: deleteByIdError } = await fromTenant('admins')
           .delete()
           .eq('id', uid)
           .select();
@@ -2495,8 +3010,7 @@ export async function deleteUserDocument(uid, email = null) {
     // If still not deleted and email is provided, try deleting by email
     if (!deleted && email) {
       console.log(`Trying to delete by email: ${email}`);
-      const { data: deleteByEmailData, error: deleteByEmailError } = await supabase
-        .from('admins')
+      const { data: deleteByEmailData, error: deleteByEmailError } = await fromTenant('admins')
         .delete()
         .eq('email', email)
         .select();
@@ -2539,8 +3053,7 @@ export async function deleteUserDocument(uid, email = null) {
 
     if (!deleted) {
       // Check if user exists at all by id/uid or email
-      let checkQuery = supabase
-        .from('admins')
+      let checkQuery = fromTenant('admins')
         .select('id, uid, email, role');
       
       if (uid) {
@@ -2564,8 +3077,7 @@ export async function deleteUserDocument(uid, email = null) {
         // If multiple users found with same email, try deleting all by email
         if (checkUser.length > 1 && email) {
           console.log(`Found ${checkUser.length} users with email ${email}. Attempting to delete all duplicates...`);
-          const { data: deleteAllData, error: deleteAllError } = await supabase
-            .from('admins')
+          const { data: deleteAllData, error: deleteAllError } = await fromTenant('admins')
             .delete()
             .eq('email', email)
             .select();
@@ -2584,16 +3096,14 @@ export async function deleteUserDocument(uid, email = null) {
           // Try deleting with the actual ID from the database
           const actualId = actualUser.id || actualUser.uid;
           if (actualId) {
-            const { data: deleteByActualIdData, error: deleteByActualIdError } = await supabase
-              .from('admins')
+            const { data: deleteByActualIdData, error: deleteByActualIdError } = await fromTenant('admins')
               .delete()
               .eq('id', actualId)
               .select();
             
             if (deleteByActualIdError) {
               // Try by uid
-              const { data: deleteByActualUidData, error: deleteByActualUidError } = await supabase
-                .from('admins')
+              const { data: deleteByActualUidData, error: deleteByActualUidError } = await fromTenant('admins')
                 .delete()
                 .eq('uid', actualId)
                 .select();
@@ -2626,15 +3136,13 @@ export async function deleteUserDocument(uid, email = null) {
     // Also try to delete from distributors table (if they exist there)
     try {
       if (uid) {
-        const { error: distributorError } = await supabase
-          .from('distributors')
+        const { error: distributorError } = await fromTenant('distributors')
           .delete()
           .eq('uid', uid);
 
         if (distributorError && !distributorError.message?.includes('No rows')) {
           // Try by id as well
-          await supabase
-            .from('distributors')
+          await fromTenant('distributors')
             .delete()
             .eq('id', uid);
         }
@@ -2667,8 +3175,7 @@ export async function isUsernameTaken(username, excludeId = null) {
       throw new Error('Supabase not initialized');
     }
 
-    let query = supabase
-      .from('distributors')
+    let query = fromTenant('distributors')
       .select('code')
       .eq('username', username);
 
@@ -2700,8 +3207,7 @@ export async function isEmailTaken(email, excludeId = null) {
     }
 
     // Check in distributors
-    let query = supabase
-      .from('distributors')
+    let query = fromTenant('distributors')
       .select('code')
       .eq('email', email);
 
@@ -2717,8 +3223,7 @@ export async function isEmailTaken(email, excludeId = null) {
     }
 
     // Check in admins
-    let adminQuery = supabase
-      .from('admins')
+    let adminQuery = fromTenant('admins')
       .select('uid')
       .eq('email', email);
 
@@ -2743,22 +3248,109 @@ export async function isEmailTaken(email, excludeId = null) {
  * @param {Object} salesData - Sales data object
  * @returns {Promise<Object>} Saved sales data
  */
+function normalizeSalesDataInsertPayload(salesData) {
+  const code =
+    salesData.distributorCode != null && salesData.distributorCode !== ''
+      ? String(salesData.distributorCode).trim()
+      : salesData.distributor_code != null && salesData.distributor_code !== ''
+        ? String(salesData.distributor_code).trim()
+        : null;
+
+  const orderNumber = String(
+    salesData.orderNumber ?? salesData.order_number ?? salesData.invoiceNumber ?? ''
+  ).trim();
+
+  const csdPC = Number(salesData.csdPC ?? salesData.csd_pc ?? 0) || 0;
+  const csdUC = Number(salesData.csdUC ?? salesData.csd_uc ?? 0) || 0;
+  const waterPC = Number(salesData.waterPC ?? salesData.water_pc ?? 0) || 0;
+  const waterUC = Number(salesData.waterUC ?? salesData.water_uc ?? 0) || 0;
+  const totalUC =
+    Number(salesData.totalUC ?? salesData.total_uc ?? 0) || csdUC + waterUC;
+
+  let invoiceDate = salesData.invoiceDate ?? salesData.invoice_date;
+  if (invoiceDate instanceof Date) {
+    invoiceDate = invoiceDate.toISOString();
+  } else if (invoiceDate != null && invoiceDate !== '') {
+    const parsed = new Date(invoiceDate);
+    invoiceDate = Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  } else {
+    invoiceDate = new Date().toISOString();
+  }
+
+  const row = {
+    distributorCode: code,
+    distributorName: salesData.distributorName ?? salesData.distributor_name ?? null,
+    invoiceNumber: orderNumber || salesData.invoiceNumber || null,
+    invoiceDate,
+    products: Array.isArray(salesData.products) ? salesData.products : [],
+    csdPC,
+    csdUC,
+    waterPC,
+    waterUC,
+    totalUC,
+    source: salesData.source || 'order_delivery',
+    created_at: new Date().toISOString(),
+  };
+
+  // Optional after running ADD_SALES_DATA_ORDER_LINK.sql
+  if (salesData.order_id != null || salesData.orderId != null) {
+    row.order_id = salesData.order_id ?? salesData.orderId;
+  }
+  if (orderNumber) {
+    row.orderNumber = orderNumber;
+  }
+
+  return row;
+}
+
+/**
+ * Existing sales_data row for a dispatched order (idempotent dispatch).
+ */
+export async function findSalesDataForDispatchedOrder(distributorCode, orderNumber) {
+  try {
+    if (!supabase) return null;
+    const code = String(distributorCode || '').trim();
+    const on = String(orderNumber ?? '').trim();
+    if (!code || !on) return null;
+
+    for (const c of distributorCodeMatchVariants(code)) {
+      for (const num of orderNumberMatchVariants(on)) {
+        const { data, error } = await fromTenant('sales_data')
+          .select('*')
+          .eq('distributorCode', c)
+          .eq('source', 'order_delivery')
+          .eq('invoiceNumber', String(num))
+          .maybeSingle();
+        if (!error && data) return data;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Error finding sales data for order:', error);
+    return null;
+  }
+}
+
 export async function saveSalesData(salesData) {
   try {
     if (!supabase) {
       throw new Error('Supabase not initialized');
     }
 
-    const salesDoc = {
-      ...salesData,
-      created_at: new Date().toISOString()
-    };
+    const salesDoc = normalizeSalesDataInsertPayload(salesData);
 
-    const { data, error } = await supabase
-      .from('sales_data')
+    let { data, error } = await fromTenant('sales_data')
       .insert([salesDoc])
       .select()
       .single();
+
+    if (error && /orderNumber|order_id/i.test(error.message || '')) {
+      const { orderNumber: _on, order_id: _oid, ...fallbackRow } = salesDoc;
+      ({ data, error } = await fromTenant('sales_data')
+        .insert([fallbackRow])
+        .select()
+        .single());
+    }
 
     if (error) throw error;
 
@@ -2782,23 +3374,12 @@ export async function saveSalesDataBatch(salesDataArray) {
       throw new Error('Supabase not initialized');
     }
 
-    const toRow = (data) => {
-      const code = data.distributorCode != null && data.distributorCode !== ''
-        ? String(data.distributorCode).trim()
-        : null;
-      return {
-        ...data,
-        distributorCode: code,
-        products: Array.isArray(data.products) ? data.products : [],
-        created_at: new Date().toISOString()
-      };
-    };
+    const toRow = (data) => normalizeSalesDataInsertPayload(data);
 
     const allReturned = [];
     for (let i = 0; i < salesDataArray.length; i += SALES_INSERT_CHUNK_SIZE) {
       const chunk = salesDataArray.slice(i, i + SALES_INSERT_CHUNK_SIZE).map(toRow);
-      const { data, error } = await supabase
-        .from('sales_data')
+      const { data, error } = await fromTenant('sales_data')
         .insert(chunk)
         .select();
 
@@ -2830,8 +3411,7 @@ export async function getSalesDataByDateRange(startDate, endDate) {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('sales_data')
+    const { data, error } = await fromTenant('sales_data')
       .select('*')
       .gte('invoiceDate', startDate.toISOString())
       .lte('invoiceDate', endDate.toISOString())
@@ -2856,8 +3436,7 @@ export async function getAllSalesData() {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('sales_data')
+    const { data, error } = await fromTenant('sales_data')
       .select('*')
       .order('invoiceDate', { ascending: false });
 
@@ -2880,10 +3459,9 @@ export async function deleteAllSalesDataFromAdmin() {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('sales_data')
+    const { data, error } = await fromTenant('sales_data')
       .delete()
-      .eq('source', 'excel_upload')
+      .not('id', 'is', null)
       .select();
 
     if (error) throw error;
@@ -2910,8 +3488,7 @@ export async function getStockLiftingRecords(distributorCode, startDate = null, 
     }
 
     const code = distributorCode != null ? String(distributorCode).trim() : '';
-    let query = supabase
-      .from('sales_data')
+    let query = fromTenant('sales_data')
       .select('*')
       .eq('distributorCode', code);
 
@@ -3040,9 +3617,8 @@ export async function saveTarget(distributorCode, targetData) {
       updated_by: currentUser?.email || currentUser?.id || 'unknown'
     };
 
-    const { data, error } = await supabase
-      .from('targets')
-      .upsert({ ...targetDoc, id: distributorCode }, { onConflict: 'id' })
+    const { data, error } = await fromTenant('targets')
+      .upsert(withOrgPayload({ ...targetDoc, id: distributorCode }), { onConflict: tenantUpsertConflict('id') })
       .select()
       .single();
 
@@ -3078,9 +3654,8 @@ export async function saveTargetsBatch(targetsMap) {
       updated_by: currentUser?.email || currentUser?.id || 'unknown'
     }));
 
-    const { data, error } = await supabase
-      .from('targets')
-      .upsert(targets, { onConflict: 'id' })
+    const { data, error } = await fromTenant('targets')
+      .upsert(withOrgPayload(targets), { onConflict: tenantUpsertConflict('id') })
       .select();
 
     if (error) throw error;
@@ -3110,8 +3685,7 @@ export async function deleteTargetsBatch(distributorCodes = []) {
     let deletedCount = 0;
 
     // Delete by primary id first.
-    const { data: byIdData, error: byIdError } = await supabase
-      .from('targets')
+    const { data: byIdData, error: byIdError } = await fromTenant('targets')
       .delete()
       .in('id', codes)
       .select();
@@ -3120,8 +3694,7 @@ export async function deleteTargetsBatch(distributorCodes = []) {
     deletedCount += byIdData?.length || 0;
 
     // Backward compatibility: if records are keyed by distributorCode.
-    const { data: byCodeData, error: byCodeError } = await supabase
-      .from('targets')
+    const { data: byCodeData, error: byCodeError } = await fromTenant('targets')
       .delete()
       .in('distributorCode', codes)
       .select();
@@ -3131,12 +3704,9 @@ export async function deleteTargetsBatch(distributorCodes = []) {
 
     // Keep local cache in sync.
     try {
-      const stored = localStorage.getItem('targets');
-      if (stored) {
-        const targetsMap = JSON.parse(stored);
-        codes.forEach((code) => delete targetsMap[code]);
-        localStorage.setItem('targets', JSON.stringify(targetsMap));
-      }
+      const targetsMap = readTenantJson('targets') || {};
+      codes.forEach((code) => delete targetsMap[code]);
+      writeTenantJson('targets', targetsMap);
     } catch (cacheError) {
       console.warn('Could not update local target cache after delete:', cacheError);
     }
@@ -3160,8 +3730,7 @@ export async function getTarget(distributorCode) {
       return null;
     }
 
-    const { data, error } = await supabase
-      .from('targets')
+    const { data, error } = await fromTenant('targets')
       .select('*')
       .eq('distributorCode', distributorCode)
       .single();
@@ -3179,8 +3748,7 @@ export async function getTarget(distributorCode) {
     if (data) {
       // Cache in localStorage as fallback
       try {
-        const stored = localStorage.getItem('targets') || '{}';
-        const targetsMap = JSON.parse(stored);
+        const targetsMap = readTenantJson('targets') || {};
         targetsMap[distributorCode] = {
           CSD_PC: data.CSD_PC || 0,
           CSD_UC: data.CSD_UC || 0,
@@ -3189,7 +3757,7 @@ export async function getTarget(distributorCode) {
           updatedAt: data.updated_at,
           updatedBy: data.updated_by
         };
-        localStorage.setItem('targets', JSON.stringify(targetsMap));
+        writeTenantJson('targets', targetsMap);
       } catch (e) {
         // Ignore localStorage errors
       }
@@ -3210,9 +3778,8 @@ export async function getTarget(distributorCode) {
     if (error.message?.includes('quota') || error.message?.includes('exceeded')) {
       console.warn('⚠️ Supabase quota exceeded. Using cached target from localStorage.');
       try {
-        const stored = localStorage.getItem('targets');
-        if (stored) {
-          const targetsMap = JSON.parse(stored);
+        const targetsMap = readTenantJson('targets');
+        if (targetsMap) {
           const targetData = targetsMap[distributorCode];
           if (targetData) {
             return targetData;
@@ -3300,8 +3867,7 @@ export async function getAllTargets() {
       return {};
     }
 
-    const { data, error } = await supabase
-      .from('targets')
+    const { data, error } = await fromTenant('targets')
       .select('*');
 
     if (error) {
@@ -3386,9 +3952,8 @@ export async function saveScheme(schemeData) {
     try {
       // First try to save with all fields
       const fullSchemeDoc = { ...coreSchemeDoc, ...optionalFields };
-      const result = await supabase
-        .from('schemes')
-        .upsert(fullSchemeDoc, { onConflict: 'id' })
+      const result = await fromTenant('schemes')
+        .upsert(withOrgPayload(fullSchemeDoc), { onConflict: tenantUpsertConflict('id') })
         .select()
         .single();
       
@@ -3407,9 +3972,8 @@ export async function saveScheme(schemeData) {
           console.warn('⚠️ Some optional columns may be missing. Saving core fields first...');
           
           // Save core fields first
-          const coreResult = await supabase
-            .from('schemes')
-            .upsert(coreSchemeDoc, { onConflict: 'id' })
+          const coreResult = await fromTenant('schemes')
+            .upsert(withOrgPayload(coreSchemeDoc), { onConflict: tenantUpsertConflict('id') })
             .select()
             .single();
           
@@ -3436,8 +4000,7 @@ export async function saveScheme(schemeData) {
             
             if (Object.keys(fieldsToUpdate).length > 0) {
               try {
-                const updateResult = await supabase
-                  .from('schemes')
+                const updateResult = await fromTenant('schemes')
                   .update(fieldsToUpdate)
                   .eq('id', schemeData.id)
                   .select()
@@ -3489,8 +4052,7 @@ export async function getAllSchemes() {
       throw new Error('Supabase not initialized');
     }
 
-    const { data, error } = await supabase
-      .from('schemes')
+    const { data, error } = await fromTenant('schemes')
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -3530,8 +4092,7 @@ export async function getActiveSchemesForDistributor(distributorCode) {
 
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
-      .from('schemes')
+    const { data, error } = await fromTenant('schemes')
       .select('*')
       .lte('startDate', now)
       .gte('endDate', now);
@@ -3571,8 +4132,7 @@ export async function deleteScheme(schemeId) {
       throw new Error('Supabase not initialized');
     }
 
-    const { error } = await supabase
-      .from('schemes')
+    const { error } = await fromTenant('schemes')
       .delete()
       .eq('id', schemeId);
 
@@ -3585,117 +4145,222 @@ export async function deleteScheme(schemeId) {
 
 // ==================== PRODUCT RATES (app_config) ====================
 
+function parseProductRatesRow(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  if (row.products?.length || row.skuRates || row.canRate) {
+    return {
+      products: Array.isArray(row.products) ? row.products : [],
+      settings: row.settings || {},
+      skuRates: row.skuRates || {},
+      canRate: row.canRate,
+      customProducts: Array.isArray(row.customProducts) ? row.customProducts : [],
+    };
+  }
+
+  const candidates = [row.clientId, row.apiKey, row.gmail_client_id, row.gmail_api_key];
+  for (const raw of candidates) {
+    if (!raw || typeof raw !== 'string') continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        (parsed.products?.length || parsed.skuRates || parsed.canRate)
+      ) {
+        return {
+          products: Array.isArray(parsed.products) ? parsed.products : [],
+          settings: parsed.settings || {},
+          skuRates: parsed.skuRates || {},
+          canRate: parsed.canRate,
+          customProducts: Array.isArray(parsed.customProducts) ? parsed.customProducts : [],
+        };
+      }
+    } catch {
+      // Ignore parse errors and try next column
+    }
+  }
+  return null;
+}
+
+async function fetchProductRatesDirect() {
+  const { data, error } = await fromTenant('app_config')
+    .select('*')
+    .eq('id', 'product_rates')
+    .limit(1);
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching product rates:', error);
+    return null;
+  }
+
+  if (data && data.length > 0) {
+    return parseProductRatesRow(data[0]);
+  }
+  return null;
+}
+
+async function fetchProductRatesViaRpc(slug) {
+  const { data, error } = await supabase.rpc('get_workspace_product_rates', {
+    p_slug: slug,
+  });
+  if (error) {
+    if (!isMissingRpcError(error)) {
+      console.error('Error fetching product rates via RPC:', error);
+    }
+    return null;
+  }
+  if (!data || typeof data !== 'object') return null;
+  return parseProductRatesRow(data);
+}
+
 /**
  * Get product rates from app_config table
  * @returns {Promise<Object|null>} Rates object or null if not set
  */
+function pickProductRatesDoc(...candidates) {
+  let fallback = null;
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const catalog = ensureProductCatalog(raw);
+    if (catalog.products?.length) return catalog;
+    if (!fallback) fallback = catalog;
+  }
+  return fallback;
+}
+
 export async function getProductRates() {
   try {
     if (!supabase) return null;
 
-    const { data, error } = await supabase
-      .from('app_config')
-      .select('*')
-      .eq('id', 'product_rates')
-      .limit(1);
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching product rates:', error);
-      return null;
-    }
-
-    if (data && data.length > 0) {
-      const row = data[0];
-
-      // Preferred shape (if table has dedicated columns)
-      if (row.skuRates || row.canRate) {
-        return {
-          skuRates: row.skuRates || {},
-          canRate: row.canRate,
-          customProducts: Array.isArray(row.customProducts) ? row.customProducts : [],
-        };
-      }
-
-      // Fallback: parse JSON stored in existing text columns
-      const candidates = [row.clientId, row.apiKey, row.gmail_client_id, row.gmail_api_key];
-      for (const raw of candidates) {
-        if (!raw || typeof raw !== 'string') continue;
-        try {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object' && (parsed.skuRates || parsed.canRate)) {
-            return {
-              skuRates: parsed.skuRates || {},
-              canRate: parsed.canRate,
-              customProducts: Array.isArray(parsed.customProducts) ? parsed.customProducts : [],
-            };
-          }
-        } catch {
-          // Ignore parse errors and try next column
-        }
-      }
-    }
-    return null;
+    const direct = await fetchProductRatesDirect();
+    const slug = getActiveOrganizationSlug();
+    const rpc = slug ? await fetchProductRatesViaRpc(slug) : null;
+    return pickProductRatesDoc(direct, rpc);
   } catch (error) {
     console.error('Error fetching product rates:', error);
     return null;
   }
 }
 
+function isMissingAppConfigColumnError(error, columnName) {
+  return (
+    error?.code === 'PGRST204' &&
+    typeof error.message === 'string' &&
+    (!columnName || error.message.includes(columnName))
+  );
+}
+
+function isDuplicateKeyError(error) {
+  const msg = String(error?.message || error || '').toLowerCase();
+  return error?.code === '23505' || msg.includes('duplicate key') || msg.includes('app_config_pkey');
+}
+
+async function saveProductRatesViaRpc(orgId, payloadObject) {
+  const { data, error } = await supabase.rpc('save_workspace_product_rates', {
+    p_org_id: orgId,
+    p_payload: payloadObject,
+  });
+  if (error) {
+    if (isMissingRpcError(error)) {
+      throw new Error(
+        'Rate Master cloud save RPC is missing. Run supabase/distributor_orders_rpc.sql in the Supabase SQL Editor.'
+      );
+    }
+    throw error;
+  }
+  if (data === false) {
+    throw new Error('Rate Master could not be saved to the cloud.');
+  }
+}
+
 /**
  * Save product rates + optional custom product catalogue to app_config table
- * @param {Object} rates - { skuRates, canRate, customProducts? }
- *   customProducts: [{ name, sku?, category, kgPerCase, ucMultiplier|null, rate }]
+ * @param {Object} rates - { products, settings, skuRates?, canRate?, customProducts? }
  * @returns {Promise<void>}
  */
 export async function saveProductRates(rates) {
+  if (!supabase) {
+    throw new Error('Supabase not initialized');
+  }
+
+  const orgId = getActiveOrganizationId();
+  if (!orgId) {
+    throw new Error(
+      'No active workspace. Sign out, then sign in again at /w/your-workspace/login before saving Rate Master.'
+    );
+  }
+
+  const payloadObject = {
+    products: Array.isArray(rates?.products) ? rates.products : [],
+    settings: rates?.settings || {},
+    skuRates: rates?.skuRates || {},
+    canRate: rates?.canRate,
+    customProducts: Array.isArray(rates?.customProducts) ? rates.customProducts : [],
+  };
   try {
-    if (!supabase) {
-      throw new Error('Supabase not initialized');
-    }
-
-    const payload = JSON.stringify({
-      skuRates: rates?.skuRates || {},
-      canRate: rates?.canRate,
-      customProducts: Array.isArray(rates?.customProducts) ? rates.customProducts : [],
-    });
-
-    const { error } = await supabase
-      .from('app_config')
-      .upsert(
-        {
-          id: 'product_rates',
-          clientId: payload,
-          apiKey: payload,
-          customProducts: rates?.customProducts ?? [],
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: 'id' }
-      );
-
-    if (error) {
-      const noCustomCol =
-        error.code === 'PGRST204' &&
-        typeof error.message === 'string' &&
-        error.message.includes('customProducts');
-      if (noCustomCol) {
-        const { error: err2 } = await supabase
-          .from('app_config')
-          .upsert(
-            {
-              id: 'product_rates',
-              clientId: payload,
-              apiKey: payload,
-              updated_at: new Date().toISOString()
-            },
-            { onConflict: 'id' }
-          );
-        if (err2) throw err2;
-        return;
+    await saveProductRatesViaRpc(orgId, payloadObject);
+    return;
+  } catch (rpcError) {
+    if (!isMissingRpcError(rpcError)) {
+      if (isDuplicateKeyError(rpcError)) {
+        throw new Error(
+          'Rate Master row already exists under the legacy app_config key. Run supabase/fix_app_config_tenant_pkey.sql in Supabase, then save again.'
+        );
       }
-      throw error;
+      throw rpcError;
     }
+  }
+
+  const payloadText = JSON.stringify(payloadObject);
+  const conflict = tenantUpsertConflict('id');
+
+  const attempts = [
+    {
+      id: 'product_rates',
+      clientId: payloadText,
+      apiKey: payloadText,
+      products: payloadObject.products,
+      settings: payloadObject.settings,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: 'product_rates',
+      clientId: payloadText,
+      apiKey: payloadText,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: 'product_rates',
+      clientId: payloadText,
+      apiKey: payloadText,
+    },
+  ];
+
+  let lastError = null;
+  for (const row of attempts) {
+    const { error } = await fromTenant('app_config').upsert(withOrgPayload(row), { onConflict: conflict });
+    if (!error) return;
+    lastError = error;
+    if (isMissingAppConfigColumnError(error)) continue;
+    if (isDuplicateKeyError(error) || isSupabasePermissionError(error)) break;
+    break;
+  }
+
+  try {
+    await saveProductRatesViaRpc(orgId, payloadObject);
   } catch (error) {
     console.error('Error saving product rates:', error);
+    if (isSupabasePermissionError(lastError) || isSupabasePermissionError(error)) {
+      throw new Error(
+        'Cloud save blocked by workspace permissions. Confirm you are signed in as a workspace admin, then run supabase/fix_rls_function_grants.sql in Supabase.'
+      );
+    }
+    if (isDuplicateKeyError(lastError) || isDuplicateKeyError(error)) {
+      throw new Error(
+        'Rate Master row already exists under the legacy app_config key. Run supabase/fix_app_config_tenant_pkey.sql in Supabase, then save again.'
+      );
+    }
     throw error;
   }
 }
@@ -3712,8 +4377,7 @@ export async function getOrderArchiveRetentionFromConfig() {
   try {
     if (!supabase) return null;
 
-    const { data, error } = await supabase
-      .from('app_config')
+    const { data, error } = await fromTenant('app_config')
       .select('*')
       .eq('id', ORDER_ARCHIVE_RETENTION_CONFIG_ID)
       .limit(1);
@@ -3758,14 +4422,15 @@ export async function saveOrderArchiveRetentionToConfig(retentionDays) {
       throw new Error('Supabase not initialized');
     }
     const payload = JSON.stringify({ retentionDays: Number(retentionDays) });
-    const { error } = await supabase.from('app_config').upsert(
-      {
+    const configConflict = getActiveOrganizationId() ? 'organization_id,id' : 'id';
+    const { error } = await fromTenant('app_config').upsert(
+      withOrgPayload({
         id: ORDER_ARCHIVE_RETENTION_CONFIG_ID,
         clientId: payload,
         apiKey: payload,
         updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
+      }),
+      { onConflict: configConflict }
     );
     if (error) throw error;
   } catch (error) {
@@ -3787,8 +4452,7 @@ export async function getGlobalTargetPeriod() {
   try {
     if (!supabase) return null;
 
-    const { data, error } = await supabase
-      .from('app_config')
+    const { data, error } = await fromTenant('app_config')
       .select('*')
       .eq('id', GLOBAL_TARGET_PERIOD_ID)
       .limit(1);
@@ -3830,8 +4494,7 @@ export async function saveGlobalTargetPeriod(start, end) {
       throw new Error('Supabase not initialized');
     }
     const payload = JSON.stringify({ start, end });
-    const { error } = await supabase
-      .from('app_config')
+    const { error } = await fromTenant('app_config')
       .upsert(
         {
           id: GLOBAL_TARGET_PERIOD_ID,
@@ -3839,7 +4502,7 @@ export async function saveGlobalTargetPeriod(start, end) {
           apiKey: payload,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'id' }
+        { onConflict: tenantUpsertConflict('id') }
       );
     if (error) throw error;
   } catch (error) {
@@ -3856,8 +4519,7 @@ export async function getSalesPerformanceLastUpdated() {
   try {
     if (!supabase) return null;
 
-    const { data, error } = await supabase
-      .from('app_config')
+    const { data, error } = await fromTenant('app_config')
       .select('*')
       .eq('id', SALES_PERFORMANCE_LAST_UPDATED_ID)
       .limit(1);
@@ -3889,8 +4551,7 @@ export async function saveSalesPerformanceLastUpdated(atIso) {
       throw new Error('Supabase not initialized');
     }
     const iso = atIso || new Date().toISOString();
-    const { error } = await supabase
-      .from('app_config')
+    const { error } = await fromTenant('app_config')
       .upsert(
         {
           id: SALES_PERFORMANCE_LAST_UPDATED_ID,
@@ -3898,7 +4559,7 @@ export async function saveSalesPerformanceLastUpdated(atIso) {
           apiKey: iso,
           updated_at: iso,
         },
-        { onConflict: 'id' }
+        { onConflict: tenantUpsertConflict('id') }
       );
     if (error) throw error;
   } catch (error) {
@@ -3915,8 +4576,7 @@ export async function getGlobalGstEnabled() {
   try {
     if (!supabase) return null;
 
-    const { data, error } = await supabase
-      .from('app_config')
+    const { data, error } = await fromTenant('app_config')
       .select('*')
       .eq('id', GLOBAL_GST_SETTING_ID)
       .limit(1);
@@ -3962,8 +4622,7 @@ export async function saveGlobalGstEnabled(enabled) {
     }
     const boolEnabled = !!enabled;
     const payload = JSON.stringify({ enabled: boolEnabled });
-    const { error } = await supabase
-      .from('app_config')
+    const { error } = await fromTenant('app_config')
       .upsert(
         {
           id: GLOBAL_GST_SETTING_ID,
@@ -3971,7 +4630,7 @@ export async function saveGlobalGstEnabled(enabled) {
           apiKey: payload,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'id' }
+        { onConflict: tenantUpsertConflict('id') }
       );
     if (error) throw error;
   } catch (error) {
@@ -3991,8 +4650,7 @@ export async function getGlobalGstPolicy() {
 
     if (!supabase) return { defaultEnabled: enabled, regionEnabled: {}, distributorEnabled: {} };
 
-    const { data, error } = await supabase
-      .from('app_config')
+    const { data, error } = await fromTenant('app_config')
       .select('*')
       .eq('id', GLOBAL_GST_SETTING_ID)
       .limit(1);
@@ -4062,8 +4720,7 @@ export async function saveGlobalGstPolicy(policy) {
       throw new Error('Supabase not initialized');
     }
     const payload = JSON.stringify(normalized);
-    const { error } = await supabase
-      .from('app_config')
+    const { error } = await fromTenant('app_config')
       .upsert(
         {
           id: GLOBAL_GST_SETTING_ID,
@@ -4071,7 +4728,7 @@ export async function saveGlobalGstPolicy(policy) {
           apiKey: payload,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'id' }
+        { onConflict: tenantUpsertConflict('id') }
       );
     if (error) throw error;
   } catch (error) {
@@ -4120,8 +4777,7 @@ export async function getFgOpeningStock() {
   try {
     if (!supabase) return null;
 
-    const { data, error } = await supabase
-      .from('app_config')
+    const { data, error } = await fromTenant('app_config')
       .select('*')
       .eq('id', FG_OPENING_STOCK_ID)
       .limit(1);
@@ -4153,12 +4809,12 @@ export async function saveFgOpeningStock(payload) {
     const body = JSON.stringify({ rows, updatedAt, updatedBy });
 
     /** Remove existing row so this upload fully replaces prior FG data (fallback to upsert if delete is blocked). */
-    const { error: delErr } = await supabase.from('app_config').delete().eq('id', FG_OPENING_STOCK_ID);
+    const { error: delErr } = await fromTenant('app_config').delete().eq('id', FG_OPENING_STOCK_ID);
     if (delErr) {
       console.warn('FG opening stock pre-save delete:', delErr);
     }
 
-    let { error } = await supabase.from('app_config').insert({
+    let { error } = await fromTenant('app_config').insert({
       id: FG_OPENING_STOCK_ID,
       clientId: body,
       apiKey: body,
@@ -4166,8 +4822,7 @@ export async function saveFgOpeningStock(payload) {
     });
 
     if (error) {
-      const up = await supabase
-        .from('app_config')
+      const up = await fromTenant('app_config')
         .upsert(
           {
             id: FG_OPENING_STOCK_ID,
@@ -4175,7 +4830,7 @@ export async function saveFgOpeningStock(payload) {
             apiKey: body,
             updated_at: updatedAt,
           },
-          { onConflict: 'id' }
+          { onConflict: tenantUpsertConflict('id') }
         );
       error = up.error;
     }

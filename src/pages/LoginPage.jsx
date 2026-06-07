@@ -14,9 +14,12 @@ import {
   Fade,
   Zoom,
   useTheme,
+  Alert,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import { useNavigate, Link as RouterLink } from "react-router-dom";
+import { useNavigate, Link as RouterLink, useSearchParams } from "react-router-dom";
+import { PLATFORM_NAME, PLATFORM_CONSOLE_LOGIN_PATH } from "../constants/saas";
+import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import PersonIcon from "@mui/icons-material/Person";
@@ -24,14 +27,19 @@ import LockIcon from "@mui/icons-material/Lock";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
 import "./LoginPage.css";
-import { APP_NAME, BRAND_MARK_SRC, PRIVACY_POLICY_PATH } from "../constants/brand";
+import { resolveOrganizationBrand, logoSrcWithPublicUrl } from "../utils/organizationBrand";
+import { APP_NAME, BRAND_MARK_SRC, PRIVACY_POLICY_PATH, TERMS_OF_SERVICE_PATH } from "../constants/brand";
+import { useBrand } from "../hooks/useBrand";
 import {
   validateDistributorLogin,
   validateAdminLogin,
   validateShippingLogin,
 } from "../utils/distributorAuth";
 import { signInDistributor, signInAdmin, supabase } from "../services/supabaseService";
+import { DEFAULT_ORGANIZATION_SLUG, getLastWorkspaceSlug } from "../services/tenantScope";
+import { resolveOrganizationForLogin } from "../services/organizationService";
 import { logActivity, ACTIVITY_TYPES } from "../services/activityService";
+import { isProductionAuthMode } from "../utils/productionMode";
 import AppSnackbar from "../components/AppSnackbar";
 import DayNightThemeToggle from "../components/DayNightThemeToggle";
 import { useDayNightTheme } from "../theme/AppThemeProvider";
@@ -60,7 +68,19 @@ function getBhutanGreeting() {
   return "Good night 🌙";
 }
 
-function LoginPage({ onLogin }) {
+function LoginPage({
+  onLogin,
+  lockedWorkspaceSlug = null,
+  workspaceDisplayName = null,
+  subtitle: subtitleProp = null,
+}) {
+  const [searchParams] = useSearchParams();
+  const [organizationSlug, setOrganizationSlug] = useState(
+    lockedWorkspaceSlug ||
+      searchParams.get("workspace") ||
+      getLastWorkspaceSlug() ||
+      DEFAULT_ORGANIZATION_SLUG
+  );
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -72,12 +92,30 @@ function LoginPage({ onLogin }) {
   const [fieldErrors, setFieldErrors] = useState({ userId: "", password: "" });
 
   const navigate = useNavigate();
+  const brand = useBrand();
+  const displayName = workspaceDisplayName || brand.appName || APP_NAME;
+  const markSrc = logoSrcWithPublicUrl(brand.markSrc || BRAND_MARK_SRC, publicUrl);
   const theme = useTheme();
   const { isDayView } = useDayNightTheme();
 
   useEffect(() => {
     markLandingSeen();
   }, []);
+
+  const inviteToken = searchParams.get("invite");
+
+  useEffect(() => {
+    const inviteEmail = searchParams.get("email");
+    if (inviteEmail && !userId) setUserId(inviteEmail);
+  }, [searchParams, userId]);
+
+  const navigateAfterStaffLogin = (actualRole) => {
+    if (inviteToken) {
+      navigate(`/invite/${encodeURIComponent(inviteToken)}`, { replace: true });
+      return;
+    }
+    navigate(actualRole === "shipping" ? "/shipping" : "/admin", { replace: true });
+  };
   const isDarkUi = isDayView;
   const greeting = getBhutanGreeting();
 
@@ -91,11 +129,11 @@ function LoginPage({ onLogin }) {
         },
       }
     : {
-        backgroundColor: "#f8f9fa",
-        "&:hover": { backgroundColor: "#f0f0f0" },
+        backgroundColor: theme.palette.grey[100],
+        "&:hover": { backgroundColor: theme.palette.grey[200] },
         "&.Mui-focused": {
-          backgroundColor: "#fff",
-          boxShadow: "0 0 0 3px rgba(229, 57, 53, 0.1)",
+          backgroundColor: theme.palette.background.paper,
+          boxShadow: "0 0 0 3px rgba(21, 101, 192, 0.1)",
         },
       };
 
@@ -144,6 +182,16 @@ function LoginPage({ onLogin }) {
     
     try {
       let normalizedSupabaseError = "";
+      if (isSupabaseConfigured) {
+        try {
+          await resolveOrganizationForLogin(organizationSlug);
+        } catch (orgError) {
+          setError(true);
+          setErrorMessage(orgError.message || "Invalid workspace ID");
+          setLoading(false);
+          return;
+        }
+      }
       // Try Supabase Auth first if configured
       if (isSupabaseConfigured) {
         let supabaseAuthError = null;
@@ -175,7 +223,9 @@ function LoginPage({ onLogin }) {
         } catch (distributorError) {
           console.log("Supabase distributor login failed:", distributorError);
 
-          const localDistributor = validateDistributorLogin(trimmedUserId, trimmedPassword);
+          const localDistributor = !isProductionAuthMode()
+            ? validateDistributorLogin(trimmedUserId, trimmedPassword)
+            : null;
           if (localDistributor) {
             setDistributorInfo({ name: localDistributor.name, code: localDistributor.code });
             logActivity(
@@ -229,10 +279,7 @@ function LoginPage({ onLogin }) {
               
               onLogin(actualRole); // Pass actual role (admin, viewer, or shipping)
               setSuccess(true);
-              navigate(
-                actualRole === "shipping" ? "/shipping" : "/admin",
-                { replace: true }
-              );
+              navigateAfterStaffLogin(actualRole);
               setLoading(false);
               return;
             }
@@ -254,28 +301,40 @@ function LoginPage({ onLogin }) {
         }
       }
 
-      // Fallback to localStorage authentication
-      // Check if it's a distributor login
-      const distributor = validateDistributorLogin(trimmedUserId, trimmedPassword);
-      if (distributor) {
-        setDistributorInfo({ name: distributor.name, code: distributor.code });
-        onLogin("distributor", distributor);
-        setSuccess(true);
-        setTimeout(() => navigate("/distributor", { replace: true }), 1500);
-        setLoading(false);
-        return;
+      if (!isProductionAuthMode()) {
+        const distributor = validateDistributorLogin(trimmedUserId, trimmedPassword);
+        if (distributor) {
+          setDistributorInfo({ name: distributor.name, code: distributor.code });
+          onLogin("distributor", distributor);
+          setSuccess(true);
+          setTimeout(() => navigate("/distributor", { replace: true }), 1500);
+          setLoading(false);
+          return;
+        }
+
+        if (validateAdminLogin(trimmedUserId, trimmedPassword)) {
+          onLogin("admin");
+          setSuccess(true);
+          if (inviteToken) {
+            navigate(`/invite/${encodeURIComponent(inviteToken)}`, { replace: true });
+          } else {
+            setTimeout(() => navigate("/admin", { replace: true }), 1500);
+          }
+          setLoading(false);
+          return;
+        }
       }
 
-      // Check if it's admin login
-      if (validateAdminLogin(trimmedUserId, trimmedPassword)) {
-        onLogin("admin");
-        setSuccess(true);
-        setTimeout(() => navigate("/admin", { replace: true }), 1500);
-        setLoading(false);
-        return;
-      }
-
-      if (validateShippingLogin(trimmedUserId, trimmedPassword)) {
+      // Offline-only shipping login (requires workspace id like admin).
+      if (!isProductionAuthMode() && !isSupabaseConfigured && validateShippingLogin(trimmedUserId, trimmedPassword)) {
+        try {
+          await resolveOrganizationForLogin(organizationSlug);
+        } catch (orgError) {
+          setError(true);
+          setErrorMessage(orgError.message || "Invalid workspace ID");
+          setLoading(false);
+          return;
+        }
         logActivity(
           ACTIVITY_TYPES.LOGIN,
           `Shipping user logged in (offline): ${trimmedUserId}`,
@@ -287,7 +346,7 @@ function LoginPage({ onLogin }) {
         ).catch((err) => console.error("Activity logging error:", err));
         onLogin("shipping");
         setSuccess(true);
-        setTimeout(() => navigate("/shipping", { replace: true }), 1500);
+        navigateAfterStaffLogin("shipping");
         setLoading(false);
         return;
       }
@@ -327,13 +386,13 @@ function LoginPage({ onLogin }) {
           <Stack direction="row" alignItems="center" spacing={1.25} sx={{ minWidth: 0 }}>
             <Box
               component="img"
-              src={`${publicUrl}${BRAND_MARK_SRC}`}
-              alt=""
+              src={markSrc}
+              alt={displayName}
               sx={{ width: 42, height: 42, objectFit: "contain", flexShrink: 0 }}
             />
             <Box sx={{ minWidth: 0 }}>
               <Typography sx={{ fontWeight: 900, lineHeight: 1.1, fontSize: { xs: "0.8rem", sm: "1rem" } }} noWrap>
-                {APP_NAME}
+                {displayName}
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "none", sm: "block" } }}>
                 Secure access
@@ -380,9 +439,9 @@ function LoginPage({ onLogin }) {
                   height: 36,
                   px: 1,
                   fontWeight: 900,
-                  bgcolor: alpha(theme.palette.error.main, 0.1),
-                  color: "error.main",
-                  border: `1px solid ${alpha(theme.palette.error.main, 0.18)}`,
+                  bgcolor: alpha(theme.palette.primary.main, 0.1),
+                  color: "primary.main",
+                  border: `1px solid ${alpha(theme.palette.primary.main, 0.18)}`,
                   "& .MuiChip-icon": { color: "inherit" },
                 }}
               />
@@ -420,18 +479,17 @@ function LoginPage({ onLogin }) {
               elevation={0}
               className="login-box"
               sx={{
-                bgcolor: alpha(theme.palette.background.paper, isDarkUi ? 0.92 : 0.96),
+                bgcolor: "background.paper",
                 border: "1px solid",
-                borderColor: alpha(theme.palette.divider, 0.85),
+                borderColor: "divider",
                 boxShadow: `0 28px 80px ${alpha(theme.palette.common.black, isDarkUi ? 0.5 : 0.14)}`,
-                backdropFilter: "blur(20px)",
               }}
             >
               <Box sx={{ textAlign: "center", mb: 3.25 }}>
                 <Box
                   component="img"
-                  src={`${publicUrl}${BRAND_MARK_SRC}`}
-                  alt={APP_NAME}
+                  src={markSrc}
+                  alt={displayName}
                   sx={{ width: 86, height: "auto", mb: 1.5 }}
                 />
                 <Zoom in timeout={850}>
@@ -448,11 +506,46 @@ function LoginPage({ onLogin }) {
                   </Typography>
                 </Zoom>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500, lineHeight: 1.6 }}>
-                  Enter your distributor code or admin email to continue.
+                  {subtitleProp ||
+                    (lockedWorkspaceSlug
+                      ? `Sign in to ${workspaceDisplayName || lockedWorkspaceSlug}`
+                      : `Sign in to your ${PLATFORM_NAME} workspace`)}
                 </Typography>
               </Box>
 
               <Box component="form" onSubmit={handleSubmit}>
+                {inviteToken ? (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Sign in to accept your team invite. You will return here after signing in.
+                  </Alert>
+                ) : null}
+                {isSupabaseConfigured && (
+                  <TextField
+                    fullWidth
+                    label="Workspace ID"
+                    variant="outlined"
+                    value={organizationSlug}
+                    disabled={Boolean(lockedWorkspaceSlug)}
+                    onChange={(e) => {
+                      setOrganizationSlug(e.target.value);
+                      setError(false);
+                    }}
+                    helperText={
+                      lockedWorkspaceSlug
+                        ? `Signing in to workspace "${lockedWorkspaceSlug}"`
+                        : `Your company's sign-in ID (e.g. ${DEFAULT_ORGANIZATION_SLUG})`
+                    }
+                    sx={{ mb: 2.25 }}
+                    InputProps={{
+                      sx: {
+                        borderRadius: "14px",
+                        transition: "all 0.25s ease",
+                        ...inputSurfaceSx,
+                      },
+                    }}
+                    InputLabelProps={{ sx: { fontWeight: 650 } }}
+                  />
+                )}
                 <TextField
                   fullWidth
                   label={isSupabaseConfigured ? "Distributor code / admin email" : "User ID"}
@@ -565,6 +658,47 @@ function LoginPage({ onLogin }) {
                 </Zoom>
               </Box>
 
+              {isSupabaseConfigured && (
+                <Typography
+                  variant="body2"
+                  sx={{ mt: 2.5, textAlign: "center", display: { xs: "none", sm: "block" } }}
+                >
+                  New company?{" "}
+                  <Box
+                    component={RouterLink}
+                    to="/signup"
+                    sx={{ color: "primary.main", fontWeight: 800, textDecoration: "none", "&:hover": { textDecoration: "underline" } }}
+                  >
+                    Create a workspace
+                  </Box>
+                </Typography>
+              )}
+
+              {isSupabaseConfigured && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mt: 1.75, textAlign: "center" }}
+                >
+                  <AdminPanelSettingsOutlinedIcon
+                    sx={{ fontSize: 18, verticalAlign: "text-bottom", mr: 0.5, opacity: 0.85 }}
+                  />
+                  {PLATFORM_NAME} platform owner?{" "}
+                  <Box
+                    component={RouterLink}
+                    to={PLATFORM_CONSOLE_LOGIN_PATH}
+                    sx={{
+                      color: "primary.main",
+                      fontWeight: 800,
+                      textDecoration: "none",
+                      "&:hover": { textDecoration: "underline" },
+                    }}
+                  >
+                    Owner dashboard
+                  </Box>
+                </Typography>
+              )}
+
               <Box
                 component="nav"
                 aria-label="Legal"
@@ -595,7 +729,7 @@ function LoginPage({ onLogin }) {
                   {" | "}
                   <Box
                     component="a"
-                    href={`${publicUrl}/terms-of-service.html`}
+                    href={`${publicUrl}${TERMS_OF_SERVICE_PATH}`}
                     sx={{ color: "primary.main", textDecoration: "none", fontWeight: 800, "&:hover": { textDecoration: "underline" } }}
                   >
                     Terms

@@ -1,4 +1,21 @@
+import {
+  getTenantScopedStorageKey,
+  mayReadLegacyStorage,
+  readTenantJson,
+  writeTenantJson,
+} from "./tenantLocalStorage";
+import { getActiveOrganizationId } from "../services/tenantScope";
+
 export const GLOBAL_GST_STORAGE_KEY = "coke_global_gst_enabled";
+
+/** All regions shown in GST settings (includes Northern even if no distributors yet). */
+export const DEFAULT_GST_REGIONS = ["Southern", "Western", "Eastern", "Northern"];
+
+export function normalizeGstRegionName(region) {
+  const r = String(region || "").trim();
+  if (r === "North") return "Northern";
+  return r;
+}
 
 const DEFAULT_GST_POLICY = {
   defaultEnabled: true,
@@ -45,44 +62,54 @@ export function resolveGstEnabledForRegion(policy, regionName, distributorCode) 
   if (codeKey && Object.prototype.hasOwnProperty.call(normalized.distributorEnabled, codeKey)) {
     return !!normalized.distributorEnabled[codeKey];
   }
-  const key = regionName != null ? String(regionName).trim() : "";
+  const key = normalizeGstRegionName(regionName);
   if (key && Object.prototype.hasOwnProperty.call(normalized.regionEnabled, key)) {
     return !!normalized.regionEnabled[key];
   }
   return !!normalized.defaultEnabled;
 }
 
-export function readGlobalGstPolicyFromLocalStorage() {
+function parseLegacyGstRaw(raw) {
   try {
-    const raw = localStorage.getItem(GLOBAL_GST_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_GST_POLICY };
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        return normalizeGlobalGstPolicy(parsed);
-      }
-    } catch {
-      // Older boolean-only local format.
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return normalizeGlobalGstPolicy(parsed);
     }
-    return {
-      defaultEnabled: normalizeGlobalGstEnabled(raw, true),
-      regionEnabled: {},
-      distributorEnabled: {},
-    };
+  } catch {
+    // Older boolean-only local format.
+  }
+  return {
+    defaultEnabled: normalizeGlobalGstEnabled(raw, true),
+    regionEnabled: {},
+    distributorEnabled: {},
+  };
+}
+
+export function readGlobalGstPolicyFromLocalStorage(organizationId) {
+  try {
+    const orgId = organizationId ?? getActiveOrganizationId();
+    const scopedKey = getTenantScopedStorageKey(GLOBAL_GST_STORAGE_KEY, orgId);
+    let raw = localStorage.getItem(scopedKey);
+    if (!raw && mayReadLegacyStorage(orgId)) {
+      raw = localStorage.getItem(GLOBAL_GST_STORAGE_KEY);
+    }
+    if (!raw) {
+      const fromJson = readTenantJson(GLOBAL_GST_STORAGE_KEY, orgId);
+      if (fromJson) return normalizeGlobalGstPolicy(fromJson);
+      return { ...DEFAULT_GST_POLICY };
+    }
+    return parseLegacyGstRaw(raw);
   } catch {
     return { ...DEFAULT_GST_POLICY };
   }
 }
 
-export function writeGlobalGstPolicyToLocalStorage(policy) {
-  try {
-    localStorage.setItem(
-      GLOBAL_GST_STORAGE_KEY,
-      JSON.stringify(normalizeGlobalGstPolicy(policy))
-    );
-  } catch {
-    /* ignore */
-  }
+export function writeGlobalGstPolicyToLocalStorage(policy, organizationId) {
+  writeTenantJson(
+    GLOBAL_GST_STORAGE_KEY,
+    normalizeGlobalGstPolicy(policy),
+    organizationId
+  );
 }
 
 // Backward-compatible helpers used in some places.

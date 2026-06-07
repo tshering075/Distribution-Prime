@@ -263,7 +263,8 @@ export default function AdminStockLiftingRecordsDialog({
       <Box
         sx={{
           flexShrink: 0,
-          background: "linear-gradient(135deg, #c62828 0%, #8e0000 100%)",
+          background: (t) =>
+            `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
           color: "#fff",
           px: { xs: 1.5, sm: 2.5 },
           py: { xs: 1.25, sm: 1.5 },
@@ -494,7 +495,7 @@ export default function AdminStockLiftingRecordsDialog({
 
         {(!allSalesData || allSalesData.length === 0) && (
           <Typography color="text.secondary" sx={{ mb: 2 }}>
-            No sales / lifting data loaded yet. Upload sales Excel from the dashboard or check your Supabase connection.
+            No dispatch lifting records yet. They appear when shipping marks orders dispatched.
           </Typography>
         )}
 

@@ -3,7 +3,15 @@
  * Counter is synced against coke_orders + optional Supabase list so numbers do not repeat.
  */
 
+import { getActiveOrganizationId } from '../services/tenantScope';
+import { getTenantScopedStorageKey } from './tenantLocalStorage';
+import { readOrdersCache } from './ordersLocalStorage';
+
 const ORDER_NUMBER_KEY = "coke_order_counter";
+
+function counterStorageKey() {
+  return getTenantScopedStorageKey(ORDER_NUMBER_KEY, getActiveOrganizationId());
+}
 const MIN_ORDER_NUMBER = 1000;
 const MAX_ORDER_NUMBER = 9999;
 
@@ -18,7 +26,7 @@ export function normalizeOrderNumber(value) {
 
 function readCounter() {
   try {
-    const stored = localStorage.getItem(ORDER_NUMBER_KEY);
+    const stored = localStorage.getItem(counterStorageKey());
     const counter = stored ? parseInt(stored, 10) : MIN_ORDER_NUMBER - 1;
     if (!Number.isFinite(counter)) return MIN_ORDER_NUMBER - 1;
     return counter;
@@ -29,7 +37,7 @@ function readCounter() {
 
 function writeCounter(counter) {
   try {
-    localStorage.setItem(ORDER_NUMBER_KEY, String(counter));
+    localStorage.setItem(counterStorageKey(), String(counter));
   } catch {
     /* ignore */
   }
@@ -48,9 +56,7 @@ export function collectUsedOrderNumbers(orders) {
 /** All order numbers already stored in this browser's coke_orders cache. */
 export function loadUsedOrderNumbersFromLocalStorage() {
   try {
-    const stored = localStorage.getItem("coke_orders");
-    const orders = stored ? JSON.parse(stored) : [];
-    return collectUsedOrderNumbers(Array.isArray(orders) ? orders : []);
+    return collectUsedOrderNumbers(readOrdersCache());
   } catch {
     return new Set();
   }
@@ -176,7 +182,7 @@ export function getCurrentOrderNumber() {
  */
 export function resetOrderNumber(startFrom = 1000) {
   try {
-    localStorage.setItem(ORDER_NUMBER_KEY, String(startFrom));
+    localStorage.setItem(counterStorageKey(), String(startFrom));
     return true;
   } catch {
     return false;

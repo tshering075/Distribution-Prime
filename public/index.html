@@ -2,20 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/coke-sales-icon-512.png" type="image/png" />
+    <link rel="icon" href="%PUBLIC_URL%/distribution-prime-icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="%PUBLIC_URL%/distribution-prime-icon-512.png" type="image/png" sizes="512x512" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#E40521" />
-    <meta name="description" content="CokeSales Management System — distributor sales tracking, targets, orders, and optional Gmail-based order approvals. Operated by Tashi Beverages Ltd." />
+    <meta name="theme-color" content="#0d47a1" />
+    <meta name="description" content="Distribution Prime — multi-tenant distribution management: sales performance, targets, orders, shipping, and team workspaces." />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="CokeSales" />
+    <meta name="apple-mobile-web-app-title" content="Dist Prime" />
     <!-- Google Search Console: add URL-prefix property https://cokesales-management-system.pages.dev/ and paste the meta tag below. -->
     <meta name="google-site-verification" content="DIdPOeUQ1nVZfMtDBpMv7Pso5S0h2n8i8breS8tUDSQ" />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/coke-sales-icon-512.png" />
-    <!-- All icons generated from the same master logo via scripts/resize-brand-logos.ps1 -->
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/distribution-prime-icon-512.png" />
+    <!-- All icons generated from distribution-prime-icon-1024.png via scripts/generate-distribution-prime-icons.ps1 -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <title>CokeSales Management System</title>
+    <title>Distribution Prime</title>
     <style>
       #splash-screen {
         position: fixed;
@@ -24,7 +25,7 @@
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        background: linear-gradient(135deg, #fff 0%, #f5f8fc 50%, #fff 100%);
+        background: linear-gradient(135deg, #e4e8ec 0%, #dce4ec 50%, #eef0f3 100%);
         z-index: 9999;
         transition: opacity 0.5s ease-out;
       }
@@ -43,7 +44,7 @@
         width: 40px;
         height: 40px;
         border: 4px solid #f3f3f3;
-        border-top: 4px solid #0d47a1;
+        border-top: 4px solid #1565c0;
         border-radius: 50%;
         animation: splashSpin 0.8s linear infinite;
       }
@@ -72,9 +73,9 @@
   <body>
     <noscript>
       <main id="oauth-home-fallback">
-        <p><img src="%PUBLIC_URL%/coke-sales-icon-512.png" alt="" width="72" height="72" /></p>
-        <h1>CokeSales Management System</h1>
-        <p class="operator">Operated by <strong>Tashi Beverages Ltd</strong></p>
+        <p><img src="%PUBLIC_URL%/distribution-prime-icon-512.png" alt="" width="72" height="72" /></p>
+        <h1>Distribution Prime</h1>
+        <p class="operator"><strong>Distribution Prime</strong></p>
         <p>
           Web application for beverage distribution teams: distributor targets and achievements,
           order workflow, product rates, stock lifting, and optional Gmail-based order approval emails
@@ -83,15 +84,15 @@
         <p>
           <a href="%PUBLIC_URL%/login">Sign in</a>
           &middot;
-          <a href="%PUBLIC_URL%/privacy-policy">Privacy Policy</a>
+          <a href="%PUBLIC_URL%/privacy-policy.html">Privacy Policy</a>
           &middot;
-          <a href="%PUBLIC_URL%/terms-of-service">Terms of Service</a>
+          <a href="%PUBLIC_URL%/terms-of-service.html">Terms of Service</a>
         </p>
         <p>Contact: <a href="mailto:tsheringtamang@bhutancoke.com">tsheringtamang@bhutancoke.com</a></p>
       </main>
     </noscript>
     <div id="splash-screen">
-      <img src="%PUBLIC_URL%/coke-sales-icon-512.png" alt="CokeSales Management System" width="200" height="200" />
+      <img src="%PUBLIC_URL%/distribution-prime-icon-512.png" alt="Distribution Prime" width="200" height="200" />
       <div class="splash-loader"></div>
     </div>
     <div id="root"></div>

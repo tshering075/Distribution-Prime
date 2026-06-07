@@ -4,6 +4,7 @@ import {
   orderHasShippingInvoices,
   buildShippingInvoicePatch,
 } from "./shippingInvoiceStorage";
+import { readOrdersCache, writeOrdersCache } from "./ordersLocalStorage";
 
 export { getOrderShippingInvoices, buildShippingInvoicePatch };
 
@@ -80,7 +81,7 @@ const STATUS_LABELS = {
   [ORDER_STATUS.PENDING]: "Pending",
   [ORDER_STATUS.SENT]: "Sent",
   [ORDER_STATUS.APPROVED]: "Approved",
-  [ORDER_STATUS.DELIVERED]: "Delivered",
+  [ORDER_STATUS.DELIVERED]: "Dispatched",
   [ORDER_STATUS.REJECTED]: "Rejected",
   [ORDER_STATUS.CANCELED]: "Canceled",
   [ORDER_STATUS.PENDING_EMAIL_FAILED]: "Email Failed",
@@ -262,29 +263,26 @@ export function orderIdentityMatches(a, b, getOrderKey, distributorCode = "") {
   return false;
 }
 
-/** Remove one order from shared coke_orders localStorage (all distributors). */
+/** Remove one order from workspace-scoped coke_orders cache. */
 export function removeOrderFromCokeOrdersLocalStorage(order, { distributorCode, getOrderKey }) {
   if (!order || typeof getOrderKey !== "function") return;
   try {
-    const stored = localStorage.getItem("coke_orders");
-    if (!stored) return;
-    const allOrders = JSON.parse(stored);
+    const allOrders = readOrdersCache();
     if (!Array.isArray(allOrders)) return;
     const filtered = allOrders.filter(
       (o) => !orderIdentityMatches(o, order, getOrderKey, distributorCode)
     );
-    localStorage.setItem("coke_orders", JSON.stringify(filtered));
+    writeOrdersCache(filtered);
   } catch (e) {
     console.warn("Could not remove order from coke_orders localStorage:", e);
   }
 }
 
-/** Merge invoice + status patch into coke_orders localStorage (distributor browser sync). */
+/** Merge invoice + status patch into workspace-scoped coke_orders cache. */
 export function upsertOrderInCokeOrdersLocalStorage(order, patch, getOrderId) {
   if (!order || typeof getOrderId !== "function") return;
   try {
-    const stored = localStorage.getItem("coke_orders");
-    const all = stored ? JSON.parse(stored) : [];
+    const all = readOrdersCache();
     const orderId = getOrderId(order);
     const idx = all.findIndex(
       (o) =>
@@ -294,7 +292,7 @@ export function upsertOrderInCokeOrdersLocalStorage(order, patch, getOrderId) {
     const merged = { ...(idx >= 0 ? all[idx] : order), ...order, ...patch };
     if (idx >= 0) all[idx] = merged;
     else all.push(merged);
-    localStorage.setItem("coke_orders", JSON.stringify(all));
+    writeOrdersCache(all);
   } catch (e) {
     console.warn("Could not update coke_orders localStorage:", e);
   }

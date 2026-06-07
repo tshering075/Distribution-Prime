@@ -126,7 +126,7 @@ export default function OrdersDialog({
           </Typography>
           {!hideHelpText ? (
             <Typography variant="caption" sx={{ opacity: 0.92, display: "block", mt: 0.5 }}>
-              Tap a row for your calculated table. When delivered, use <strong>View</strong> / <strong>Download</strong> for
+              Tap a row for your calculated table. When dispatched, use <strong>View</strong> / <strong>Download</strong> for
               shipping documents (multiple files per order are supported).
             </Typography>
           ) : null}
@@ -170,24 +170,24 @@ export default function OrdersDialog({
         {!hideHelpText ? (
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2, fontWeight: 600 }}>
             {isHistoryView
-              ? "Delivered orders. Use View / Download for shipping invoices."
+              ? "Dispatched orders. Use View / Download for shipping invoices."
               : "In-progress orders. Cancel removes pending/sent orders from the app, browser storage, and server."}
           </Typography>
         ) : null}
         <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mb: 2, mt: hideHelpText ? 0.5 : 0 }}>
           <Chip size="small" label="Pending" color="default" variant="outlined" sx={{ fontWeight: 700 }} />
           <Chip size="small" label="Approved" color="success" variant="outlined" sx={{ fontWeight: 700 }} />
-          <Chip size="small" label="Delivered" color="primary" variant="outlined" sx={{ fontWeight: 700 }} />
+          <Chip size="small" label="Dispatched" color="primary" variant="outlined" sx={{ fontWeight: 700 }} />
         </Stack>
         {!hideHelpText && invoiceOrderCount > 0 ? (
           <Alert severity="success" sx={{ mb: 2, borderRadius: 2 }}>
-            {invoiceOrderCount} delivered order{invoiceOrderCount !== 1 ? "s have" : " has"} shipping invoice
+            {invoiceOrderCount} dispatched order{invoiceOrderCount !== 1 ? "s have" : " has"} shipping invoice
             {invoiceOrderCount !== 1 ? "s" : ""}. Use the invoice column — badge shows when there are multiple files.
           </Alert>
         ) : null}
         {!hideHelpText && deliveredAwaitingInvoice > 0 ? (
           <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-            {deliveredAwaitingInvoice} delivered order{deliveredAwaitingInvoice !== 1 ? "s" : ""} without an invoice
+            {deliveredAwaitingInvoice} dispatched order{deliveredAwaitingInvoice !== 1 ? "s" : ""} without an invoice
             loaded yet. Tap <strong>Get invoice</strong> or use Refresh above.
           </Alert>
         ) : null}
@@ -197,8 +197,8 @@ export default function OrdersDialog({
               {hideHelpText
                 ? "No orders found"
                 : isHistoryView
-                  ? "No delivered orders in history yet."
-                  : "No active orders. Delivered orders appear under History."}
+                  ? "No dispatched orders in history yet."
+                  : "No active orders. Dispatched orders appear under History."}
             </Typography>
           </Box>
         ) : (
@@ -409,7 +409,7 @@ export default function OrdersDialog({
                           if (isHistoryView) {
                             return (
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                                Delivered
+                                Dispatched
                               </Typography>
                             );
                           }

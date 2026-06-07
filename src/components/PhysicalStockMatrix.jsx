@@ -57,7 +57,7 @@ export default function PhysicalStockMatrix({
   const getSkuAccent = useCallback(
     (skuName) => {
       const s = String(skuName || "").trim().toUpperCase();
-      if (s.startsWith("KO")) return "#E40521";
+      if (s.startsWith("KO")) return "#1565c0";
       if (s.startsWith("FX")) return "#FF7A00";
       if (s.startsWith("SP")) return "#00A651";
       if (s.startsWith("CH")) return "#8B1A1A";

@@ -7,7 +7,7 @@ jest.mock("./layout/AppRouter", () => ({
   default: function MockAppRouter() {
     return (
       <div data-testid="app-shell">
-        <span>CokeSales Management System</span>
+        <span>Distribution Prime</span>
       </div>
     );
   },
@@ -16,5 +16,5 @@ jest.mock("./layout/AppRouter", () => ({
 test("App mounts without throwing", () => {
   expect(() => render(<App />)).not.toThrow();
   expect(screen.getByTestId("app-shell")).toBeInTheDocument();
-  expect(screen.getByText(/CokeSales Management System/i)).toBeInTheDocument();
+  expect(screen.getByText(/Distribution Prime/i)).toBeInTheDocument();
 });

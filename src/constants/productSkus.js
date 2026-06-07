@@ -1,7 +1,10 @@
-/** UC = (cases × ucMultiplier) / UC_DIVISOR — divisor is fixed for all products. */
+/** Default UC divisor when not set in Product & Rate Master settings. */
 export const UC_DIVISOR = 5.678;
 
-/** Built-in catalogue (display names; keys for saved rates / orders). */
+/**
+ * @deprecated Legacy reference list only — runtime catalogue lives in Product & Rate Master.
+ * Existing saved `skuRates` / `customProducts` are migrated automatically on load.
+ */
 export const DEFAULT_SKUS = [
   { name: "COKE 300 ML", category: "CSD", kgPerCase: 8.28, ucMultiplier: 7.2, rate: 480 },
   { name: "COKE 500 ML", category: "CSD", kgPerCase: 13.16, ucMultiplier: 12, rate: 625 },

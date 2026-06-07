@@ -1,4 +1,6 @@
-/** Daily physical stock: opening, primary sale, physical stock, secondary sale by SKU (FIFO lot lines). */
+import { getAllCatalogLineNames } from "./productCatalog";
+
+/** Legacy abbreviated lines (KO = Coke, etc.) — used only when workspace catalogue is empty. */
 export const PHYSICAL_STOCK_PRODUCT_LINES = [
   "KO 300ML",
   "FX 300ML",
@@ -14,6 +16,33 @@ export const PHYSICAL_STOCK_PRODUCT_LINES = [
   "KWAT 500ML",
   "KWAT 1L",
 ];
+
+const LEGACY_PHYSICAL_STOCK_SET = new Set(
+  PHYSICAL_STOCK_PRODUCT_LINES.map((s) => s.toUpperCase())
+);
+
+/** True for legacy Coke/Fanta/Sprite/Kinley abbreviated SKU rows. */
+export function isLegacyPhysicalStockSku(productSku) {
+  const u = String(productSku || "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (!u) return false;
+  if (LEGACY_PHYSICAL_STOCK_SET.has(u)) return true;
+  if (/^(KO|FX|SP|CH|KWAT|KW)\b/.test(u)) return true;
+  if (/^(KO|FX|SP|CH|KW)\s+\d/.test(u)) return true;
+  return false;
+}
+
+/** True when Rate Master supplied at least one catalogue line (any name). */
+function hasCatalogueLines(productLines) {
+  return Array.isArray(productLines) && productLines.length > 0;
+}
+
+/** Resolve grid lines from explicit array or Rate Master catalogue object. */
+export function resolvePhysicalStockLinesArg(productRatesOrLines) {
+  if (Array.isArray(productRatesOrLines)) {
+    return productRatesOrLines;
+  }
+  return resolvePhysicalStockProductLines(productRatesOrLines);
+}
 
 export function createFifoLotId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -91,8 +120,21 @@ export function getLotsFromProductRow(row) {
   return [lot];
 }
 
-export function createEmptyPhysicalStockRows() {
-  return PHYSICAL_STOCK_PRODUCT_LINES.map((productSku) => ({
+/** Active workspace SKU lines from Rate Master — never falls back to hardcoded KO/FX/SP list. */
+export function resolvePhysicalStockProductLines(productRates) {
+  const fromCatalog = getAllCatalogLineNames(productRates);
+  if (fromCatalog.length > 0) {
+    return [...fromCatalog].sort((a, b) => a.localeCompare(b));
+  }
+  return [];
+}
+
+function linesOrCatalog(productLines) {
+  return Array.isArray(productLines) ? productLines : [];
+}
+
+export function createEmptyPhysicalStockRows(productLines) {
+  return linesOrCatalog(productLines).map((productSku) => ({
     productSku,
     lots: [createEmptyFifoLot()],
   }));
@@ -184,9 +226,12 @@ function normalizeRowShape(rawRow) {
   };
 }
 
-/** Merge saved rows with current template (new SKU lines appear; matches keep values). */
-export function mergePhysicalStockRows(savedRows) {
-  const template = createEmptyPhysicalStockRows();
+/** Merge saved rows with Rate Master lines only — never resurrect legacy SKUs outside the catalogue. */
+export function mergePhysicalStockRows(savedRows, productLines) {
+  const lines = linesOrCatalog(productLines);
+  if (!hasCatalogueLines(lines)) return [];
+
+  const template = createEmptyPhysicalStockRows(lines);
   if (!Array.isArray(savedRows) || savedRows.length === 0) return template;
 
   const map = new Map();
@@ -207,11 +252,12 @@ export function mergePhysicalStockRows(savedRows) {
   });
 }
 
-export function normalizePhysicalStockPayload(raw) {
+export function normalizePhysicalStockPayload(raw, productRatesOrLines) {
+  const productLines = resolvePhysicalStockLinesArg(productRatesOrLines);
   if (!raw || typeof raw !== "object") {
     return {
       reportDate: new Date().toISOString().slice(0, 10),
-      rows: createEmptyPhysicalStockRows(),
+      rows: createEmptyPhysicalStockRows(productLines),
     };
   }
   const reportDate =
@@ -221,7 +267,7 @@ export function normalizePhysicalStockPayload(raw) {
   return {
     reportDate,
     updatedAt: raw.updatedAt || new Date().toISOString(),
-    rows: mergePhysicalStockRows(raw.rows),
+    rows: mergePhysicalStockRows(raw.rows, productLines),
   };
 }
 
@@ -310,7 +356,7 @@ export function saveLocalPhysicalStockSnapshot(distributorCode, payload) {
 }
 
 /** Load a saved report-date payload from localStorage. */
-export function getLocalPhysicalStockSnapshot(distributorCode, reportDate) {
+export function getLocalPhysicalStockSnapshot(distributorCode, reportDate, productRates) {
   const code = String(distributorCode || "").trim();
   const date = String(reportDate || "").slice(0, 10);
   if (!code || !date) return null;
@@ -318,20 +364,20 @@ export function getLocalPhysicalStockSnapshot(distributorCode, reportDate) {
     const map = JSON.parse(localStorage.getItem(snapshotStorageKey(code)) || "{}");
     const raw = map[date];
     if (!raw) return null;
-    return normalizePhysicalStockPayload(raw);
+    return normalizePhysicalStockPayload(raw, productRates);
   } catch {
     return null;
   }
 }
 
 /** All report-date payloads stored locally for this distributor. */
-export function listLocalPhysicalStockSnapshots(distributorCode) {
+export function listLocalPhysicalStockSnapshots(distributorCode, productRates) {
   const code = String(distributorCode || "").trim();
   if (!code) return [];
   try {
     const map = JSON.parse(localStorage.getItem(snapshotStorageKey(code)) || "{}");
     return Object.values(map)
-      .map((raw) => normalizePhysicalStockPayload(raw))
+      .map((raw) => normalizePhysicalStockPayload(raw, productRates))
       .filter((p) => rowsHaveCarryForwardSource(p.rows));
   } catch {
     return [];
@@ -369,13 +415,13 @@ export function rowsHaveAnyStockData(rows) {
 /**
  * Pick the most recently updated saved stock for carry-forward (not the same report date as target).
  */
-export function findLatestPhysicalStockForCarryForward(candidates, targetReportDate) {
+export function findLatestPhysicalStockForCarryForward(candidates, targetReportDate, productRates) {
   const target = String(targetReportDate || "").slice(0, 10);
   let best = null;
   let bestTs = -1;
   for (const item of candidates || []) {
     if (!item) continue;
-    const norm = normalizePhysicalStockPayload(item);
+    const norm = normalizePhysicalStockPayload(item, productRates);
     if (!rowsHaveCarryForwardSource(norm.rows)) continue;
     const rd = String(norm.reportDate || "").slice(0, 10);
     if (rd === target) continue;
@@ -420,8 +466,8 @@ export function rowsHaveCarryForwardSource(rows) {
  * Copy last-saved FIFO lines into a new report day: same MFG / batch / BBD;
  * prior physical stock → opening; primary / physical / secondary cleared (user may edit all).
  */
-export function buildRowsCarriedFromPreviousDay(previousRows) {
-  const base = mergePhysicalStockRows(previousRows);
+export function buildRowsCarriedFromPreviousDay(previousRows, productLines) {
+  const base = mergePhysicalStockRows(previousRows, productLines);
   return base.map((row) => ({
     productSku: row.productSku,
     lots: getLotsFromProductRow(row).map((lot) => {
@@ -449,9 +495,9 @@ export function rowsNeedTraceabilityFill(rows) {
 }
 
 /** Fill empty MFG / batch / BBD on current rows from a prior report (per SKU + lot index). */
-export function mergeTraceabilityFromPriorRows(currentRows, priorRows) {
-  const merged = mergePhysicalStockRows(currentRows);
-  const priorMerged = mergePhysicalStockRows(priorRows);
+export function mergeTraceabilityFromPriorRows(currentRows, priorRows, productLines) {
+  const merged = mergePhysicalStockRows(currentRows, productLines);
+  const priorMerged = mergePhysicalStockRows(priorRows, productLines);
   const priorMap = new Map();
   priorMerged.forEach((r) => {
     priorMap.set(String(r.productSku).trim().toUpperCase(), getLotsFromProductRow(r));
@@ -491,13 +537,17 @@ export async function resolvePhysicalStockRowsForReportDate({
   savedRaw,
   distributorCode,
   fetchLatestSnapshot,
+  productRates,
 }) {
+  const productLines = resolvePhysicalStockProductLines(productRates);
   const target = String(targetReportDate || "").slice(0, 10) || localIsoDate();
-  const localForTarget = getLocalPhysicalStockSnapshot(distributorCode, target);
-  const distSaved = normalizePhysicalStockPayload(savedRaw || {});
-  const saved = localForTarget ? normalizePhysicalStockPayload(localForTarget) : distSaved;
+  const localForTarget = getLocalPhysicalStockSnapshot(distributorCode, target, productRates);
+  const distSaved = normalizePhysicalStockPayload(savedRaw || {}, productRates);
+  const saved = localForTarget
+    ? normalizePhysicalStockPayload(localForTarget, productRates)
+    : distSaved;
 
-  const candidates = [...listLocalPhysicalStockSnapshots(distributorCode)];
+  const candidates = [...listLocalPhysicalStockSnapshots(distributorCode, productRates)];
   const pushCandidate = (payload) => {
     if (!payload || !rowsHaveCarryForwardSource(payload.rows)) return;
     const d = String(payload.reportDate || "").slice(0, 10);
@@ -512,14 +562,14 @@ export async function resolvePhysicalStockRowsForReportDate({
     try {
       const remote = await fetchLatestSnapshot(distributorCode, target);
       if (remote && rowsHaveCarryForwardSource(remote.rows)) {
-        pushCandidate(normalizePhysicalStockPayload(remote));
+        pushCandidate(normalizePhysicalStockPayload(remote, productRates));
       }
     } catch {
       /* fall through */
     }
   }
 
-  const prior = findLatestPhysicalStockForCarryForward(candidates, target);
+  const prior = findLatestPhysicalStockForCarryForward(candidates, target, productRates);
   const carriedFrom = prior ? String(prior.reportDate || "").slice(0, 10) || null : null;
   const isSameReportDay = String(saved.reportDate || "").slice(0, 10) === target;
 
@@ -527,30 +577,30 @@ export async function resolvePhysicalStockRowsForReportDate({
     if (prior && rowsNeedTraceabilityFill(saved.rows)) {
       if (!rowsHaveUserQuantityEntry(saved.rows) && !rowsHaveAnyStockData(saved.rows)) {
         return {
-          rows: buildRowsCarriedFromPreviousDay(prior.rows),
+          rows: buildRowsCarriedFromPreviousDay(prior.rows, productLines),
           carriedFromDate: carriedFrom,
         };
       }
       return {
-        rows: mergeTraceabilityFromPriorRows(saved.rows, prior.rows),
+        rows: mergeTraceabilityFromPriorRows(saved.rows, prior.rows, productLines),
         carriedFromDate: carriedFrom,
       };
     }
     if (rowsHaveAnyStockData(saved.rows)) {
-      return { rows: saved.rows, carriedFromDate: null };
+      return { rows: mergePhysicalStockRows(saved.rows, productLines), carriedFromDate: null };
     }
   }
 
   if (prior) {
     return {
-      rows: buildRowsCarriedFromPreviousDay(prior.rows),
+      rows: buildRowsCarriedFromPreviousDay(prior.rows, productLines),
       carriedFromDate: carriedFrom,
     };
   }
 
   if (isSameReportDay) {
-    return { rows: saved.rows, carriedFromDate: null };
+    return { rows: mergePhysicalStockRows(saved.rows, productLines), carriedFromDate: null };
   }
 
-  return { rows: createEmptyPhysicalStockRows(), carriedFromDate: null };
+  return { rows: createEmptyPhysicalStockRows(productLines), carriedFromDate: null };
 }

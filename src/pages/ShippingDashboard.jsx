@@ -1,20 +1,29 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import AppSnackbar from "../components/AppSnackbar";
 import ShippingInvoiceEditDialog from "../components/ShippingInvoiceEditDialog";
 import { useLogoutConfirmation } from "../components/LogoutConfirmDialog";
 import OrderCalculatedTableDialog from "../components/OrderCalculatedTableDialog";
 import ShippingDashboardView from "./ShippingDashboard/ShippingDashboardView";
 import {
-  getAllOrders,
+  getShippingOrders,
   subscribeToAllOrders,
   updateOrderStatus as updateOrderStatusInSupabase,
+  buildDeliveredOrderStatusExtras,
+  patchOrderFields,
   patchOrderShippingInvoice,
   clearOrderShippingInvoice,
   fetchOrderShippingInvoice,
+  getActiveSchemesForDistributor,
+  getDistributorByCode,
   getCurrentUser,
   getAdminByUid,
   supabase,
 } from "../services/supabaseService";
+import { readProductRatesFromLocalStorage } from "../utils/productRatesStorage";
+import { getDistributors } from "../utils/distributorAuth";
+import { readOrdersCache, writeOrdersCache, ordersCacheStorageKey } from "../utils/ordersLocalStorage";
+import { applyDeliveredOrderAchievement, getOrderAchievementTotals } from "../services/deliveredOrderAchievement";
 import {
   ORDER_STATUS,
   normalizeOrderStatus,
@@ -40,6 +49,16 @@ import {
   unlockShippingNotificationAudio,
 } from "../utils/shippingNotifications";
 import { useTheme, useMediaQuery } from "@mui/material";
+import {
+  buildTransportPatch,
+  getOrderTransport,
+  isOrderTransportComplete,
+  transportValidationMessage,
+} from "../constants/shippingTransport";
+import { generateShippingInvoiceFile } from "../utils/shippingOrderInvoicePrint";
+import { useBrand } from "../hooks/useBrand";
+import { getActiveOrganizationId, getWorkspaceLoginPath } from "../services/tenantScope";
+import { loadOrganizationContext } from "../services/organizationService";
 
 const isSupabaseConfigured = supabase !== null;
 
@@ -90,7 +109,7 @@ function orderMatchesSearch(order, query) {
 
 function persistOrdersToLocalStorage(orders) {
   try {
-    localStorage.setItem("coke_orders", JSON.stringify(orders));
+    writeOrdersCache(orders);
   } catch (e) {
     console.warn("Could not persist orders to localStorage:", e);
   }
@@ -101,7 +120,9 @@ function mergeOrderPatch(orders, orderId, patch) {
 }
 
 function ShippingDashboard({ onLogout }) {
+  const navigate = useNavigate();
   const { requestLogout, logoutConfirmDialog } = useLogoutConfirmation(onLogout);
+  const brand = useBrand();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [orders, setOrders] = useState([]);
@@ -116,6 +137,11 @@ function ShippingDashboard({ onLogout }) {
   const invoiceSaveLockRef = useRef(0);
   const [previewOrder, setPreviewOrder] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSchemes, setPreviewSchemes] = useState([]);
+  const [previewDistributor, setPreviewDistributor] = useState(null);
+  const [productRates, setProductRates] = useState(null);
+  const [savingPreview, setSavingPreview] = useState(false);
+  const [previewDispatchPhase, setPreviewDispatchPhase] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
@@ -131,9 +157,12 @@ function ShippingDashboard({ onLogout }) {
   const [invoiceEditOrder, setInvoiceEditOrder] = useState(null);
   const [deliverPendingFiles, setDeliverPendingFiles] = useState([]);
   const deliverFileInputRef = useRef(null);
+  const transportSaveTimerRef = useRef(null);
+  const [transportError, setTransportError] = useState("");
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
   const [currentUser, setCurrentUser] = useState({ name: "Shipping", email: "", role: "shipping" });
   const shippingActorRef = useRef({ name: "Shipping", email: "", role: "shipping" });
+  const [workspaceReady, setWorkspaceReady] = useState(() => Boolean(getActiveOrganizationId()));
   const [toast, setToast] = useState({
     open: false,
     message: "",
@@ -162,9 +191,18 @@ function ShippingDashboard({ onLogout }) {
         const user = await getCurrentUser();
         if (user && !cancelled) {
           email = user.email || storedEmail || email;
-          const admin = await getAdminByUid(user.id);
+          const preferredOrg = getActiveOrganizationId();
+          const admin = await getAdminByUid(user.id, preferredOrg || undefined);
           name = admin?.name || user.user_metadata?.name || email.split("@")[0] || "Shipping";
           role = admin?.role || role;
+          if (admin?.organization_id) {
+            await loadOrganizationContext(admin.organization_id);
+            if (!cancelled) setWorkspaceReady(true);
+          } else if (!getActiveOrganizationId() && !cancelled) {
+            navigate(getWorkspaceLoginPath(), { replace: true });
+          }
+        } else if (!cancelled && getActiveOrganizationId()) {
+          setWorkspaceReady(true);
         }
       } catch (e) {
         console.warn("Could not load shipping user profile:", e);
@@ -179,7 +217,75 @@ function ShippingDashboard({ onLogout }) {
     return () => {
       cancelled = true;
     };
+  }, [navigate]);
+
+  useEffect(() => {
+    setProductRates(readProductRatesFromLocalStorage());
   }, []);
+
+  useEffect(() => {
+    if (!previewOpen || !previewOrder?.distributorCode) {
+      setPreviewSchemes([]);
+      return;
+    }
+    let cancelled = false;
+    const code = previewOrder.distributorCode;
+    (async () => {
+      try {
+        if (isSupabaseConfigured) {
+          const schemes = await getActiveSchemesForDistributor(code);
+          if (!cancelled) setPreviewSchemes(schemes || []);
+          return;
+        }
+        const stored = localStorage.getItem("schemes");
+        if (!stored) {
+          if (!cancelled) setPreviewSchemes([]);
+          return;
+        }
+        const allSchemes = JSON.parse(stored);
+        const now = new Date();
+        const active = (Array.isArray(allSchemes) ? allSchemes : []).filter((scheme) => {
+          const startDate = new Date(scheme.startDate);
+          const endDate = new Date(scheme.endDate);
+          return startDate <= now && endDate >= now && scheme.distributors?.includes(code);
+        });
+        if (!cancelled) setPreviewSchemes(active);
+      } catch (e) {
+        console.warn("Could not load schemes for order preview:", e);
+        if (!cancelled) setPreviewSchemes([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [previewOpen, previewOrder?.distributorCode]);
+
+  useEffect(() => {
+    if (!previewOpen || !previewOrder?.distributorCode) {
+      setPreviewDistributor(null);
+      return;
+    }
+    let cancelled = false;
+    const code = String(previewOrder.distributorCode).trim();
+    (async () => {
+      try {
+        let dist = null;
+        if (isSupabaseConfigured) {
+          dist = await getDistributorByCode(code);
+        }
+        if (!dist) {
+          dist = getDistributors().find((d) => String(d?.code ?? "").trim() === code) || null;
+        }
+        if (!cancelled) setPreviewDistributor(dist || null);
+      } catch (e) {
+        console.warn("Could not load distributor for invoice print:", e);
+        if (!cancelled) setPreviewDistributor(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [previewOpen, previewOrder?.distributorCode]);
 
   const logShippingActivity = useCallback((type, description, metadata = {}) => {
     const actor = shippingActorRef.current;
@@ -313,7 +419,7 @@ function ShippingDashboard({ onLogout }) {
       if (now === undefined || was === now) return;
 
       if (now === ORDER_STATUS.APPROVED && was !== ORDER_STATUS.APPROVED) {
-        const msg = `Order ${id} approved — upload invoice and deliver when ready.`;
+        const msg = `Order ${id} approved — upload invoice and dispatch when ready.`;
         pushNotification(msg, "success", "Ready to ship", "approved");
         showToast(msg, "success", "Order approved", 6000);
         void postShippingBrowserNotification("Order approved", msg, "coke-shipping-approved");
@@ -325,13 +431,16 @@ function ShippingDashboard({ onLogout }) {
 
   const loadOrders = useCallback(async () => {
     if (invoiceSaveLockRef.current > 0) return;
+    if (isSupabaseConfigured && !getActiveOrganizationId()) {
+      setLoading(false);
+      return;
+    }
     try {
       if (isSupabaseConfigured) {
-        const remote = await getAllOrders();
+        const remote = await getShippingOrders();
         setOrders((prev) => mergeOrdersPreservingInvoices(prev, remote || [], getOrderId));
       } else {
-        const stored = localStorage.getItem("coke_orders");
-        setOrders(stored ? JSON.parse(stored) : []);
+        setOrders(readOrdersCache());
       }
       setLastRefreshedAt(new Date());
     } catch (e) {
@@ -343,22 +452,29 @@ function ShippingDashboard({ onLogout }) {
   }, [showToast]);
 
   useEffect(() => {
+    if (!workspaceReady && isSupabaseConfigured) return;
     loadOrders();
-  }, [loadOrders]);
+  }, [loadOrders, workspaceReady]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
       const onStorage = (e) => {
-        if (e.key === "coke_orders") loadOrders();
+        if (e.key === ordersCacheStorageKey()) loadOrders();
       };
       window.addEventListener("storage", onStorage);
       return () => window.removeEventListener("storage", onStorage);
     }
-    const unsub = subscribeToAllOrders((next) => {
-      if (invoiceSaveLockRef.current > 0) return;
-      setOrders((prev) => mergeOrdersPreservingInvoices(prev, next || [], getOrderId));
-      setLastRefreshedAt(new Date());
-    });
+    if (!workspaceReady) return undefined;
+
+    const orgId = getActiveOrganizationId();
+    const unsub = subscribeToAllOrders(
+      (next) => {
+        if (invoiceSaveLockRef.current > 0) return;
+        setOrders((prev) => mergeOrdersPreservingInvoices(prev, next || [], getOrderId));
+        setLastRefreshedAt(new Date());
+      },
+      { organizationId: orgId, fetchOrders: getShippingOrders }
+    );
     const id = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
       loadOrders();
@@ -367,7 +483,7 @@ function ShippingDashboard({ onLogout }) {
       unsub();
       clearInterval(id);
     };
-  }, [loadOrders]);
+  }, [loadOrders, workspaceReady]);
 
   const saveInvoicesOnOrder = async (order, newInvoices, { merge = true } = {}) => {
     invoiceSaveLockRef.current += 1;
@@ -449,7 +565,7 @@ function ShippingDashboard({ onLogout }) {
         );
         pushNotification(`Invoice files removed for ${orderId}`, "info", "Invoice cleared");
         showToast(
-          "Invoice files removed. Upload the correct files before delivering.",
+          "Invoice files removed. Upload the correct files before dispatching.",
           "success",
           "Invoice cleared"
         );
@@ -496,8 +612,8 @@ function ShippingDashboard({ onLogout }) {
         );
         showToast(
           count === 1
-            ? "Invoice saved. Click Deliver when the shipment goes out."
-            : `${count} invoice files saved. Click Deliver when ready.`,
+            ? "Invoice saved. Click Dispatch when the shipment goes out."
+            : `${count} invoice files saved. Click Dispatch when ready.`,
           "success",
           "Invoices uploaded"
         );
@@ -567,7 +683,7 @@ function ShippingDashboard({ onLogout }) {
     showToast(
       fileList.length === 1
         ? `Added ${fileList[0].name}`
-        : `Added ${fileList.length} files — tap "Save & deliver" when ready`,
+        : `Added ${fileList.length} files — tap "Save & dispatch" when ready`,
       "success",
       "Invoice files"
     );
@@ -592,23 +708,29 @@ function ShippingDashboard({ onLogout }) {
     const orderId = getOrderId(order);
     const current = getOrderStatus(order);
     if (current !== ORDER_STATUS.APPROVED) {
-      showToast("Only approved orders can be marked delivered", "warning", "Shipping");
+      showToast("Only approved orders can be marked dispatched", "warning", "Shipping");
       return;
     }
     if (!orderHasShippingInvoice(order)) {
-      showToast("Upload an invoice before marking delivered", "warning", "Shipping");
+      showToast("Upload an invoice before marking dispatched", "warning", "Shipping");
+      return;
+    }
+    if (!isOrderTransportComplete(order)) {
+      showToast(transportValidationMessage(order), "warning", "Transport required");
       return;
     }
     if (!canTransitionOrderStatus(current, ORDER_STATUS.DELIVERED)) {
-      showToast("Cannot mark this order delivered", "warning", "Shipping");
+      showToast("Cannot mark this order dispatched", "warning", "Shipping");
       return;
     }
 
     setDeliveringId(orderId);
     const deliveredAt = new Date().toISOString();
+    const transportPatch = buildTransportPatch(getOrderTransport(order));
     const history = appendOrderStatusHistory(order, ORDER_STATUS.DELIVERED, {
       source: "shipping_dashboard",
       actor: "shipping",
+      ...transportPatch,
     });
     const patch = {
       status: ORDER_STATUS.DELIVERED,
@@ -618,6 +740,7 @@ function ShippingDashboard({ onLogout }) {
       dispatchedAt: deliveredAt,
       dispatched_at: deliveredAt,
       statusHistory: history,
+      ...transportPatch,
     };
 
     try {
@@ -631,31 +754,65 @@ function ShippingDashboard({ onLogout }) {
       if (isSupabaseConfigured) {
         if (!order.id && !identityFallback) {
           throw new Error(
-            "Cannot mark delivered: order is not linked to the database. Refresh the page and try again."
+            "Cannot mark dispatched: order is not linked to the database. Refresh the page and try again."
           );
         }
+        const achievementTotals = getOrderAchievementTotals(order);
+        const orderLinePatch = buildDeliveredOrderStatusExtras(order, {
+          deliveredAt,
+          statusHistory: history,
+          achievementTotals,
+        });
         await updateOrderStatusInSupabase(
           order.id ?? null,
           ORDER_STATUS.DELIVERED,
-          {
-            status_updated_at: deliveredAt,
-            dispatched_at: deliveredAt,
-            delivered_at: deliveredAt,
-            status_history: history,
-          },
+          orderLinePatch,
           identityFallback
         );
       } else {
-        const stored = localStorage.getItem("coke_orders");
-        if (stored) {
-          persistOrdersToLocalStorage(mergeOrderPatch(JSON.parse(stored), orderId, patch));
+        const cached = readOrdersCache();
+        if (cached.length > 0) {
+          persistOrdersToLocalStorage(mergeOrderPatch(cached, orderId, patch));
         }
       }
 
-      upsertOrderInCokeOrdersLocalStorage(order, patch, getOrderId);
+      const deliveredOrder = { ...order, ...patch };
+      upsertOrderInCokeOrdersLocalStorage(deliveredOrder, patch, getOrderId);
+
+      try {
+        const achievementResult = await applyDeliveredOrderAchievement(
+          deliveredOrder,
+          identityFallback
+        );
+        if (achievementResult.applied) {
+          const achievementPatch = {
+            achievementApplied: true,
+            achievement_applied: true,
+          };
+          setOrders((prev) => mergeOrderPatch(prev, orderId, achievementPatch));
+          upsertOrderInCokeOrdersLocalStorage(deliveredOrder, achievementPatch, getOrderId);
+        } else if (achievementResult.skipped && achievementResult.reason === "zero_totals") {
+          showToast(
+            "Order dispatched, but it has no CSD/Water quantities to record as sales. Add line items on the order.",
+            "warning",
+            "Sales data",
+            8000
+          );
+        }
+      } catch (achievementError) {
+        console.error("Delivered but sales/achievement save failed:", achievementError);
+        showToast(
+          achievementError?.message ||
+            "Order dispatched, but sales data could not be saved to Supabase. Contact admin.",
+          "warning",
+          "Sales data",
+          8000
+        );
+      }
+
       logShippingActivity(
         ACTIVITY_TYPES.ORDER_DELIVERED,
-        `Order delivered: ${orderId} (${order.distributorName || order.distributorCode || ""})`,
+        `Order dispatched: ${orderId} (${order.distributorName || order.distributorCode || ""})`,
         {
           orderId,
           distributorCode: order.distributorCode,
@@ -664,19 +821,19 @@ function ShippingDashboard({ onLogout }) {
         }
       );
 
-      const deliveredMsg = `Order ${orderId} marked delivered.`;
-      pushNotification(deliveredMsg, "success", "Delivered", "delivered");
+      const deliveredMsg = `Order ${orderId} marked dispatched.`;
+      pushNotification(deliveredMsg, "success", "Dispatched", "delivered");
       showToast(
-        `Order ${orderId} is now delivered. Admin and distributor dashboards will update automatically.`,
+        `Order ${orderId} dispatched. Sales recorded in Supabase; admin and distributor dashboards will update.`,
         "success",
-        "Delivered",
+        "Dispatched",
         6000
       );
-      void postShippingBrowserNotification("Order delivered", deliveredMsg, "coke-shipping-delivered");
+      void postShippingBrowserNotification("Order dispatched", deliveredMsg, "coke-shipping-delivered");
       setStatusTab("delivered");
     } catch (e) {
       console.error(e);
-      showToast(e.message || "Could not mark delivered", "error", "Shipping");
+      showToast(e.message || "Could not mark dispatched", "error", "Shipping");
       await loadOrders();
     } finally {
       setDeliveringId(null);
@@ -781,19 +938,304 @@ function ShippingDashboard({ onLogout }) {
     [filteredOrders]
   );
 
+  const previewEditable = useMemo(() => {
+    if (!previewOrder) return false;
+    return getOrderStatus(previewOrder) !== ORDER_STATUS.DELIVERED;
+  }, [previewOrder]);
+
+  const previewNeedsTransport = useMemo(() => {
+    if (!previewOrder) return false;
+    return getOrderStatus(previewOrder) === ORDER_STATUS.APPROVED;
+  }, [previewOrder]);
+
+  const persistOrderTransport = useCallback(
+    async (order, transport) => {
+      const transportPatch = buildTransportPatch(transport ?? getOrderTransport(order));
+      const orderKey = getOrderId(order);
+      const merged = { ...order, ...transportPatch };
+
+      if (transportSaveTimerRef.current) {
+        clearTimeout(transportSaveTimerRef.current);
+        transportSaveTimerRef.current = null;
+      }
+
+      setPreviewOrder((prev) =>
+        prev && getOrderId(prev) === orderKey ? { ...prev, ...transportPatch } : prev
+      );
+      setOrders((prev) => {
+        const next = mergeOrderPatch(prev, orderKey, transportPatch);
+        ordersRef.current = next;
+        if (!isSupabaseConfigured) persistOrdersToLocalStorage(next);
+        return next;
+      });
+      setDeliverConfirmOrder((prev) =>
+        prev && getOrderId(prev) === orderKey ? { ...prev, ...transportPatch } : prev
+      );
+
+      if (isSupabaseConfigured) {
+        await patchOrderFields(
+          order.id ?? null,
+          {
+            transporter_vehicle: transportPatch.transporterVehicle,
+            vehicle_type: transportPatch.vehicleType,
+            vehicle_no: transportPatch.vehicleNo,
+            transportation_charges: transportPatch.transportationCharges,
+          },
+          orderIdentityFallback(order)
+        );
+      } else {
+        upsertOrderInCokeOrdersLocalStorage(merged, transportPatch, getOrderId);
+      }
+
+      return merged;
+    },
+    [orderIdentityFallback]
+  );
+
+  const handlePreviewTransportChange = useCallback(
+    (nextTransport) => {
+      if (!previewOrder) return;
+      const patch = buildTransportPatch(nextTransport);
+      const orderKey = getOrderId(previewOrder);
+      setTransportError("");
+      setPreviewOrder((prev) => (prev ? { ...prev, ...patch } : null));
+      setOrders((prev) => {
+        const next = mergeOrderPatch(prev, orderKey, patch);
+        ordersRef.current = next;
+        if (!isSupabaseConfigured) persistOrdersToLocalStorage(next);
+        return next;
+      });
+      setDeliverConfirmOrder((prev) =>
+        prev && getOrderId(prev) === orderKey ? { ...prev, ...patch } : prev
+      );
+
+      if (transportSaveTimerRef.current) clearTimeout(transportSaveTimerRef.current);
+      transportSaveTimerRef.current = setTimeout(async () => {
+        const order =
+          ordersRef.current.find((o) => getOrderId(o) === orderKey) || { ...previewOrder, ...patch };
+        try {
+          await persistOrderTransport(order, nextTransport);
+        } catch (e) {
+          console.warn("Could not save transport details:", e);
+        }
+      }, 600);
+    },
+    [previewOrder, persistOrderTransport]
+  );
+
+  const handleSavePreviewAdjustments = useCallback(
+    async (linePatch) => {
+      if (!previewOrder) return;
+      const orderKey = getOrderId(previewOrder);
+      const patch = {
+        data: linePatch.data,
+        csdUC: linePatch.csdUC,
+        waterUC: linePatch.waterUC,
+        csdPC: linePatch.csdPC,
+        waterPC: linePatch.waterPC,
+        totalUC: linePatch.totalUC,
+        totaluc: linePatch.totalUC,
+      };
+      setSavingPreview(true);
+      try {
+        const merged = { ...previewOrder, ...patch };
+        setOrders((prev) => {
+          const next = mergeOrderPatch(prev, orderKey, patch);
+          ordersRef.current = next;
+          if (!isSupabaseConfigured) persistOrdersToLocalStorage(next);
+          return next;
+        });
+        setPreviewOrder(merged);
+
+        if (isSupabaseConfigured) {
+          const identityFallback = orderIdentityFallback(previewOrder);
+          if (!previewOrder.id && !identityFallback) {
+            throw new Error(
+              "Cannot save: order is not linked to the database. Refresh and try again."
+            );
+          }
+          const updated = await patchOrderFields(
+            previewOrder.id ?? null,
+            patch,
+            identityFallback
+          );
+          if (updated) {
+            setPreviewOrder((p) => {
+              if (!p) return p;
+              const keepTransport = buildTransportPatch(getOrderTransport(p));
+              return { ...p, ...updated, ...patch, ...keepTransport };
+            });
+            setOrders((prev) => {
+              const next = mergeOrderPatch(prev, orderKey, { ...updated, ...patch });
+              const idx = next.findIndex((o) => getOrderId(o) === orderKey);
+              if (idx >= 0) {
+                const keepTransport = buildTransportPatch(getOrderTransport(next[idx]));
+                next[idx] = { ...next[idx], ...keepTransport };
+              }
+              ordersRef.current = next;
+              return next;
+            });
+          }
+        } else {
+          upsertOrderInCokeOrdersLocalStorage(previewOrder, patch, getOrderId);
+        }
+
+        showToast("Order adjustments saved.", "success", "Saved");
+      } catch (e) {
+        console.error(e);
+        showToast(e.message || "Could not save order adjustments", "error", "Shipping");
+        throw e;
+      } finally {
+        setSavingPreview(false);
+      }
+    },
+    [previewOrder, orderIdentityFallback, showToast]
+  );
+
+  const handleSaveAndDispatchFlow = useCallback(
+    async ({ payload, transport, headerDate, orderNo, gstRate }) => {
+      if (!previewOrder) return;
+      const orderKey = getOrderId(previewOrder);
+      let merged =
+        ordersRef.current.find((o) => getOrderId(o) === orderKey) || previewOrder;
+      merged = await persistOrderTransport(merged, transport);
+      merged = {
+        ...merged,
+        data: payload.data,
+        csdUC: payload.csdUC,
+        waterUC: payload.waterUC,
+        csdPC: payload.csdPC,
+        waterPC: payload.waterPC,
+        totalUC: payload.totalUC,
+        totaluc: payload.totalUC,
+      };
+
+      setSavingPreview(true);
+      try {
+        const invoiceFile = await generateShippingInvoiceFile({
+          order: merged,
+          distributor: previewDistributor,
+          distributorName:
+            merged.distributorName || merged.distributorCode || "Distributor",
+          companyName: brand.companyName,
+          organizationAddress: brand.address,
+          organizationPostNo: brand.postNo,
+          organizationGstNo: brand.gstNo,
+          transport,
+          lines: payload.data,
+          headerDate,
+          orderNo,
+          gstRate,
+        });
+        const withInvoice = await saveInvoicesOnOrder(merged, [invoiceFile], { merge: true });
+        const readyToDispatch = {
+          ...merged,
+          ...withInvoice,
+          ...buildTransportPatch(getOrderTransport(merged)),
+        };
+        setPreviewOrder(readyToDispatch);
+        setOrders((prev) => {
+          const next = mergeOrderPatch(prev, orderKey, readyToDispatch);
+          ordersRef.current = next;
+          if (!isSupabaseConfigured) persistOrdersToLocalStorage(next);
+          return next;
+        });
+        upsertOrderInCokeOrdersLocalStorage(readyToDispatch, readyToDispatch, getOrderId);
+        setPreviewDispatchPhase(true);
+        showToast(
+          "Order saved and invoice uploaded. Review and mark dispatched.",
+          "success",
+          "Ready to dispatch",
+          6000
+        );
+      } catch (e) {
+        console.error(e);
+        showToast(
+          e.message || "Could not generate or upload the invoice",
+          "error",
+          "Dispatch"
+        );
+        throw e;
+      } finally {
+        setSavingPreview(false);
+      }
+    },
+    [previewOrder, previewDistributor, showToast, persistOrderTransport]
+  );
+
+  const handleMarkDispatchedFromPreview = useCallback(
+    async ({ transport } = {}) => {
+    if (!previewOrder) return;
+    const orderKey = getOrderId(previewOrder);
+    let order =
+      ordersRef.current.find((o) => getOrderId(o) === orderKey) || previewOrder;
+    if (previewOrder && getOrderId(previewOrder) === orderKey) {
+      order = { ...previewOrder, ...order };
+    }
+    try {
+      order = await persistOrderTransport(
+        order,
+        transport ?? getOrderTransport(previewOrder)
+      );
+    } catch (e) {
+      showToast(
+        e.message || "Could not save transport details before dispatch",
+        "error",
+        "Transport"
+      );
+      return;
+    }
+
+    if (!orderHasShippingInvoice(order)) {
+      showToast("Upload an invoice before marking dispatched", "warning", "Dispatch");
+      return;
+    }
+    if (!isOrderTransportComplete(order)) {
+      const msg = transportValidationMessage(order);
+      setTransportError(msg);
+      showToast(msg, "warning", "Transport required");
+      return;
+    }
+    setTransportError("");
+
+    try {
+      await handleDeliver(order);
+      setPreviewDispatchPhase(false);
+      setPreviewOpen(false);
+      setPreviewOrder(null);
+      setPreviewSchemes([]);
+      setPreviewDistributor(null);
+    } catch (e) {
+      showToast(e.message || "Could not mark order dispatched", "error", "Shipping");
+    }
+  },
+    [previewOrder, showToast, persistOrderTransport]
+  );
+
   const handleConfirmDeliver = async () => {
     let order = deliverConfirmOrder
       ? resolveOrderByKey(getOrderId(deliverConfirmOrder)) || deliverConfirmOrder
       : null;
     if (!order) return;
     const orderId = getOrderId(order);
+    if (previewOpen && previewOrder && getOrderId(previewOrder) === orderId) {
+      order = { ...order, ...buildTransportPatch(getOrderTransport(previewOrder)) };
+    }
     const hasExisting = orderHasShippingInvoice(order);
     const hasPending = deliverPendingFiles.length > 0;
 
     if (!hasExisting && !hasPending) {
-      showToast("Select at least one invoice file (PNG, JPG, or PDF)", "warning", "Delivery");
+      showToast("Select at least one invoice file (PNG, JPG, or PDF)", "warning", "Dispatch");
       return;
     }
+
+    if (!isOrderTransportComplete(order)) {
+      const msg = transportValidationMessage(order);
+      setTransportError(msg);
+      showToast(msg, "warning", "Transport required");
+      return;
+    }
+    setTransportError("");
 
     try {
       if (hasPending) {
@@ -815,7 +1257,7 @@ function ShippingDashboard({ onLogout }) {
           /* fall through */
         }
       }
-      showToast(e.message || "Could not complete delivery", "error", "Shipping");
+      showToast(e.message || "Could not complete dispatch", "error", "Shipping");
     } finally {
       setUploadingId(null);
     }
@@ -824,6 +1266,12 @@ function ShippingDashboard({ onLogout }) {
   useEffect(() => {
     if (!deliverConfirmOrder) setDeliverPendingFiles([]);
   }, [deliverConfirmOrder]);
+
+  useEffect(() => {
+    return () => {
+      if (transportSaveTimerRef.current) clearTimeout(transportSaveTimerRef.current);
+    };
+  }, []);
 
   return (
     <>
@@ -904,7 +1352,9 @@ function ShippingDashboard({ onLogout }) {
         }}
         onRequestDeliver={setDeliverConfirmOrder}
         onRowClick={(order) => {
-          setPreviewOrder(order);
+          const fresh = resolveOrderByKey(getOrderId(order)) || order;
+          setPreviewOrder(fresh);
+          setPreviewDispatchPhase(false);
           setPreviewOpen(true);
         }}
         getOrderId={getOrderId}
@@ -922,14 +1372,47 @@ function ShippingDashboard({ onLogout }) {
       <OrderCalculatedTableDialog
         open={previewOpen}
         onClose={() => {
+          if (savingPreview || deliveringId != null) return;
           setPreviewOpen(false);
+          setPreviewDispatchPhase(false);
           setPreviewOrder(null);
+          setPreviewSchemes([]);
+          setPreviewDistributor(null);
+          setTransportError("");
         }}
         order={previewOrder}
         distributorName={
           previewOrder?.distributorName || previewOrder?.distributorCode || "Distributor"
         }
         getOrderStatus={getOrderStatus}
+        fullScreen
+        condensed
+        editable={previewEditable && !previewDispatchPhase}
+        productRates={productRates}
+        schemes={previewSchemes}
+        onSave={previewEditable && !previewDispatchPhase ? handleSavePreviewAdjustments : undefined}
+        saving={savingPreview}
+        saveAndDispatch={previewEditable && !previewDispatchPhase}
+        onSaveAndDispatch={previewEditable && !previewDispatchPhase ? handleSaveAndDispatchFlow : undefined}
+        dispatchPhase={previewDispatchPhase}
+        onMarkDispatched={
+          previewDispatchPhase ? handleMarkDispatchedFromPreview : undefined
+        }
+        markingDispatched={
+          previewOrder != null && deliveringId === getOrderId(previewOrder)
+        }
+        distributorDetails={previewDistributor}
+        showTransportFields={
+          previewNeedsTransport ||
+          (previewOrder && getOrderStatus(previewOrder) === ORDER_STATUS.DELIVERED)
+        }
+        transport={previewOrder ? getOrderTransport(previewOrder) : undefined}
+        onTransportChange={
+          previewNeedsTransport && !previewDispatchPhase
+            ? handlePreviewTransportChange
+            : undefined
+        }
+        transportError={transportError}
       />
 
       <ShippingInvoiceEditDialog

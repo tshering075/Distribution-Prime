@@ -24,7 +24,7 @@ const STEPS = [
   {
     icon: LocalShippingIcon,
     title: "Shipping invoices",
-    body: "When an order is delivered, open Orders and use View or Download in the invoice column (multiple files supported).",
+    body: "When an order is dispatched, open Orders and use View or Download in the invoice column (multiple files supported).",
   },
 ];
 

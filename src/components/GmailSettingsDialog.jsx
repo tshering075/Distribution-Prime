@@ -105,7 +105,7 @@ function GmailSettingsDialog({ open, onClose }) {
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle
         sx={{
-          bgcolor: "#d61916",
+          bgcolor: "#1565c0",
           color: "white",
           py: 2,
           px: 3,
@@ -145,7 +145,7 @@ function GmailSettingsDialog({ open, onClose }) {
 
         <Box sx={{ p: 3 }}>
           {/* Info Card */}
-          <Card sx={{ mb: 3, boxShadow: 2, borderLeft: "4px solid #d61916" }}>
+          <Card sx={{ mb: 3, boxShadow: 2, borderLeft: "4px solid #1565c0" }}>
             <CardContent>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
                 <SettingsIcon color="primary" />
@@ -282,7 +282,7 @@ function GmailSettingsDialog({ open, onClose }) {
           startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <CheckCircleIcon />}
           disabled={saving || loading || !clientId.trim() || !apiKey.trim()}
           sx={{
-            bgcolor: "#d61916",
+            bgcolor: "#1565c0",
             "&:hover": {
               bgcolor: "#b01512",
             },

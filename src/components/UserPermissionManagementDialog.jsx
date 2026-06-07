@@ -48,7 +48,15 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import ClearIcon from "@mui/icons-material/Clear";
 import GroupOutlinedIcon from "@mui/icons-material/GroupOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
-import { createAdminAccount, deleteUserDocument, getCurrentUser, getAdminByUid } from "../services/supabaseService";
+import {
+  createAdminAccount,
+  deleteUserDocument,
+  getCurrentUser,
+  getAdminByUid,
+  getAdminByEmailInActiveOrg,
+  getAllAdmins,
+  updateAdminRole,
+} from "../services/supabaseService";
 import { supabase } from "../supabase";
 import { logActivity, ACTIVITY_TYPES } from "../services/activityService";
 import { ROLES } from "../utils/permissions";
@@ -190,16 +198,10 @@ function UserPermissionManagementDialog({ open, onClose }) {
 
         // Fallback: some environments may store admin rows keyed by email only.
         if (!adminDoc && currentUser.email) {
-          const { data: emailMatch, error: emailLookupError } = await supabase
-            .from("admins")
-            .select("*")
-            .eq("email", currentUser.email)
-            .limit(1);
-
-          if (emailLookupError) {
+          try {
+            adminDoc = await getAdminByEmailInActiveOrg(currentUser.email);
+          } catch (emailLookupError) {
             console.warn("Admin email fallback lookup failed:", emailLookupError);
-          } else if (emailMatch && emailMatch.length > 0) {
-            adminDoc = emailMatch[0];
           }
         }
 
@@ -369,24 +371,15 @@ function UserPermissionManagementDialog({ open, onClose }) {
     setError("");
     try {
       console.log("🔄 Loading users from Supabase database...");
+
+      const adminsData = await getAllAdmins();
       
-      // Load users from Supabase (admins table)
-      const { data: adminsData, error: adminsError } = await supabase
-        .from("admins")
-        .select("*")
-        .order("created_at", { ascending: false });
-      
-      // Check if component unmounted during async operation
+      console.log("✅ Loaded users from Supabase");
+
       if (!isMounted) {
         return;
       }
-      
-      if (adminsError) {
-        throw adminsError;
-      }
-      
-      console.log("✅ Loaded users from Supabase");
-      
+
       const users = [];
       const userUids = new Set();
       const userEmails = new Set(); // Track emails to prevent duplicates
@@ -629,17 +622,8 @@ function UserPermissionManagementDialog({ open, onClose }) {
 
     try {
       const userToUpdate = users.find(u => (u.id || u.uid) === userId);
-      
-      const { error } = await supabase
-        .from("admins")
-        .update({
-          role: newRole,
-          permissions: ROLES[newRole].permissions,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", userId);
-      
-      if (error) throw error;
+
+      await updateAdminRole(userId, newRole, ROLES[newRole].permissions);
       
       const currentUser = await getCurrentUser();
       await logActivity(
@@ -960,7 +944,7 @@ function UserPermissionManagementDialog({ open, onClose }) {
               <RolePickerCards role={role} onRoleChange={setRole} />
               {role === "shipping" ? (
                 <Alert severity="info" icon={<LocalShippingIcon />} sx={{ mt: 2, borderRadius: 2 }}>
-                  Opens the <strong>Shipping</strong> dashboard only (invoices and delivery). Email confirmation may
+                  Opens the <strong>Shipping</strong> dashboard only (invoices and dispatch). Email confirmation may
                   be required in Supabase Auth.
                 </Alert>
               ) : null}

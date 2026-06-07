@@ -25,44 +25,30 @@ import {
   CircularProgress,
   Container,
   Stack,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   InputAdornment,
 } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
+import { brandHeroGradient } from "../theme/contrastSurfaces";
 import CloseIcon from "@mui/icons-material/Close";
 import DownloadIcon from "@mui/icons-material/Download";
-import UploadFileIcon from "@mui/icons-material/UploadFile";
-import DeleteIcon from "@mui/icons-material/Delete";
 import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
+import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
 import PeopleOutlineIcon from "@mui/icons-material/PeopleOutline";
 import TableRowsOutlinedIcon from "@mui/icons-material/TableRowsOutlined";
 import FilterListIcon from "@mui/icons-material/FilterList";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import TableChartIcon from "@mui/icons-material/TableChart";
-import { parseExcelFile } from "../utils/excelUtils";
 import { parseFirestoreDate } from "../utils/dateUtils";
 import { logger } from "../utils/logger";
-import { DEFAULT_SKUS } from "../constants/productSkus";
+import { ensureProductCatalog, getReportSkuSeeds } from "../utils/productCatalog";
+import { readProductRatesFromLocalStorage } from "../utils/productRatesStorage";
+import { getActiveOrganizationId } from "../services/tenantScope";
 import AppSnackbar from "./AppSnackbar";
 
 /**
- * ReportsDialog - Rebuilt for sales data reporting
- * 
- * Features:
- * 1. Upload sales data (Excel format, headers at row 4)
- * 2. Date range filtering
- * 3. Distributor Performance Report (CSD/Water PC/UC per distributor)
- * 4. CSD & Water SKU-wise reports (highest selling SKUs for forecasting)
- * 
- * Props:
- * - open, onClose
- * - distributors: array of all distributors
- * - salesData: array of sales data from Firebase
+ * Reports from sales_data rows created when shipping dispatches orders (order_delivery).
  */
-export default function ReportsDialog({ open, onClose, distributors = [], salesData = [], onSalesDataUploaded, canWrite = true }) {
+export default function ReportsDialog({ open, onClose, distributors = [], salesData = [], productRates = null }) {
   // Report type tabs
   const [reportType, setReportType] = useState("performance"); // "performance" or "sku"
   
@@ -75,51 +61,6 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
   const [selectedRegion, setSelectedRegion] = useState("All");
   const [performanceSearch, setPerformanceSearch] = useState("");
   
-  // Upload state
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState({ total: 0, processed: 0, saved: 0 });
-  const hiddenFileRef = useRef(null);
-  
-  // Local sales data - ONLY from uploads in this dialog (persisted in localStorage)
-  const [localSalesData, setLocalSalesData] = useState(() => {
-    // Load from localStorage on initialization
-    try {
-      const stored = localStorage.getItem("reports_sales_data");
-      if (!stored) return [];
-      const data = JSON.parse(stored);
-      // Convert date strings back to Date objects
-      return data.map(record => ({
-        ...record,
-        invoiceDate: record.invoiceDate ? new Date(record.invoiceDate) : new Date()
-      }));
-    } catch (e) {
-      console.error("Error loading sales data from localStorage:", e);
-      return [];
-    }
-  });
-  
-  // Track uploaded files with their data (persisted in localStorage)
-  const [uploadedFiles, setUploadedFiles] = useState(() => {
-    // Load from localStorage on initialization
-    try {
-      const stored = localStorage.getItem("reports_uploaded_files");
-      if (!stored) return [];
-      const files = JSON.parse(stored);
-      // Convert date strings back to Date objects and fix data dates
-      return files.map(file => ({
-        ...file,
-        uploadDate: file.uploadDate ? new Date(file.uploadDate) : new Date(),
-        data: file.data ? file.data.map(record => ({
-          ...record,
-          invoiceDate: record.invoiceDate ? new Date(record.invoiceDate) : new Date()
-        })) : []
-      }));
-    } catch (e) {
-      console.error("Error loading uploaded files from localStorage:", e);
-      return [];
-    }
-  });
-  
   // Snackbar notifications
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "info" });
   const showSnackbar = (message, severity = "info") => {
@@ -131,63 +72,45 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
   const tableRef = useRef(null);
   const theme = useTheme();
   
-  // Save localSalesData to localStorage whenever it changes
-  React.useEffect(() => {
-    if (localSalesData && localSalesData.length > 0) {
-      try {
-        // Convert Date objects to ISO strings for localStorage
-        const serializableData = localSalesData.map(record => ({
+  const workspaceCatalog = useMemo(() => {
+    if (productRates != null) return ensureProductCatalog(productRates);
+    return ensureProductCatalog(readProductRatesFromLocalStorage(getActiveOrganizationId()));
+  }, [productRates]);
+
+  /** Sales lifts from dispatched shipping orders (Supabase sales_data, source order_delivery). */
+  const reportSalesData = useMemo(() => {
+    const rows = Array.isArray(salesData) ? salesData : [];
+    return rows
+      .filter((record) => String(record?.source || "").toLowerCase() === "order_delivery")
+      .map((record) => {
+        const invoiceDate = parseFirestoreDate(record.invoiceDate ?? record.invoice_date);
+        const distributorCode = record.distributorCode ?? record.distributor_code ?? null;
+        const distributorName = record.distributorName ?? record.distributor_name ?? "";
+        return {
           ...record,
-          invoiceDate: record.invoiceDate instanceof Date 
-            ? record.invoiceDate.toISOString() 
-            : record.invoiceDate
-        }));
-        localStorage.setItem("reports_sales_data", JSON.stringify(serializableData));
-      } catch (e) {
-        console.error("Error saving sales data to localStorage:", e);
-      }
-    } else if (localSalesData.length === 0) {
-      // Only clear localStorage if explicitly empty (not on initial mount)
-      try {
-        localStorage.removeItem("reports_sales_data");
-      } catch (e) {
-        console.error("Error clearing sales data from localStorage:", e);
-      }
-    }
-  }, [localSalesData]);
-  
-  // Save uploadedFiles to localStorage whenever it changes
+          distributorCode,
+          distributorName,
+          matchedDistributorName: record.matchedDistributorName ?? distributorName,
+          invoiceDate: Number.isNaN(invoiceDate.getTime()) ? new Date() : invoiceDate,
+          csdPC: Number(record.csdPC ?? record.csd_pc ?? 0) || 0,
+          csdUC: Number(record.csdUC ?? record.csd_uc ?? 0) || 0,
+          waterPC: Number(record.waterPC ?? record.water_pc ?? 0) || 0,
+          waterUC: Number(record.waterUC ?? record.water_uc ?? 0) || 0,
+          products: Array.isArray(record.products) ? record.products : [],
+        };
+      });
+  }, [salesData]);
+
   React.useEffect(() => {
-    if (uploadedFiles && uploadedFiles.length > 0) {
-      try {
-        // Convert Date objects to ISO strings for localStorage
-        const serializableFiles = uploadedFiles.map(file => ({
-          ...file,
-          uploadDate: file.uploadDate instanceof Date 
-            ? file.uploadDate.toISOString() 
-            : file.uploadDate,
-          // Also serialize data dates
-          data: file.data ? file.data.map(record => ({
-            ...record,
-            invoiceDate: record.invoiceDate instanceof Date 
-              ? record.invoiceDate.toISOString() 
-              : record.invoiceDate
-          })) : []
-        }));
-        localStorage.setItem("reports_uploaded_files", JSON.stringify(serializableFiles));
-      } catch (e) {
-        console.error("Error saving uploaded files to localStorage:", e);
-      }
-    } else if (uploadedFiles.length === 0) {
-      // Only clear localStorage if explicitly empty (not on initial mount)
-      try {
-        localStorage.removeItem("reports_uploaded_files");
-      } catch (e) {
-        console.error("Error clearing uploaded files from localStorage:", e);
-      }
+    if (!open) return;
+    try {
+      localStorage.removeItem("reports_sales_data");
+      localStorage.removeItem("reports_uploaded_files");
+    } catch {
+      /* ignore */
     }
-  }, [uploadedFiles]);
-  
+  }, [open]);
+
   // Debug: Log distributors when they change or dialog opens
   React.useEffect(() => {
     if (open) {
@@ -230,7 +153,7 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
   // Filter sales data by date range and distributor selection
   // Note: Distributor filter only applies to "Distributor Performance" report
   const filteredSalesData = useMemo(() => {
-    let filtered = localSalesData;
+    let filtered = reportSalesData;
     
     // Filter by date range
     if (startDate && endDate) {
@@ -338,7 +261,7 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
     }
     
     return filtered;
-  }, [localSalesData, startDate, endDate, selectedRegion, distributors, reportType]);
+  }, [reportSalesData, startDate, endDate, selectedRegion, distributors, reportType]);
   
   // Helper: Convert PC to UC based on product SKU
   // Handles product names from Excel: "WATER 200 ML", "K WATER 500 ML", "K WATER R 1L", "COKE 300 ML", etc.
@@ -393,8 +316,7 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
     return 0; // Unknown SKU - no conversion
   };
   
-  // 1. DISTRIBUTOR PERFORMANCE REPORT
-  // Aggregates uploaded product lines into the spreadsheet-style distributor SKU layout.
+  // 1. DISTRIBUTOR PERFORMANCE REPORT — aggregates dispatched-order sales lifts per distributor/SKU.
   const performanceSkuReport = useMemo(() => {
     const normalizeSkuText = (value) =>
       (value || "")
@@ -451,12 +373,7 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
       return 3;
     };
 
-    const seededSkus = {
-      csd: DEFAULT_SKUS.filter((sku) => categoryNameToKey(sku.category) === "csd")
-        .map((sku) => ({ sku: sku.name, pc: 0, uc: 0 })),
-      water: DEFAULT_SKUS.filter((sku) => categoryNameToKey(sku.category) === "water")
-        .map((sku) => ({ sku: sku.name, pc: 0, uc: 0 })),
-    };
+    const seededSkus = getReportSkuSeeds(workspaceCatalog);
 
     const distributorMap = new Map();
 
@@ -561,8 +478,8 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
           waterUC: Math.round(group.totals.waterUC * 100) / 100,
         },
       }))
-      .sort((a, b) => (b.totals.csdUC + b.totals.waterUC) - (a.totals.csdUC + a.totals.waterUC));
-  }, [filteredSalesData]);
+      .sort((a, b) => (b.totals.csdUC + a.totals.waterUC) - (a.totals.csdUC + a.totals.waterUC));
+  }, [filteredSalesData, workspaceCatalog]);
   
   // 2. CSD & WATER SKU-WISE REPORTS (same aggregation, different product category)
   const { skuReport, waterSkuReport } = useMemo(() => {
@@ -612,345 +529,6 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
       waterSkuReport: aggregateByCategory("water"),
     };
   }, [filteredSalesData]);
-  
-  // Handle sales data upload
-  const handleSalesDataUpload = async (file) => {
-    if (!file) return;
-    if (!canWrite) {
-      alert("You don't have permission to upload data. Only admins can upload data.");
-      return;
-    }
-    
-    // Debug: Check distributors - detailed logging
-    logger.log("=== Upload Sales Data - Distributors Check ===");
-    logger.log("- distributors prop type:", typeof distributors);
-    logger.log("- distributors is array:", Array.isArray(distributors));
-    logger.log("- distributors.length:", distributors?.length || 0);
-    logger.log("- distributors value:", distributors);
-    
-    if (distributors && distributors.length > 0) {
-      logger.log("- ✅ Distributors found:", distributors.length);
-      logger.log("- First 5 distributor names:", distributors.slice(0, 5).map(d => d.name || d.code));
-      logger.log("- First 5 distributor codes:", distributors.slice(0, 5).map(d => d.code));
-    } else {
-      logger.error("❌ NO DISTRIBUTORS FOUND!");
-      logger.error("- distributors is null/undefined:", distributors === null || distributors === undefined);
-      logger.error("- distributors is empty array:", Array.isArray(distributors) && distributors.length === 0);
-      logger.error("- Please check AdminDashboard is passing distributors prop correctly");
-      logger.error("- Check browser console for 'ReportsDialog opened - Distributors check' message");
-    }
-    
-    // Log distributor availability (no blocking warning if distributors exist)
-    if (!distributors || distributors.length === 0) {
-      logger.warn("⚠️ No distributors found in app! Upload will continue but all records will be skipped.");
-      // Only show warning if truly no distributors exist
-      showSnackbar("⚠️ No distributors found in app. Please add distributors in the Distributors section first, then upload again.", "warning");
-      // Continue anyway - we can still save data, just with null distributor codes
-    } else {
-      logger.log("✅ Distributors available for matching:", distributors.length);
-      // Don't show warning if distributors exist - only show it if some records fail to match later
-    }
-    
-    // Validate file type
-    const validTypes = [
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.ms-excel",
-      "application/excel"
-    ];
-    
-    if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
-      showSnackbar("Please upload a valid Excel file (.xlsx or .xls)", "error");
-      return;
-    }
-    
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) {
-      showSnackbar("File size exceeds 10MB. Please upload a smaller file.", "error");
-      return;
-    }
-    
-    setUploading(true);
-    setUploadProgress({ total: 0, processed: 0, saved: 0 });
-    
-    try {
-      logger.log("Parsing Excel for sales data...");
-      logger.log("File name:", file.name);
-      logger.log("Available distributors:", distributors.length);
-      
-      // Parse Excel file (handles headers starting at row 4)
-      const parseResult = await parseExcelFile(file);
-      const salesDataFromFile = parseResult.salesData || [];
-      const achievements = parseResult.achievements || {};
-      
-      logger.log(`Found ${salesDataFromFile.length} sales data records`);
-      
-      if (salesDataFromFile.length === 0 && Object.keys(achievements).length === 0) {
-        showSnackbar("No sales data found in Excel file. Please check the file format.\n\nMake sure:\n- Headers are in row 4\n- 'Party Name / Address' column exists\n- Product columns contain quantities\n- Invoice Date column exists", "warning");
-        setUploading(false);
-        return;
-      }
-      
-      setUploadProgress(prev => ({ ...prev, total: salesDataFromFile.length }));
-      
-      // Try to import Firebase functions
-      let saveSalesDataBatchFn = null;
-      let TimestampFn = null;
-      
-      try {
-        const firebaseService = await import("../services/firebaseService");
-        saveSalesDataBatchFn = firebaseService.saveSalesDataBatch;
-        const firestore = await import("firebase/firestore");
-        TimestampFn = firestore.Timestamp;
-      } catch (e) {
-        logger.warn("Firebase not available, saving to local state only");
-      }
-      
-      // Enhanced distributor matching function
-      const findDistributor = (saleName) => {
-        if (!saleName) return null;
-        if (!distributors || distributors.length === 0) return null; // No distributors available
-        
-        // Skip non-distributor rows (like "Total", "Grand Total", etc.)
-        const normalizedForCheck = saleName.toString().trim().toLowerCase();
-        if (normalizedForCheck === "total" || 
-            normalizedForCheck.includes("total :") ||
-            normalizedForCheck.includes("grand total") ||
-            normalizedForCheck === "sum" ||
-            normalizedForCheck.startsWith("si no") ||
-            normalizedForCheck === "") {
-          return null; // Not a distributor name
-        }
-        
-        // Extract name part before comma (location suffix)
-        let cleanSaleName = saleName.toString().trim();
-        if (cleanSaleName.includes(",")) {
-          cleanSaleName = cleanSaleName.split(",")[0].trim();
-        }
-        
-        const normalize = (s) => {
-          if (!s) return "";
-          return s.toString()
-            .trim()
-            .toLowerCase()
-            .replace(/\s+/g, " ")
-            .replace(/[.,\-_]/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-        };
-        
-        const normalizedSaleName = normalize(cleanSaleName);
-        
-        // Strategy 1: Try exact match
-        let match = distributors.find(d => normalize(d.name) === normalizedSaleName);
-        if (match) {
-          logger.log(`Matched "${saleName}" -> "${match.name}" (exact match)`);
-          return match;
-        }
-        
-        // Strategy 2: Try partial match
-        match = distributors.find(d => {
-          const normalizedDistName = normalize(d.name);
-          return normalizedSaleName.includes(normalizedDistName) || 
-                 normalizedDistName.includes(normalizedSaleName);
-        });
-        if (match) {
-          logger.log(`Matched "${saleName}" -> "${match.name}" (partial match)`);
-          return match;
-        }
-        
-        // Strategy 3: Try business terms removal
-        const removeBusinessTerms = (name) => {
-          return name
-            .replace(/\b(private|limited|ltd|pvt|inc|corp|company|co)\b/gi, "")
-            .replace(/\s+/g, " ")
-            .trim();
-        };
-        
-        const cleanedSaleName = normalize(removeBusinessTerms(cleanSaleName));
-        match = distributors.find(d => {
-          const cleanedDistName = normalize(removeBusinessTerms(d.name));
-          return cleanedDistName === cleanedSaleName ||
-                 cleanedSaleName.includes(cleanedDistName) ||
-                 cleanedDistName.includes(cleanedSaleName);
-        });
-        if (match) {
-          logger.log(`Matched "${saleName}" -> "${match.name}" (business terms removed)`);
-          return match;
-        }
-        
-        // Strategy 4: Try first words match
-        const saleWords = normalizedSaleName.split(" ").filter(w => w.length > 2);
-        if (saleWords.length > 0) {
-          const firstWords = saleWords.slice(0, 2).join(" ");
-          match = distributors.find(d => {
-            const distWords = normalize(d.name).split(" ").filter(w => w.length > 2);
-            const distFirstWords = distWords.slice(0, 2).join(" ");
-            return distFirstWords === firstWords || 
-                   distFirstWords.includes(firstWords) ||
-                   firstWords.includes(distFirstWords);
-          });
-        }
-        
-        if (match) {
-          logger.log(`Matched "${saleName}" -> "${match.name}" (first words match)`);
-        } else {
-          logger.warn(`Could not match "${saleName}" (cleaned: "${cleanSaleName}")`);
-        }
-        
-        return match || null;
-      };
-      
-      // Match distributors and prepare data for saving
-      const salesDataToSave = salesDataFromFile.map(sale => {
-        const distributor = findDistributor(sale.distributorName);
-        
-        return {
-          distributorCode: distributor?.code || null,
-          distributorName: sale.distributorName,
-          matchedDistributorName: distributor?.name || null,
-          invoiceDate: sale.invoiceDate,
-          products: sale.products || [],
-          csdPC: sale.csdPC || 0,
-          csdUC: sale.csdUC || 0,
-          waterPC: sale.waterPC || 0,
-          waterUC: sale.waterUC || 0,
-          totalUC: sale.totalUC || 0,
-          source: "reports_upload",
-        };
-      });
-      
-      // Filter valid sales data (must have distributor match)
-      // Note: We check for matchedDistributorName instead of distributorCode because
-      // some distributors might not have codes assigned yet, but we still matched them
-      const validSalesData = salesDataToSave.filter(sale => sale.matchedDistributorName);
-      const unmatchedSalesData = salesDataToSave.filter(sale => !sale.matchedDistributorName);
-      
-      // Save to Firebase
-      let savedToFirebase = 0;
-      if (saveSalesDataBatchFn && validSalesData.length > 0) {
-        try {
-          const salesDataWithTimestamps = validSalesData.map(sale => ({
-            ...sale,
-            invoiceDate: TimestampFn.fromDate(sale.invoiceDate)
-          }));
-          
-          await saveSalesDataBatchFn(salesDataWithTimestamps);
-          savedToFirebase = validSalesData.length;
-          logger.log(`✅ Saved ${savedToFirebase} sales data records to Firebase`);
-        } catch (firebaseError) {
-          logger.error("Error saving to Firebase:", firebaseError);
-        }
-      }
-      
-      // Keep every parsed upload row in the local report view. Cloud save still only uses matched rows.
-      const localFormattedData = salesDataToSave.map(sale => ({
-        ...sale,
-        invoiceDate: sale.invoiceDate instanceof Date ? sale.invoiceDate : new Date(sale.invoiceDate),
-        uploadedFileName: file.name, // Track which file this record came from
-      }));
-      
-      // Add file to uploaded files list (keep history of all uploads)
-      setUploadedFiles(prev => {
-        // Check if file already exists (by name) - replace it
-        const existingIndex = prev.findIndex(f => f.fileName === file.name);
-        if (existingIndex >= 0) {
-          // Replace existing file data
-          const updated = [...prev];
-          updated[existingIndex] = {
-            fileName: file.name,
-            uploadDate: new Date(),
-            recordCount: localFormattedData.length,
-            data: localFormattedData,
-          };
-          return updated;
-        } else {
-          // Add new file to history
-          return [...prev, {
-            fileName: file.name,
-            uploadDate: new Date(),
-            recordCount: localFormattedData.length,
-            data: localFormattedData,
-          }];
-        }
-      });
-      
-      // REPLACE all local sales data with new upload (as requested)
-      setLocalSalesData(localFormattedData);
-      setPerformanceSearch("");
-      setUploadProgress(prev => ({ ...prev, processed: salesDataFromFile.length, saved: localFormattedData.length }));
-      
-      if (onSalesDataUploaded) {
-        onSalesDataUploaded(validSalesData.map(sale => ({
-          ...sale,
-          invoiceDate: sale.invoiceDate instanceof Date ? sale.invoiceDate : new Date(sale.invoiceDate),
-          uploadedFileName: file.name,
-        })));
-      }
-      
-      // Show success message
-      let message = `Successfully uploaded ${localFormattedData.length} sales record(s) for reports.`;
-      if (savedToFirebase > 0) {
-        message += ` ${savedToFirebase} record(s) saved to Firebase.`;
-      }
-      // Filter out non-distributor names from unmatched list (like "Total", etc.)
-      const actualUnmatchedDistributors = unmatchedSalesData
-        .map(s => s.distributorName)
-        .filter(name => {
-          const normalized = name?.toString().trim().toLowerCase() || "";
-          return normalized && 
-                 !normalized.includes("total") && 
-                 !normalized.includes("sum") &&
-                 normalized !== "" &&
-                 !normalized.startsWith("si no");
-        });
-      
-      const actualSkippedCount = actualUnmatchedDistributors.length;
-      
-      if (actualSkippedCount > 0) {
-        const unmatchedNames = [...new Set(actualUnmatchedDistributors)].slice(0, 5).join(", ");
-        const moreCount = actualSkippedCount > 5 ? ` and ${actualSkippedCount - 5} more` : "";
-        const availableDistCount = distributors?.length || 0;
-        
-        message += `\n\n⚠️ ${actualSkippedCount} record(s) were not matched to an app distributor: ${unmatchedNames}${moreCount}. They will still appear in this report, but region filtering may exclude them.`;
-        if (availableDistCount > 0) {
-          message += `\n\n💡 Tip: Add missing distributors in the Distributors section, then upload again.`;
-        }
-        
-        logger.warn("Unmatched distributors (excluding totals):", [...new Set(actualUnmatchedDistributors)].slice(0, 10));
-        
-        showSnackbar(message, "warning");
-      } else {
-        message += ` You can now generate reports using the uploaded data.`;
-        showSnackbar(message, "success");
-      }
-      
-    } catch (error) {
-      logger.error("Error uploading sales data:", error);
-      showSnackbar(`Failed to upload sales data: ${error.message || "Unknown error"}`, "error");
-    } finally {
-      setUploading(false);
-      setUploadProgress({ total: 0, processed: 0, saved: 0 });
-    }
-  };
-  
-  // Trigger file upload
-  const triggerFileUpload = () => {
-    hiddenFileRef.current?.click();
-  };
-  
-  const onFileChange = (e) => {
-    if (!canWrite) {
-      alert("You don't have permission to upload data. Only admins can upload data.");
-      e.target.value = ""; // Reset
-      return;
-    }
-    const file = e.target.files?.[0];
-    if (file) {
-      handleSalesDataUpload(file);
-    }
-    e.target.value = ""; // Reset so same file can be selected again
-  };
   
   // Excel Export
   const handleDownloadExcel = async () => {
@@ -1013,18 +591,20 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
           ["SKU", "Total PC", "Total UC"],
           ...waterSkuReport.map((row) => [row.sku, row.totalPC, row.totalUC.toFixed(2)]),
         ];
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(csdSheet), "CSD SKU Sales");
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(waterSheet), "Water SKU Sales");
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(csdSheet), "CSD SKUs");
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(waterSheet), "Water SKUs");
       }
-      
-      XLSX.writeFile(wb, `Sales_Report_${new Date().toISOString().split("T")[0]}.xlsx`);
-      showSnackbar("Report exported to Excel successfully!", "success");
+
+      const fileName = `report_${reportType}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      showSnackbar("Excel report downloaded", "success");
     } catch (error) {
-      logger.error("Error exporting to Excel:", error);
-      showSnackbar("Failed to export to Excel: " + (error.message || "Unknown error"), "error");
+      logger.error("Error exporting Excel:", error);
+      showSnackbar(`Failed to export Excel: ${error.message || "Unknown error"}`, "error");
     }
   };
-  
+
+  // PDF Export — start marker for deletion
   // PDF Export
   const handleDownloadPDF = async () => {
     if (!tableRef.current) return;
@@ -1194,7 +774,12 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
 
   const tableMaxH = { xs: "min(48vh, 360px)", sm: "min(56vh, 520px)" };
   const skuTableMaxH = { xs: "min(34vh, 300px)", sm: "min(38vh, 340px)" };
-  const headSx = { fontWeight: 700, backgroundColor: "#c62828", color: "#fff", py: 1.25 };
+  const headSx = {
+    fontWeight: 700,
+    backgroundColor: theme.palette.primary.dark,
+    color: "#fff",
+    py: 1.25,
+  };
   const renderMetric = (value) => {
     const num = Math.round(Number(value) || 0);
     return (
@@ -1238,13 +823,14 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
         position="sticky"
         elevation={0}
         sx={{
-          background: `linear-gradient(115deg, #b71c1c 0%, #d32f2f 45%, #c62828 100%)`,
+          background: brandHeroGradient(theme),
+          color: "text.primary",
           borderBottom: "1px solid",
-          borderColor: alpha("#fff", 0.15),
+          borderColor: "divider",
         }}
       >
         <Toolbar sx={{ py: 1, gap: 2, minHeight: { xs: 56, sm: 64 } }}>
-          <AssessmentOutlinedIcon sx={{ opacity: 0.95, fontSize: { xs: 26, sm: 30 } }} />
+          <AssessmentOutlinedIcon color="primary" sx={{ fontSize: { xs: 26, sm: 30 } }} />
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
               Reports & analytics
@@ -1253,10 +839,10 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
               variant="caption"
               sx={{ opacity: 0.92, display: { xs: "none", sm: "block" }, mt: 0.25 }}
             >
-              Excel row 4 headers · filter by dates and region · export Excel or PDF
+              Sales from dispatched orders · filter by dates and region · export Excel or PDF
             </Typography>
           </Box>
-          <IconButton color="inherit" onClick={onClose} aria-label="Close reports" size="large">
+          <IconButton onClick={onClose} aria-label="Close reports" size="large">
             <CloseIcon />
           </IconButton>
         </Toolbar>
@@ -1294,7 +880,7 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
               </Box>
               <Box>
                 <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                  Distributors (for matching)
+                  Distributors
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.1 }}>
                   {distributors?.length ?? 0}
@@ -1330,10 +916,10 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
               </Box>
               <Box>
                 <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                  Records in use
+                  Dispatched lifts
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.1 }}>
-                  {localSalesData?.length ?? 0}
+                  {reportSalesData?.length ?? 0}
                 </Typography>
               </Box>
             </Paper>
@@ -1382,159 +968,50 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
               p: { xs: 2, sm: 2.5 },
               mb: 3,
               borderRadius: 2,
-              borderStyle: "dashed",
-              borderColor: alpha(theme.palette.error.main, 0.35),
-              bgcolor: alpha(theme.palette.error.main, 0.02),
+              borderColor: alpha(theme.palette.primary.main, 0.25),
+              bgcolor: alpha(theme.palette.primary.main, 0.04),
             }}
           >
-            <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>
-              Report data source
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
-              Upload an Excel workbook (.xlsx / .xls) with the same layout as main dashboard imports. Data here is
-              stored for reports on this device and replaces the previous upload.
-            </Typography>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "center" }}>
-              <Button
-                variant="contained"
-                size="large"
-                startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <UploadFileIcon />}
-                onClick={triggerFileUpload}
-                disabled={uploading || !canWrite}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }}>
+              <Box
                 sx={{
-                  backgroundColor: "#c62828",
-                  "&:hover": { backgroundColor: "#b71c1c" },
-                  fontWeight: 700,
-                  py: 1.25,
+                  width: 48,
+                  height: 48,
+                  borderRadius: 1.5,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  bgcolor: alpha(theme.palette.primary.main, 0.12),
+                  color: "primary.main",
+                  flexShrink: 0,
                 }}
-                title={!canWrite ? "You don't have permission to upload data." : ""}
               >
-                {uploading
-                  ? `Uploading… (${uploadProgress.processed}/${uploadProgress.total})`
-                  : "Upload sales Excel"}
-              </Button>
-              <input
-                ref={hiddenFileRef}
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={onFileChange}
-                style={{ display: "none" }}
-              />
-              {uploadProgress.total > 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  Processed {uploadProgress.saved} of {uploadProgress.total} rows
+                <LocalShippingOutlinedIcon />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5 }}>
+                  Report data source
                 </Typography>
-              ) : null}
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ ml: { sm: "auto" } }}>
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 720 }}>
+                  Figures come from orders marked <strong>dispatched</strong> in Shipping. Each dispatch creates a sales
+                  lift in your workspace (synced automatically). No separate Excel upload is required.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 <Chip
-                  label={`${distributors?.length || 0} distributor${distributors?.length !== 1 ? "s" : ""}`}
-                  color={distributors && distributors.length > 0 ? "success" : "warning"}
+                  label={`${reportSalesData.length} dispatch lift${reportSalesData.length !== 1 ? "s" : ""}`}
+                  color={reportSalesData.length > 0 ? "primary" : "default"}
                   size="small"
                   variant="outlined"
                 />
                 <Chip
-                  label={`${localSalesData?.length || 0} row${(localSalesData?.length || 0) !== 1 ? "s" : ""} loaded`}
-                  color={localSalesData && localSalesData.length > 0 ? "primary" : "default"}
+                  label={`${distributors?.length || 0} distributor${distributors?.length !== 1 ? "s" : ""}`}
+                  color={distributors?.length ? "success" : "warning"}
                   size="small"
                   variant="outlined"
                 />
               </Stack>
             </Stack>
-
-            {uploadedFiles && uploadedFiles.length > 0 ? (
-              <Accordion
-                defaultExpanded
-                disableGutters
-                elevation={0}
-                sx={{ mt: 2, borderRadius: "8px !important", border: "1px solid", borderColor: "divider", "&:before": { display: "none" } }}
-              >
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography fontWeight={700}>
-                    Uploaded files ({uploadedFiles.length})
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails sx={{ pt: 0 }}>
-                  <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      size="small"
-                      startIcon={<DeleteIcon />}
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Delete all ${uploadedFiles.length} file(s) and clear report data?`
-                          )
-                        ) {
-                          setUploadedFiles([]);
-                          setLocalSalesData([]);
-                          showSnackbar("All uploaded files removed", "info");
-                        }
-                      }}
-                    >
-                      Clear all
-                    </Button>
-                  </Stack>
-                  <TableContainer
-                    component={Paper}
-                    variant="outlined"
-                    sx={{ maxHeight: 280, borderRadius: 1 }}
-                  >
-                    <Table stickyHeader size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ ...headSx, width: 48 }}>#</TableCell>
-                          <TableCell sx={headSx}>File</TableCell>
-                          <TableCell sx={headSx}>Uploaded</TableCell>
-                          <TableCell align="center" sx={headSx}>
-                            Rows
-                          </TableCell>
-                          <TableCell align="center" sx={{ ...headSx, width: 72, fontSize: "0.7rem" }}>
-                            Del
-                          </TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {uploadedFiles.map((file, index) => (
-                          <TableRow key={file.fileName} hover>
-                            <TableCell>{index + 1}</TableCell>
-                            <TableCell sx={{ fontWeight: 600 }}>{file.fileName}</TableCell>
-                            <TableCell sx={{ color: "text.secondary", fontSize: "0.8125rem" }}>
-                              {file.uploadDate instanceof Date
-                                ? file.uploadDate.toLocaleString()
-                                : new Date(file.uploadDate).toLocaleString()}
-                            </TableCell>
-                            <TableCell align="center">{file.recordCount}</TableCell>
-                            <TableCell align="center">
-                              <IconButton
-                                size="small"
-                                color="error"
-                                aria-label={`Remove ${file.fileName}`}
-                                onClick={() => {
-                                  if (
-                                    window.confirm(
-                                      `Remove "${file.fileName}" (${file.recordCount} rows)?`
-                                    )
-                                  ) {
-                                    setUploadedFiles((prev) => prev.filter((f) => f.fileName !== file.fileName));
-                                    setLocalSalesData((prev) =>
-                                      prev.filter((record) => record.uploadedFileName !== file.fileName)
-                                    );
-                                    showSnackbar(`Removed ${file.fileName}`, "info");
-                                  }
-                                }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </AccordionDetails>
-              </Accordion>
-            ) : null}
           </Paper>
 
           <Paper elevation={0} variant="outlined" sx={{ p: 0, mb: 2, borderRadius: 2, overflow: "hidden" }}>
@@ -1552,7 +1029,11 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
                   minHeight: 52,
                 },
                 "& .Mui-selected": { color: "error.dark" },
-                "& .MuiTabs-indicator": { height: 3, borderRadius: "3px 3px 0 0", bgcolor: "#c62828" },
+                "& .MuiTabs-indicator": {
+                  height: 3,
+                  borderRadius: "3px 3px 0 0",
+                  bgcolor: "primary.main",
+                },
               }}
             >
               <Tab label="Distributor performance" value="performance" />
@@ -1704,18 +1185,18 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
                       sx={{ fontSize: 48, color: "action.disabled", mb: 1.5 }}
                     />
                     <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                      {localSalesData.length === 0
-                        ? "No data yet"
+                      {reportSalesData.length === 0
+                        ? "No dispatched sales yet"
                         : (startDate && endDate) || (selectedRegion && selectedRegion !== "All")
                           ? "Nothing matches these filters"
                           : "No rows to show"}
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 400, mx: "auto" }}>
-                      {localSalesData.length === 0
-                        ? "Upload a sales Excel file above to build distributor performance."
+                      {reportSalesData.length === 0
+                        ? "Dispatch approved orders from Shipping to record sales lifts, then return here."
                         : (startDate && endDate) || (selectedRegion && selectedRegion !== "All")
                           ? "Try widening the date range or setting region to All."
-                          : "Adjust filters or upload a file with matched distributors."}
+                          : "Adjust filters to see more distributors."}
                     </Typography>
                   </Box>
                 ) : filteredPerformanceSkuReport.length === 0 ? (
@@ -1875,8 +1356,8 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
                             <TableRow>
                               <TableCell colSpan={4} align="center" sx={{ py: 4, border: "none" }}>
                                 <Typography variant="body2" color="text.secondary">
-                                  {localSalesData.length === 0
-                                    ? "Upload sales data with CSD product lines."
+                                  {reportSalesData.length === 0
+                                    ? "Dispatch orders with CSD line items to populate this report."
                                     : startDate && endDate
                                       ? "No CSD SKUs in this date range."
                                       : "No CSD SKUs in the filtered data."}
@@ -1938,8 +1419,8 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
                             <TableRow>
                               <TableCell colSpan={4} align="center" sx={{ py: 4, border: "none" }}>
                                 <Typography variant="body2" color="text.secondary">
-                                  {localSalesData.length === 0
-                                    ? "Upload sales data with Water / Kinley product lines."
+                                  {reportSalesData.length === 0
+                                    ? "Dispatch orders with Water / Kinley line items to populate this report."
                                     : startDate && endDate
                                       ? "No water SKUs in this date range."
                                       : "No water SKUs in the filtered data."}
@@ -2023,7 +1504,7 @@ export default function ReportsDialog({ open, onClose, distributors = [], salesD
                 }
                 onClick={handleDownloadPDF}
                 disabled={exportingPDF || !reportHasRows}
-                sx={{ bgcolor: "#c62828", "&:hover": { bgcolor: "#b71c1c" }, fontWeight: 700 }}
+                sx={{ bgcolor: "primary.main", "&:hover": { bgcolor: "primary.dark" }, fontWeight: 700 }}
               >
                 {exportingPDF ? "Building PDF…" : "PDF"}
               </Button>

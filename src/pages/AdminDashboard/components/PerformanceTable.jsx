@@ -13,13 +13,14 @@ import {
   useTheme,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
+import { tableHeaderBg, tableSubHeaderBandBg } from "../../../theme/contrastSurfaces";
 import PeopleIcon from "@mui/icons-material/People";
 
 function bodyStripeBg(theme, rowIdx) {
   const isDark = theme.palette.mode === "dark";
   return rowIdx % 2 === 0
-    ? alpha(theme.palette.primary.main, isDark ? 0.14 : 0.05)
-    : alpha(theme.palette.secondary.main, isDark ? 0.12 : 0.07);
+    ? (isDark ? alpha(theme.palette.common.white, 0.05) : theme.palette.grey[50])
+    : theme.palette.background.paper;
 }
 
 function hoverRowBg(theme) {
@@ -49,6 +50,7 @@ const figureSx = {
 };
 
 function MetricHeaderCells({ top, zIndex = 15, sectionBorder = "none", sxExtra = {} }) {
+  const theme = useTheme();
   return METRIC_KEYS.map((m, i) => (
     <TableCell
       key={m.key}
@@ -59,8 +61,8 @@ function MetricHeaderCells({ top, zIndex = 15, sectionBorder = "none", sxExtra =
         position: "sticky",
         top,
         zIndex,
-        bgcolor: "secondary.main",
-        color: (t) => t.palette.getContrastText(t.palette.secondary.main),
+        bgcolor: tableSubHeaderBandBg(theme),
+        color: "text.primary",
         borderLeft:
           i === 0 && (sectionBorder === "left" || sectionBorder === "both") ? "2px solid" : undefined,
         borderRight:
@@ -113,15 +115,15 @@ function PerformanceTable({
 
   const headerPrimary = useMemo(
     () => ({
-      bg: theme.palette.primary.main,
-      fg: theme.palette.primary.contrastText,
-      divider: alpha(theme.palette.primary.contrastText, 0.35),
+      bg: tableHeaderBg(theme),
+      fg: theme.palette.text.primary,
+      divider: theme.palette.divider,
     }),
     [theme]
   );
 
   const totalRowBg = useMemo(
-    () => alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.2 : 0.08),
+    () => (theme.palette.mode === "dark" ? alpha(theme.palette.common.white, 0.08) : theme.palette.grey[100]),
     [theme]
   );
 
@@ -327,7 +329,7 @@ function PerformanceTable({
                       component="button"
                       type="button"
                       onClick={() => onDistributorClick(distributor)}
-                      title="View SKU liftings from uploaded sales"
+                      title="View SKU liftings from dispatched orders"
                       sx={{
                         display: "block",
                         fontWeight: 700,

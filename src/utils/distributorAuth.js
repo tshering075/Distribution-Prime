@@ -2,6 +2,11 @@
  * Utility functions for managing distributor credentials and authentication
  */
 
+import {
+  readTenantJson,
+  writeTenantJson,
+} from './tenantLocalStorage';
+
 const DISTRIBUTORS_STORAGE_KEY = "coke_distributors";
 const ADMIN_CREDENTIALS_KEY = "coke_admin_credentials";
 const SHIPPING_CREDENTIALS_KEY = "coke_shipping_credentials";
@@ -22,15 +27,11 @@ export function hashPasswordSync(password) {
 }
 
 /**
- * Get all distributors from localStorage
+ * Get all distributors from localStorage (scoped to active workspace).
  */
-export function getDistributors() {
-  try {
-    const stored = localStorage.getItem(DISTRIBUTORS_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch (error) {
-    return [];
-  }
+export function getDistributors(organizationId) {
+  const parsed = readTenantJson(DISTRIBUTORS_STORAGE_KEY, organizationId);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 /**
@@ -97,15 +98,11 @@ export async function generateUniqueDistributorCode(name, existingDistributors =
 }
 
 /**
- * Save distributors to localStorage
+ * Save distributors to localStorage (scoped to active workspace).
  */
-export function saveDistributors(distributors) {
-  try {
-    localStorage.setItem(DISTRIBUTORS_STORAGE_KEY, JSON.stringify(distributors));
-    return true;
-  } catch (error) {
-    return false;
-  }
+export function saveDistributors(distributors, organizationId) {
+  writeTenantJson(DISTRIBUTORS_STORAGE_KEY, distributors, organizationId);
+  return true;
 }
 
 /**

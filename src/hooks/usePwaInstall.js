@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const DISMISS_KEY = "coke_pwa_install_banner_dismissed";
-const SKIP_GATE_KEY = "coke_pwa_skip_install_gate";
 
 function readDismissed() {
   try {
@@ -17,27 +16,6 @@ export function dismissPwaInstallBanner() {
   } catch {
     /* ignore */
   }
-}
-
-/** User chose “Continue in browser” on the install screen. */
-export function skipInstallGate() {
-  try {
-    localStorage.setItem(SKIP_GATE_KEY, "1");
-    dismissPwaInstallBanner();
-  } catch {
-    /* ignore */
-  }
-}
-
-export function shouldShowInstallGate() {
-  if (typeof window === "undefined") return false;
-  if (isStandaloneDisplayMode()) return false;
-  try {
-    if (localStorage.getItem(SKIP_GATE_KEY) === "1") return false;
-  } catch {
-    /* ignore */
-  }
-  return true;
 }
 
 export function isStandaloneDisplayMode() {

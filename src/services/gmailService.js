@@ -5,6 +5,11 @@
  */
 
 import { supabase } from '../supabase';
+import {
+  getActiveOrganizationId,
+  withOrgPayload,
+  wrapTenantTableQuery,
+} from './tenantScope';
 
 // Cache for Gmail credentials (loaded from Supabase)
 let gmailCredentialsCache = null;
@@ -36,8 +41,7 @@ async function loadGmailCredentialsFromSupabase() {
     credentialsLoadPromise = (async () => {
       try {
         // Use array response instead of .single() to avoid 406 if multiple rows exist
-        const { data, error } = await supabase
-          .from('app_config')
+        const { data, error } = await wrapTenantTableQuery(supabase.from('app_config'))
           .select('*')
           .eq('id', 'gmail_credentials')
           .limit(1);
@@ -118,8 +122,8 @@ export async function saveGmailCredentialsToSupabase(clientId, apiKey) {
         const { getCurrentUser } = await import('./supabaseService');
         const currentUser = await getCurrentUser();
         
-        const { error } = await supabase
-          .from('app_config')
+        const configConflict = getActiveOrganizationId() ? 'organization_id,id' : 'id';
+        const { error } = await wrapTenantTableQuery(supabase.from('app_config'))
           .upsert(
             {
               id: 'gmail_credentials',
@@ -128,7 +132,7 @@ export async function saveGmailCredentialsToSupabase(clientId, apiKey) {
               updated_at: new Date().toISOString(),
               updated_by: currentUser?.email || 'Unknown',
             },
-            { onConflict: 'id' }
+            { onConflict: configConflict }
           );
 
         if (error) {

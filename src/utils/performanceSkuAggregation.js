@@ -3,8 +3,15 @@
  * and Admin performance totals attribution rules).
  */
 
-import { DEFAULT_SKUS } from "../constants/productSkus";
+import { ensureProductCatalog, getReportSkuSeeds } from "./productCatalog";
+import { readProductRatesFromLocalStorage } from "./productRatesStorage";
+import { getActiveOrganizationId } from "../services/tenantScope";
 import { findDistributorForPartyName } from "./distributorNameMatch";
+
+function resolveWorkspaceProductRates(productRates) {
+  if (productRates != null) return ensureProductCatalog(productRates);
+  return ensureProductCatalog(readProductRatesFromLocalStorage(getActiveOrganizationId()));
+}
 
 function readField(obj, keys, fallback = undefined) {
   for (const key of keys) {
@@ -72,15 +79,16 @@ function saleMatchesDateRange(sale, dateFrom, dateTo) {
   return true;
 }
 
-function createSkuGroupMaps(seedFromDefaults) {
+function createSkuGroupMaps(seedFromCatalogue, productRates) {
   const csd = new Map();
   const water = new Map();
-  if (seedFromDefaults) {
-    DEFAULT_SKUS.filter((s) => categoryNameToKey(s.category) === "csd").forEach((s) => {
-      csd.set(s.name, { sku: s.name, category: "CSD", pc: 0, uc: 0 });
+  if (seedFromCatalogue) {
+    const seeds = getReportSkuSeeds(resolveWorkspaceProductRates(productRates));
+    seeds.csd.forEach((s) => {
+      csd.set(s.sku, { sku: s.sku, category: "CSD", pc: 0, uc: 0 });
     });
-    DEFAULT_SKUS.filter((s) => categoryNameToKey(s.category) === "water").forEach((s) => {
-      water.set(s.name, { sku: s.name, category: "Water", pc: 0, uc: 0 });
+    seeds.water.forEach((s) => {
+      water.set(s.sku, { sku: s.sku, category: "Water", pc: 0, uc: 0 });
     });
   }
   return { csd, water };
@@ -356,23 +364,17 @@ function addSku(skuMap, sku, pc, uc) {
  * @param {Set<string>} exportDistributorCodes - distributor codes included in the performance export
  * @returns {Array<Record<string, string|number>>}
  */
-export function buildDistributorPerformanceSkuDetailRows(allSalesData, distributors, exportDistributorCodes) {
+export function buildDistributorPerformanceSkuDetailRows(
+  allSalesData,
+  distributors,
+  exportDistributorCodes,
+  productRates = null
+) {
   if (!(exportDistributorCodes instanceof Set) || exportDistributorCodes.size === 0) {
     return [];
   }
 
-  const seededSkus = {
-    csd: DEFAULT_SKUS.filter((sku) => categoryNameToKey(sku.category) === "csd").map((sku) => ({
-      sku: sku.name,
-      pc: 0,
-      uc: 0,
-    })),
-    water: DEFAULT_SKUS.filter((sku) => categoryNameToKey(sku.category) === "water").map((sku) => ({
-      sku: sku.name,
-      pc: 0,
-      uc: 0,
-    })),
-  };
+  const seededSkus = getReportSkuSeeds(resolveWorkspaceProductRates(productRates));
 
   const distributorMap = new Map();
 

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" role="img" aria-labelledby="wmTitle">
+  <title id="wmTitle">Distribution Prime</title>
+  <defs>
+    <linearGradient id="markBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1565c0"/>
+      <stop offset="100%" stop-color="#0d47a1"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="4" width="56" height="56" rx="14" fill="url(#markBg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" opacity="0.9">
+    <circle cx="28" cy="22" r="3.5" fill="#fff" stroke="none"/>
+    <circle cx="18" cy="36" r="2.5" fill="#fff" stroke="none"/>
+    <circle cx="38" cy="36" r="2.5" fill="#fff" stroke="none"/>
+    <path d="M28 25v6M21 34l5-5M35 34l-5-5"/>
+  </g>
+  <text x="28" y="52" text-anchor="middle" fill="#fff" font-family="Segoe UI, system-ui, sans-serif" font-size="14" font-weight="700">DP</text>
+  <text x="72" y="28" fill="#0d47a1" font-family="Segoe UI, system-ui, sans-serif" font-size="22" font-weight="700">Distribution</text>
+  <text x="72" y="50" fill="#1565c0" font-family="Segoe UI, system-ui, sans-serif" font-size="22" font-weight="600">Prime</text>
+</svg>

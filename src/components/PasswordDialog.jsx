@@ -115,7 +115,7 @@ export default function PasswordDialog({
     >
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <LockIcon sx={{ color: "#e53935", fontSize: 28 }} />
+          <LockIcon sx={{ color: "primary.main", fontSize: 28 }} />
           <Typography variant="h6" sx={{ fontWeight: 600, color: "#333" }}>
             {title}
           </Typography>
@@ -181,10 +181,10 @@ export default function PasswordDialog({
           form="password-form"
           variant="contained"
           sx={{
-            bgcolor: "#e53935",
+            bgcolor: "primary.main",
             borderRadius: 2,
             "&:hover": {
-              bgcolor: "#c62828"
+              bgcolor: "primary.dark"
             }
           }}
         >

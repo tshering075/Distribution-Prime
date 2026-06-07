@@ -258,7 +258,7 @@ function OrdersSection({
             >
               {ORDER_ARCHIVE_RETENTION_OPTIONS.map((d) => (
                 <MenuItem key={d} value={d}>
-                  {d} days delivered
+                  {d} days after dispatch
                 </MenuItem>
               ))}
             </Select>
@@ -288,8 +288,8 @@ function OrdersSection({
 
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 600 }}>
           {isHistoryView
-            ? `Delivered orders older than ${retentionDays} days. Records stay in the database until you delete them.`
-            : `Recent and in-progress orders. Delivered orders move to History after ${retentionDays} days.`}
+            ? `Dispatched orders older than ${retentionDays} days. Records stay in the database until you delete them.`
+            : `Recent and in-progress orders. Dispatched orders move to History after ${retentionDays} days.`}
         </Typography>
 
         <ToggleButtonGroup
@@ -309,7 +309,7 @@ function OrdersSection({
             Approved ({tabCounts.approved})
           </ToggleButton>
           <ToggleButton value="delivered" sx={{ textTransform: "none", fontWeight: 700 }}>
-            Delivered ({tabCounts.delivered})
+            Dispatched ({tabCounts.delivered})
           </ToggleButton>
         </ToggleButtonGroup>
 
@@ -367,8 +367,8 @@ function OrdersSection({
           <HistoryIcon sx={{ fontSize: 48, color: "text.disabled", mb: 1 }} />
           <Typography color="text.secondary">
             {isHistoryView
-              ? `No archived orders yet. Delivered orders appear here ${retentionDays}+ days after delivery.`
-              : "No orders in the active queue. Check History for older delivered orders."}
+              ? `No archived orders yet. Dispatched orders appear here ${retentionDays}+ days after dispatch.`
+              : "No orders in the active queue. Check History for older dispatched orders."}
           </Typography>
         </Box>
       ) : filteredOrders.length === 0 ? (

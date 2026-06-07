@@ -12,8 +12,6 @@ import {
   TableRow,
   Paper,
   useMediaQuery,
-  MenuItem,
-  Select,
   Chip,
   Dialog,
   DialogTitle,
@@ -25,9 +23,7 @@ import {
   CircularProgress,
   Stack,
   Divider,
-  FormControl,
-  InputLabel,
-  FormHelperText,
+  Alert,
 } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import {
@@ -39,8 +35,8 @@ import {
   tableFooterBandBorder,
   tableRowHoverBg,
   tableStripeAt,
+  tableHeadRowSx,
 } from "./theme/contrastSurfaces";
-import CheckIcon from "@mui/icons-material/Check";
 import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import ShoppingCartCheckoutIcon from "@mui/icons-material/ShoppingCartCheckout";
@@ -54,28 +50,7 @@ import {
   getCurrentOrderNumber,
 } from "./utils/orderNumber";
 import AppSnackbar from "./components/AppSnackbar";
-import {
-  DEFAULT_SKUS,
-  UC_DIVISOR,
-  DEFAULT_SKU_NAMES,
-  customProductLineName,
-  skuNameLooksLikeBuiltInCanLine,
-} from "./constants/productSkus";
-
-/** Built-in CAN lines (multi-select); Sprite can uses distinct name from PET SPRITE 300 ML. */
-const BUILT_IN_CAN_PRODUCTS = [
-  "COKE CAN 300 ML",
-  "FANTA CAN 300 ML",
-  "SPRITE CAN 300 ML",
-  "DIET COKE CAN 300 ML",
-  "COKE ZERO 300 ML",
-  "LIMCA CAN 300 ML",
-  "THUMS UP CAN 300 ML",
-  "SCHWEPPES CAN TONIC WATER",
-  "SCHWEPPES CAN SODA WATER",
-];
-
-const DEFAULT_CAN_RATE = 750;
+import { buildCalculatorSkus } from "./utils/orderLineCalculation";
 
 const productFieldSx = {
   "& .MuiInputLabel-root": { fontWeight: 600 },
@@ -269,71 +244,19 @@ function CokeCalculator({
   onToggleGst = null,
   getPreviewOrderNumber = null,
 }) {
-  const skus = useMemo(() => {
-    const skuRates = productRates?.skuRates || {};
-    const builtIn = DEFAULT_SKUS.map((sku) => {
-      const saved = skuRates[sku.name];
-      const kgPerCase = saved?.kgPerCase ?? sku.kgPerCase;
-      const rate = saved?.rate ?? sku.rate;
-      let ucMul = sku.ucMultiplier;
-      if (saved && Object.prototype.hasOwnProperty.call(saved, "ucMultiplier")) {
-        ucMul = saved.ucMultiplier;
-      }
-      const ucFormula =
-        ucMul != null && typeof ucMul === "number" && !Number.isNaN(ucMul)
-          ? (q) => (q * ucMul) / UC_DIVISOR
-          : null;
-      return { ...sku, kgPerCase, rate, ucMultiplier: ucMul, ucFormula };
-    });
+  const skus = useMemo(() => buildCalculatorSkus(productRates), [productRates]);
 
-    const rawCustom = Array.isArray(productRates?.customProducts) ? productRates.customProducts : [];
-    const customs = [];
-    const seen = new Set();
-    for (const p of rawCustom) {
-      const lineName = customProductLineName(p?.name, p?.sku);
-      if (!lineName || DEFAULT_SKU_NAMES.has(lineName) || seen.has(lineName)) continue;
-      seen.add(lineName);
-      const category =
-        p.category === "Water" ? "Water" : p.category === "CAN" ? "CAN" : "CSD";
-      const kgPerCase = Number(p.kgPerCase);
-      const rate = Number(p.rate);
-      const mulRaw = p.ucMultiplier;
-      const ucMul =
-        mulRaw === "" || mulRaw === null || mulRaw === undefined
-          ? null
-          : typeof mulRaw === "number"
-            ? mulRaw
-            : parseFloat(mulRaw);
-      const ucFormula =
-        ucMul != null && typeof ucMul === "number" && !Number.isNaN(ucMul)
-          ? (q) => (q * ucMul) / UC_DIVISOR
-          : null;
-      customs.push({
-        name: lineName,
-        category,
-        kgPerCase: Number.isFinite(kgPerCase) ? kgPerCase : 0,
-        rate: Number.isFinite(rate) ? rate : 0,
-        ucMultiplier: ucMul != null && !Number.isNaN(ucMul) ? ucMul : null,
-        ucFormula,
-        isCustom: true,
-      });
+  const productsByCategory = useMemo(() => {
+    const groups = { CSD: [], CAN: [], Water: [] };
+    for (const s of skus) {
+      const cat = s.category === "Water" ? "Water" : s.category === "CAN" ? "CAN" : "CSD";
+      groups[cat].push(s);
     }
-
-    return [...builtIn, ...customs];
-  }, [productRates]);
-
-  const selectableCanSkus = useMemo(() => {
-    const customCanNames = skus.filter((s) => s.category === "CAN").map((s) => s.name);
-    return [...BUILT_IN_CAN_PRODUCTS, ...customCanNames];
+    return groups;
   }, [skus]);
-
-  const canRate = useMemo(() => {
-    return productRates?.canRate ?? DEFAULT_CAN_RATE;
-  }, [productRates]);
 
   const [inputs, setInputs] = useState({});
   const [results, setResults] = useState([]);
-  const [selectedCans, setSelectedCans] = useState([]);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [orderDialogOpen, setOrderDialogOpen] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
@@ -349,17 +272,12 @@ function CokeCalculator({
   useEffect(() => {
     if (initialInputs && typeof initialInputs === "object" && Object.keys(initialInputs).length > 0) {
       setInputs(initialInputs);
-      setSelectedCans(
-        Object.keys(initialInputs).filter(
-          (sku) => selectableCanSkus.includes(sku) && Number(initialInputs[sku] || 0) > 0
-        )
-      );
       if (fixedOrderNumber) {
         setCurrentOrderNumber(fixedOrderNumber);
       }
       prefillPendingRef.current = true;
     }
-  }, [initialInputs, fixedOrderNumber, selectableCanSkus]);
+  }, [initialInputs, fixedOrderNumber]);
 
   useEffect(() => {
     if (prefillPendingRef.current) {
@@ -409,11 +327,6 @@ function CokeCalculator({
           let rate = item?.rate;
           let kgPerCase = item?.kgPerCase;
           let ucFormula = item?.ucFormula;
-          if (!item && BUILT_IN_CAN_PRODUCTS.includes(sku)) {
-            rate = canRate;
-            kgPerCase = 8.28;
-            ucFormula = null;
-          }
           const cases = inputs[sku];
           if (cases <= 0) return; // Skip zero or negative cases
           
@@ -429,7 +342,8 @@ function CokeCalculator({
           let finalCases = cases;
           
           // Find applicable schemes for this SKU
-          const category = item?.category === "Water" ? "Water" : "CSD";
+          const category =
+            item?.category === "Water" ? "Water" : item?.category === "CAN" ? "CAN" : "CSD";
           
           // Debug: Log available schemes and current SKU
           if (process.env.NODE_ENV === "development" && schemes.length > 0) {
@@ -573,7 +487,6 @@ function CokeCalculator({
   const reset = () => {
     setInputs({});
     setResults([]);
-    setSelectedCans([]);
     setCurrentOrderNumber(null); // Reset order number
   };
 
@@ -621,7 +534,7 @@ function CokeCalculator({
       const attachOrderId = placed?.orderId || editContext?.orderId || null;
 
       if (typeof onAttachOrderTableImage === "function" && tableRef.current) {
-        const bg = theme.palette.mode === "dark" ? "#1e1e1e" : "#ffffff";
+        const bg = theme.palette.mode === "dark" ? "#1e1e1e" : theme.palette.background.paper;
         void (async () => {
           try {
             const tableImageData = await captureTableAsPng(tableRef.current, bg);
@@ -661,8 +574,7 @@ function CokeCalculator({
 
   const priceLineForSku = (skuName) => {
     const item = skus.find((s) => s.name === skuName);
-    const rate = item?.rate ?? (BUILT_IN_CAN_PRODUCTS.includes(skuName) ? canRate : null);
-    const amount = Number(rate);
+    const amount = Number(item?.rate);
     if (!Number.isFinite(amount)) return null;
     return `Price: Nu. ${amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}/cs`;
   };
@@ -685,7 +597,7 @@ function CokeCalculator({
     };
     const tint = (light, darkBg) => (isDark ? darkBg : light);
 
-    if (skuNameLooksLikeBuiltInCanLine(item.name) || item.category === "CAN")
+    if (item.category === "CAN")
       return {
         input: {
           ...baseStyle,
@@ -705,14 +617,14 @@ function CokeCalculator({
       return { input: { ...baseStyle, background: tint("#e6f2ff", alpha(theme.palette.info.main, 0.22)) } };
     if (item.name.startsWith("CHARGED"))
       return { input: { ...baseStyle, background: tint("#ffeaea", alpha(theme.palette.error.main, 0.16)) } };
-    if (item.isCustom)
-      return { input: { ...baseStyle, background: tint("#f3e5f5", alpha("#ce93d8", 0.22)) } };
     return { input: { ...baseStyle, background: tint("#fffde7", alpha(theme.palette.secondary.light, 0.12)) } };
   };
 
   // Group SKUs by category
-  const csdProducts = skus.filter((item) => item.category === "CSD" && item.name !== "CAN 300 ML");
-  const waterProducts = skus.filter(item => item.category === "Water");
+  const csdProducts = productsByCategory.CSD;
+  const canProducts = productsByCategory.CAN;
+  const waterProducts = productsByCategory.Water;
+  const catalogEmpty = skus.length === 0;
 
   const countFilled = (names) =>
     names.filter((name) => {
@@ -722,7 +634,7 @@ function CokeCalculator({
 
   const csdFilledCount = countFilled(csdProducts.map((p) => p.name));
   const waterFilledCount = countFilled(waterProducts.map((p) => p.name));
-  const canFilledCount = countFilled(selectedCans);
+  const canFilledCount = countFilled(canProducts.map((p) => p.name));
   const totalFilledCount = csdFilledCount + waterFilledCount + canFilledCount;
 
   const quickSummaryCardSx = {
@@ -762,14 +674,16 @@ function CokeCalculator({
               variant={isMobile ? "h5" : "h4"}
               sx={{ fontWeight: 800, color: "primary.main", letterSpacing: 0.5, lineHeight: 1.2 }}
             >
-              Coke Calculator
+              Order Calculator
             </Typography>
             <Typography
               variant="body2"
               color="text.secondary"
               sx={{ maxWidth: 520, fontSize: { xs: "0.85rem", sm: "0.95rem" }, px: { xs: 0.5, sm: 0 } }}
             >
-              Enter case quantities by product. Tap Calculate to see amounts, UC, and weight in tons.
+              {catalogEmpty
+                ? "Enter case quantities by product. Tap Calculate to see amounts, UC, and weight in tons."
+                : `${skus.length} product line${skus.length === 1 ? "" : "s"} from Product & Rate Master — enter cases, then Calculate.`}
             </Typography>
             {totalFilledCount > 0 ? (
               <Chip
@@ -783,7 +697,14 @@ function CokeCalculator({
             )}
           </Stack>
 
-          {/* CSD Products Section */}
+          {catalogEmpty ? (
+            <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
+              No products in the catalogue. Ask an admin to add products in{" "}
+              <strong>Product &amp; Rate Master</strong> before placing orders.
+            </Alert>
+          ) : null}
+
+          {!catalogEmpty && csdProducts.length > 0 ? (
           <Box sx={{ mb: 3 }}>
             <CalculatorSectionHeader
               title="CSD Products"
@@ -815,104 +736,47 @@ function CokeCalculator({
               ))}
             </Box>
           </Box>
+          ) : null}
 
-          {/* CAN Products Section */}
+          {!catalogEmpty && canProducts.length > 0 ? (
           <Box sx={{ mb: 3 }}>
             <CalculatorSectionHeader
               title="CAN Products"
-              subtitle="Pick can lines first, then enter cases for each"
+              subtitle="Can SKUs from your product catalogue — enter cases per line"
               paletteColor="secondary"
               icon={SportsBarIcon}
               filledCount={canFilledCount}
             />
             <Box
               sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)" },
+                gap: { xs: 1.5, sm: 2 },
                 width: "100%",
-                p: { xs: 2, sm: 2.5 },
-                borderRadius: 3,
-                bgcolor: (t) =>
-                  t.palette.mode === "dark"
-                    ? alpha(t.palette.secondary.main, 0.1)
-                    : alpha(t.palette.secondary.light, 0.2),
-                border: "1px solid",
-                borderColor: "divider",
                 boxSizing: "border-box",
               }}
             >
-              <FormControl fullWidth size={isMobile ? "small" : "medium"} sx={{ mb: selectedCans.length > 0 ? 2 : 0 }}>
-                <InputLabel id="can-products-label" shrink>
-                  CAN products
-                </InputLabel>
-                <Select
-                  labelId="can-products-label"
-                  label="CAN products"
-                  multiple
-                  value={selectedCans}
-                  onChange={(e) => setSelectedCans(e.target.value)}
-                  displayEmpty
-                  notched
-                  renderValue={(selected) =>
-                    selected.length === 0 ? (
-                      <Typography color="text.secondary" variant="body2">
-                        Tap to choose can SKUs…
-                      </Typography>
-                    ) : (
-                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                        {selected.map((value) => (
-                          <Chip key={value} label={value} size="small" color="secondary" sx={{ fontWeight: 600 }} />
-                        ))}
-                      </Box>
-                    )
-                  }
-                >
-                  {selectableCanSkus.map((p) => (
-                    <MenuItem key={p} value={p}>
-                      {p}
-                      {selectedCans.includes(p) ? <CheckIcon color="success" sx={{ ml: "auto" }} /> : null}
-                    </MenuItem>
-                  ))}
-                </Select>
-                <FormHelperText>
-                  {selectedCans.length === 0
-                    ? "Select one or more can products to show quantity fields."
-                    : `${selectedCans.length} can line${selectedCans.length === 1 ? "" : "s"} selected`}
-                </FormHelperText>
-              </FormControl>
-
-              {selectedCans.length > 0 && (
-                <Box
-                  sx={{
-                    display: "grid",
-                    gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)" },
-                    gap: 1.5,
-                    width: "100%",
-                  }}
-                >
-                  {selectedCans.map((can) => (
-                    <ProductCaseField
-                      key={can}
-                      label={`${can} — cases`}
-                      value={inputs[can]}
-                      hasValue={Number(inputs[can]) > 0}
-                      inputStyle={
-                        getInputStyle(skus.find((s) => s.name === can) || { name: "CAN 300 ML", category: "CAN" })
-                          .input
-                      }
-                      priceLine={priceLineForSku(can)}
-                      isMobile={isMobile}
-                      onChange={(e) => handleChange(can, e.target.value)}
-                    />
-                  ))}
-                </Box>
-              )}
+              {canProducts.map((item) => (
+                <ProductCaseField
+                  key={item.name}
+                  label={item.name}
+                  value={inputs[item.name]}
+                  hasValue={Number(inputs[item.name]) > 0}
+                  inputStyle={getInputStyle(item).input}
+                  priceLine={priceLineForSku(item.name)}
+                  isMobile={isMobile}
+                  onChange={(e) => handleChange(item.name, e.target.value)}
+                />
+              ))}
             </Box>
           </Box>
+          ) : null}
 
-          {/* Water Products Section */}
+          {!catalogEmpty && waterProducts.length > 0 ? (
           <Box sx={{ mb: 3 }}>
             <CalculatorSectionHeader
               title="Water Products"
-              subtitle="Kinley and other water SKUs"
+              subtitle="Water SKUs from your product catalogue"
               paletteColor="info"
               icon={WaterDropIcon}
               filledCount={waterFilledCount}
@@ -940,6 +804,7 @@ function CokeCalculator({
               ))}
             </Box>
           </Box>
+          ) : null}
 
           {/* GST Toggle Switch (admin control only) */}
           {canManageGst && (
@@ -1105,12 +970,11 @@ function CokeCalculator({
               <Table size="small" sx={{ width: "100%" }}>
                 <TableHead>
                   <TableRow sx={{ 
-                    background: "linear-gradient(135deg, #e53935 0%, #c62828 100%)",
-                    boxShadow: "0 2px 8px rgba(229, 57, 53, 0.3)"
+                    ...tableHeadRowSx(theme)
                   }}>
                     <TableCell sx={{ 
                       fontWeight: "bold", 
-                      color: "#ffffff", 
+                      color: "text.primary", 
                       fontSize: isMobile ? 9 : 14, 
                       textAlign: "left", 
                       px: isMobile ? 0.5 : 1.5, 
@@ -1122,7 +986,7 @@ function CokeCalculator({
                     </TableCell>
                     <TableCell sx={{ 
                       fontWeight: "bold", 
-                      color: "#ffffff", 
+                      color: "text.primary", 
                       fontSize: isMobile ? 9 : 14, 
                       textAlign: "right", 
                       px: isMobile ? 0.5 : 1.5, 
@@ -1134,7 +998,7 @@ function CokeCalculator({
                     </TableCell>
                     <TableCell sx={{ 
                       fontWeight: "bold", 
-                      color: "#ffffff", 
+                      color: "text.primary", 
                       fontSize: isMobile ? 9 : 14, 
                       textAlign: "right", 
                       px: isMobile ? 0.5 : 1.5, 
@@ -1146,7 +1010,7 @@ function CokeCalculator({
                     </TableCell>
                     <TableCell sx={{ 
                       fontWeight: "bold", 
-                      color: "#ffffff", 
+                      color: "text.primary", 
                       fontSize: isMobile ? 9 : 14, 
                       textAlign: "right", 
                       px: isMobile ? 0.5 : 1.5, 
@@ -1158,7 +1022,7 @@ function CokeCalculator({
                     </TableCell>
                     <TableCell sx={{ 
                       fontWeight: "bold", 
-                      color: "#ffffff", 
+                      color: "text.primary", 
                       fontSize: isMobile ? 9 : 14, 
                       textAlign: "right", 
                       px: isMobile ? 0.5 : 1.5, 
@@ -1170,7 +1034,7 @@ function CokeCalculator({
                     </TableCell>
                     <TableCell sx={{ 
                       fontWeight: "bold", 
-                      color: "#ffffff", 
+                      color: "text.primary", 
                       fontSize: isMobile ? 9 : 14, 
                       textAlign: "right", 
                       px: isMobile ? 0.5 : 1.5, 
@@ -1706,13 +1570,10 @@ function CokeCalculator({
           <TableContainer component={Paper} sx={{ bgcolor: "background.paper", borderRadius: 2, boxShadow: 2, border: "1px solid", borderColor: "divider" }}>
             <Table size="small" sx={{ width: "100%" }}>
               <TableHead>
-                <TableRow sx={{ 
-                  background: "linear-gradient(135deg, #e53935 0%, #c62828 100%)",
-                  boxShadow: "0 2px 8px rgba(229, 57, 53, 0.3)"
-                }}>
+                  <TableRow sx={tableHeadRowSx(theme)}>
                   <TableCell sx={{ 
                     fontWeight: "bold", 
-                    color: "#ffffff", 
+                    color: "text.primary", 
                     fontSize: isMobile ? 9 : 14, 
                     textAlign: "left", 
                     px: isMobile ? 0.5 : 1.5, 
@@ -1724,7 +1585,7 @@ function CokeCalculator({
                   </TableCell>
                   <TableCell sx={{ 
                     fontWeight: "bold", 
-                    color: "#ffffff", 
+                    color: "text.primary", 
                     fontSize: isMobile ? 9 : 14, 
                     textAlign: "right", 
                     px: isMobile ? 0.5 : 1.5, 
@@ -1736,7 +1597,7 @@ function CokeCalculator({
                   </TableCell>
                   <TableCell sx={{ 
                     fontWeight: "bold", 
-                    color: "#ffffff", 
+                    color: "text.primary", 
                     fontSize: isMobile ? 9 : 14, 
                     textAlign: "right", 
                     px: isMobile ? 0.5 : 1.5, 
@@ -1748,7 +1609,7 @@ function CokeCalculator({
                   </TableCell>
                   <TableCell sx={{ 
                     fontWeight: "bold", 
-                    color: "#ffffff", 
+                    color: "text.primary", 
                     fontSize: isMobile ? 9 : 14, 
                     textAlign: "right", 
                     px: isMobile ? 0.5 : 1.5, 
@@ -1760,7 +1621,7 @@ function CokeCalculator({
                   </TableCell>
                   <TableCell sx={{ 
                     fontWeight: "bold", 
-                    color: "#ffffff", 
+                    color: "text.primary", 
                     fontSize: isMobile ? 9 : 14, 
                     textAlign: "right", 
                     px: isMobile ? 0.5 : 1.5, 
@@ -1772,7 +1633,7 @@ function CokeCalculator({
                   </TableCell>
                   <TableCell sx={{ 
                     fontWeight: "bold", 
-                    color: "#ffffff", 
+                    color: "text.primary", 
                     fontSize: isMobile ? 9 : 14, 
                     textAlign: "right", 
                     px: isMobile ? 0.5 : 1.5, 

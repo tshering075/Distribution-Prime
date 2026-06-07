@@ -27,6 +27,9 @@ import {
   Tooltip,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
+import { tableHeaderBg, tableSubHeaderBandBg } from "../theme/contrastSurfaces";
+import { saasAppBarSx, saasAppBarToolbarSx, saasDashboardMainSx } from "../theme/saasChrome";
+import SaasAppBarTitle from "../components/saas/SaasAppBarTitle";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import LogoutIcon from "@mui/icons-material/Logout";
 import {
@@ -41,6 +44,7 @@ import {
   WavingHand as WavingHandIcon,
 } from "@mui/icons-material";
 import NuProductRateIcon from "../components/NuProductRateIcon";
+import WorkspaceChip from "../components/WorkspaceChip";
 import CokeCalculator from "../cokecalculator";
 import OrdersDialog from "../components/OrdersDialog";
 import StockLiftingRecordsTable from "../components/StockLiftingRecordsTable";
@@ -113,8 +117,8 @@ import {
   writeGlobalGstPolicyToLocalStorage,
   resolveGstEnabledForRegion,
 } from "../utils/globalGstSetting";
-import { DEFAULT_SKUS, DEFAULT_SKU_NAMES, customProductLineName } from "../constants/productSkus";
-import { BUILT_IN_CAN_PRODUCTS } from "../utils/calculatorSkuNames";
+import { ensureProductCatalog, getCatalogSkusGrouped } from "../utils/productCatalog";
+import { readOrdersCache, writeOrdersCache, ordersCacheStorageKey } from "../utils/ordersLocalStorage";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
@@ -141,9 +145,8 @@ import {
   loadUsedOrderNumbersFromLocalStorage,
 } from "../utils/orderNumber";
 
-const DEFAULT_CAN_RATE = 750;
 const PRODUCT_RATE_CATEGORY_COLORS = {
-  CSD: "#E40521",
+  CSD: "#1565c0",
   CAN: "#FF6F00",
   Water: "#0288D1",
 };
@@ -333,12 +336,9 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       if (isSupabaseConfigured) {
         const ratesDoc = await getProductRates();
         if (ratesDoc) {
-          setProductRates({
-            skuRates: ratesDoc.skuRates || {},
-            canRate: ratesDoc.canRate,
-            customProducts: Array.isArray(ratesDoc.customProducts) ? ratesDoc.customProducts : [],
-          });
-          writeProductRatesToLocalStorage(ratesDoc);
+          const catalog = ensureProductCatalog(ratesDoc);
+          setProductRates(catalog);
+          writeProductRatesToLocalStorage(catalog);
           return;
         }
       }
@@ -347,11 +347,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     }
     const local = readProductRatesFromLocalStorage();
     if (local) {
-      setProductRates({
-        skuRates: local.skuRates || {},
-        canRate: local.canRate,
-        customProducts: Array.isArray(local.customProducts) ? local.customProducts : [],
-      });
+      setProductRates(ensureProductCatalog(local));
     }
   }, [isSupabaseConfigured]);
 
@@ -569,57 +565,13 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
   );
 
   const productRateRows = useMemo(() => {
-    const skuRates = productRates?.skuRates || {};
-    const seen = new Set();
-
-    const rateFor = (name, fallback, isCan = false) => {
-      const savedRate = Number(skuRates?.[name]?.rate);
-      const canRate = Number(productRates?.canRate);
-      const fallbackRate = Number(fallback);
-      if (isCan && Number.isFinite(canRate)) return canRate;
-      if (Number.isFinite(savedRate)) return savedRate;
-      if (Number.isFinite(fallbackRate)) return fallbackRate;
-      return null;
-    };
-
-    const pushRow = (rows, { name, category, rate, source = "Standard" }) => {
-      if (!name || seen.has(name)) return;
-      seen.add(name);
-      rows.push({
-        name,
-        category: category === "Water" ? "Water" : category === "CAN" ? "CAN" : "CSD",
-        rate,
-        source,
-      });
-    };
-
-    const rows = [];
-    DEFAULT_SKUS.filter((sku) => sku.category === "CSD" && sku.name !== "CAN 300 ML").forEach((sku) => {
-      pushRow(rows, { name: sku.name, category: "CSD", rate: rateFor(sku.name, sku.rate) });
-    });
-
-    BUILT_IN_CAN_PRODUCTS.forEach((name) => {
-      pushRow(rows, { name, category: "CAN", rate: rateFor(name, DEFAULT_CAN_RATE, true) });
-    });
-
-    DEFAULT_SKUS.filter((sku) => sku.category === "Water").forEach((sku) => {
-      pushRow(rows, { name: sku.name, category: "Water", rate: rateFor(sku.name, sku.rate) });
-    });
-
-    const customProducts = Array.isArray(productRates?.customProducts) ? productRates.customProducts : [];
-    customProducts.forEach((product) => {
-      const lineName = customProductLineName(product?.name, product?.sku);
-      if (!lineName || DEFAULT_SKU_NAMES.has(lineName)) return;
-      const productRate = Number(product?.rate);
-      pushRow(rows, {
-        name: lineName,
-        category: product?.category,
-        rate: rateFor(lineName, Number.isFinite(productRate) ? productRate : null),
-        source: "Custom",
-      });
-    });
-
-    return rows;
+    const grouped = getCatalogSkusGrouped(productRates);
+    return grouped.all.map((p) => ({
+      name: p.name,
+      category: p.category,
+      rate: Number.isFinite(Number(p.rate)) ? Number(p.rate) : null,
+      source: "Catalogue",
+    }));
   }, [productRates]);
 
   const physicalStockPayload = useMemo(
@@ -702,9 +654,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
 
   const readLocalOrdersForDistributor = useCallback(() => {
     try {
-      const stored = localStorage.getItem("coke_orders");
-      if (!stored) return [];
-      const allOrders = JSON.parse(stored);
+      const allOrders = readOrdersCache();
       if (!Array.isArray(allOrders)) return [];
       return allOrders.filter(orderBelongsToDistributor);
     } catch {
@@ -814,10 +764,9 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
         }
       }
 
-      const stored = localStorage.getItem("coke_orders");
-      if (stored) {
+      const all = readOrdersCache();
+      if (all.length > 0) {
         try {
-          const all = JSON.parse(stored);
           const found = all.find(
             (o) =>
               (order.id && o?.id === order.id) ||
@@ -861,7 +810,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       const resolved = await resolveOrderWithShippingInvoice(order);
       if (!orderHasShippingInvoice(resolved)) {
         showToast(
-          "No shipping invoice is available for this order yet. Ask shipping to upload the file when delivering.",
+          "No shipping invoice is available for this order yet. Ask shipping to upload the file when dispatching.",
           "info",
           5000,
           "No invoice"
@@ -945,21 +894,21 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
           const hasInv = invCount > 0 || orderHasShippingInvoice(order);
           const msg = hasInv
             ? invCount > 1
-              ? `Order ${key} delivered with ${invCount} invoice files. Orders → invoice column → View or Download all.`
-              : `Order ${key} delivered. Orders (bottom menu) → invoice column → View or Download.`
-            : `Order ${key} has been delivered. Your goods are on the way. Check Orders later for shipping documents.`;
-          pushNotification(msg, "success", "Order delivered", "delivered");
-          showToast(msg, "success", 6500, "Order delivered");
+              ? `Order ${key} dispatched with ${invCount} invoice files. Orders → invoice column → View or Download all.`
+              : `Order ${key} dispatched. Orders (bottom menu) → invoice column → View or Download.`
+            : `Order ${key} has been dispatched. Your goods are on the way. Check Orders later for shipping documents.`;
+          pushNotification(msg, "success", "Order dispatched", "delivered");
+          showToast(msg, "success", 6500, "Order dispatched");
           (async () => {
             if (typeof window === "undefined" || !("Notification" in window)) return;
             try {
               const iconUrl = getTargetReminderNotificationIconUrl();
               if (Notification.permission === "granted") {
-                new Notification("Order delivered", { body: msg, icon: iconUrl });
+                new Notification("Order dispatched", { body: msg, icon: iconUrl });
               } else if (Notification.permission === "default") {
                 const p = await Notification.requestPermission();
                 if (p === "granted") {
-                  new Notification("Order delivered", { body: msg, icon: iconUrl });
+                  new Notification("Order dispatched", { body: msg, icon: iconUrl });
                 }
               }
             } catch (e) {
@@ -1153,9 +1102,11 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
 
   const allocateGlobalOrderNumber = useCallback(async () => {
     return allocateUniqueOrderNumber(
-      isSupabaseConfigured ? supabaseOrderNumberOptions(fetchAllOrderNumbers) : {}
+      isSupabaseConfigured
+        ? supabaseOrderNumberOptions(() => fetchAllOrderNumbers(distributorCode))
+        : {}
     );
-  }, [isSupabaseConfigured]);
+  }, [isSupabaseConfigured, distributorCode]);
 
   // Keep local order counter above all numbers in Supabase (calculator preview + new orders)
   useEffect(() => {
@@ -1164,7 +1115,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     (async () => {
       try {
         const { syncOrderNumberCounterFromUsed } = await import("../utils/orderNumber");
-        const remote = await fetchAllOrderNumbers();
+        const remote = await fetchAllOrderNumbers(distributorCode);
         if (cancelled) return;
         const used = loadUsedOrderNumbersFromLocalStorage();
         for (const n of remote) {
@@ -1196,7 +1147,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
   useEffect(() => {
     if (isSupabaseConfigured) return;
     const onStorage = (e) => {
-      if (e.key !== "coke_orders") return;
+      if (e.key !== ordersCacheStorageKey()) return;
       refreshDistributorOrders();
     };
     window.addEventListener("storage", onStorage);
@@ -1349,7 +1300,8 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     !openPhysicalStockDialog &&
     !openStockLiftingDialog;
 
-  const openNewOrder = () => {
+  const openNewOrder = async () => {
+    await loadProductRates();
     setEditingOrder(null);
     setCalculatorInitialInputs(null);
     setShowCalculator(true);
@@ -1367,7 +1319,8 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     await loadProductRates();
   };
 
-  const openPhysicalStock = () => {
+  const openPhysicalStock = async () => {
+    await loadProductRates();
     setOpenPhysicalStockDialog(true);
     setDistributorCurrentView("physical_stock");
   };
@@ -1380,7 +1333,9 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       if (savedView === "orders") setOpenOrdersListDialog(true);
       if (savedView === "product_rates") setOpenProductRateDialog(true);
       if (savedView === "stock_lifting") setOpenStockLiftingDialog(true);
-      if (savedView === "physical_stock") setOpenPhysicalStockDialog(true);
+      if (savedView === "physical_stock") {
+        loadProductRates().finally(() => setOpenPhysicalStockDialog(true));
+      }
       if (savedView === "calculator") setShowCalculator(true);
     } catch (error) {
       console.warn("Could not restore distributor current view:", error);
@@ -1432,15 +1387,12 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       );
 
       try {
-        const stored = localStorage.getItem("coke_orders");
-        if (stored) {
-          const allOrders = JSON.parse(stored);
-          if (Array.isArray(allOrders)) {
-            const updated = allOrders.map((o) =>
-              normalizeOrderNumber(o.orderNumber) === on ? { ...o, tableImageData } : o
-            );
-            localStorage.setItem("coke_orders", JSON.stringify(updated));
-          }
+        const allOrders = readOrdersCache();
+        if (Array.isArray(allOrders) && allOrders.length > 0) {
+          const updated = allOrders.map((o) =>
+            normalizeOrderNumber(o.orderNumber) === on ? { ...o, tableImageData } : o
+          );
+          writeOrdersCache(updated);
         }
       } catch (storageError) {
         console.warn("Could not save order table image to localStorage:", storageError);
@@ -1583,13 +1535,12 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
         );
 
         try {
-          const stored = localStorage.getItem("coke_orders");
-          if (stored) {
-            const allOrders = JSON.parse(stored);
+          const allOrders = readOrdersCache();
+          if (allOrders.length > 0) {
             const updatedOrders = allOrders.map((o) =>
               getOrderKey(o) === editContext.orderKey ? finalUpdatedOrder : o
             );
-            localStorage.setItem("coke_orders", JSON.stringify(updatedOrders));
+            writeOrdersCache(updatedOrders);
           }
         } catch (storageError) {
           console.warn("Error updating localStorage edited order:", storageError);
@@ -1607,15 +1558,6 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
           orderId: finalUpdatedOrder.id || editContext.orderId || null,
         };
       }
-
-      const updatedAchieved = distributor
-        ? {
-            CSD_PC: (distributor.achieved?.CSD_PC || 0) + csdPC,
-            CSD_UC: (distributor.achieved?.CSD_UC || 0) + csdUC,
-            Water_PC: (distributor.achieved?.Water_PC || 0) + waterPC,
-            Water_UC: (distributor.achieved?.Water_UC || 0) + waterUC,
-          }
-        : null;
 
       const totalUC = csdUC + waterUC;
       let finalOrderNumber = await allocateGlobalOrderNumber();
@@ -1675,10 +1617,9 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
         }
       }
 
-      const stored = localStorage.getItem("coke_orders");
-      const allOrders = stored ? JSON.parse(stored) : [];
+      const allOrders = readOrdersCache();
       allOrders.push(order);
-      localStorage.setItem("coke_orders", JSON.stringify(allOrders));
+      writeOrdersCache(allOrders);
 
       const placedKey = getOrderKey(order);
       unmarkOrderLocallyDeleted(distributorCode, placedKey);
@@ -1692,26 +1633,6 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
         );
         return [order, ...rest];
       });
-
-      if (updatedAchieved && distributor) {
-        if (isSupabaseConfigured && distributorCode) {
-          void updateDistributor(distributorCode, { achieved: updatedAchieved })
-            .then(() => setDistributor((prev) => (prev ? { ...prev, achieved: updatedAchieved } : prev)))
-            .catch((updateError) => {
-              console.error("Failed to update distributor achieved in Supabase:", updateError);
-            });
-        } else {
-          const distributors = getDistributors();
-          const updatedDistributors = distributors.map((d) => {
-            if (d.code === distributorCode || d.name === distributorName) {
-              return { ...d, achieved: updatedAchieved };
-            }
-            return d;
-          });
-          saveDistributors(updatedDistributors);
-          setDistributor((prev) => (prev ? { ...prev, achieved: updatedAchieved } : prev));
-        }
-      }
 
       void logActivity(
         ACTIVITY_TYPES.ORDER_CREATED,
@@ -1827,12 +1748,10 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
             console.error("Failed to delete order from Supabase:", supabaseError);
             setOrders(previousOrdersSnapshot);
             try {
-              const stored = localStorage.getItem("coke_orders");
-              const parsed = stored ? JSON.parse(stored) : [];
-              const restored = Array.isArray(parsed) ? [...parsed] : [];
+              const restored = [...readOrdersCache()];
               const stillMissing = !restored.some((o) => getOrderKey(o) === orderKey);
               if (stillMissing) restored.push(order);
-              localStorage.setItem("coke_orders", JSON.stringify(restored));
+              writeOrdersCache(restored);
             } catch (rollbackStorageError) {
               console.warn("Error rolling back localStorage after failed delete:", rollbackStorageError);
             }
@@ -1889,7 +1808,8 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
   };
 
   /** Edit icon: full calculator to change and resubmit (not available for approved). */
-  const handleEditOrderInCalculator = (order) => {
+  const handleEditOrderInCalculator = async (order) => {
+    await loadProductRates();
     const initial = {};
     (order?.data || []).forEach((row) => {
       if (row?.sku) initial[row.sku] = Number(row.cases || 0);
@@ -1986,34 +1906,15 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     return () => window.removeEventListener("popstate", handlePopState);
   }, [closeTopDashboardDialog]);
 
-  const dashboardSurfaceBg =
-    theme.palette.mode === "dark"
-      ? `radial-gradient(circle at top left, ${alpha(theme.palette.primary.main, 0.16)}, transparent 30%), linear-gradient(180deg, ${alpha(theme.palette.background.paper, 0.22)} 0%, ${theme.palette.background.default} 44%)`
-      : `radial-gradient(circle at top left, ${alpha(theme.palette.primary.main, 0.08)}, transparent 30%), linear-gradient(180deg, #fff 0%, ${alpha(theme.palette.grey[50], 0.98)} 46%, #fff 100%)`;
-
   return (
     <Box sx={{ display: "flex", height: "100vh", bgcolor: "background.default" }}>
-      {/* Top AppBar */}
-      <AppBar
-        position="fixed"
-        elevation={0}
-        sx={{
-          zIndex: 1201,
-          bgcolor: alpha(theme.palette.primary.main, 0.96),
-          backdropFilter: "blur(14px)",
-          borderBottom: `1px solid ${alpha(theme.palette.primary.contrastText, 0.12)}`,
-          boxShadow: `0 10px 30px ${alpha(theme.palette.common.black, theme.palette.mode === "dark" ? 0.35 : 0.12)}`,
-        }}
-      >
-        <Toolbar sx={{ gap: 1 }}>
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography variant="subtitle1" noWrap sx={{ fontWeight: 850, fontSize: { xs: "0.95rem", sm: "1.05rem" }, lineHeight: 1.15 }}>
-              {distributorName}
-            </Typography>
-            <Typography variant="caption" sx={{ opacity: 0.82, display: { xs: "none", sm: "block" }, fontWeight: 600 }}>
-              Distributor workspace · {today.toLocaleDateString()}
-            </Typography>
-          </Box>
+      <AppBar elevation={0} sx={{ ...saasAppBarSx(theme), zIndex: (t) => t.zIndex.drawer + 1 }}>
+        <Toolbar sx={saasAppBarToolbarSx()}>
+          <SaasAppBarTitle
+            title={distributorName}
+            subtitle={`Distributor workspace · ${today.toLocaleDateString()}`}
+          />
+          <WorkspaceChip sx={{ display: { xs: "none", sm: "flex" } }} />
           <DayNightThemeToggle />
           <Tooltip title="Notifications">
             <IconButton
@@ -2041,13 +1942,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       <Box
         component="main"
         className="distributor-dashboard-main"
-        sx={{
-          flexGrow: 1,
-          background: dashboardSurfaceBg,
-          p: { xs: 1.5, sm: 3 },
-          pb: { xs: 12, sm: 13 },
-          overflow: "auto",
-        }}
+        sx={saasDashboardMainSx(theme, { withBottomNav: true })}
       >
         <Toolbar />
 
@@ -2129,12 +2024,9 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
             p: { xs: 1.5, sm: 2 },
             mb: 2.5,
             borderRadius: 3,
-            background:
-              theme.palette.mode === "dark"
-                ? `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${alpha(theme.palette.info.main, 0.1)} 48%, ${alpha(theme.palette.success.main, 0.12)} 100%)`
-                : "linear-gradient(135deg, #ffffff 0%, #e3f2fd 48%, #e8f5e9 100%)",
+            bgcolor: "background.paper",
             border: "1px solid",
-            borderColor: alpha(theme.palette.divider, theme.palette.mode === "dark" ? 0.8 : 0.9),
+            borderColor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.35 : 0.22),
             boxShadow: `0 16px 44px ${alpha(theme.palette.common.black, theme.palette.mode === "dark" ? 0.28 : 0.08)}`,
           }}
         >
@@ -2290,13 +2182,13 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                   align="center"
                   sx={{
                     fontWeight: 700,
-                    color: theme.palette.primary.contrastText,
-                    bgcolor: "primary.main",
+                    color: "text.primary",
+                    bgcolor: tableHeaderBg(theme),
+                    borderBottom: `2px solid ${theme.palette.primary.main}`,
                     p: { xs: 0.85, sm: 1.25 },
                     fontSize: { xs: "0.75rem", sm: "0.875rem" },
                     width: { xs: "18%", sm: "auto" },
                     verticalAlign: "middle",
-                    borderBottom: 0,
                   }}
                 >
                   Category
@@ -2306,12 +2198,12 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                   align="center"
                   sx={{
                     fontWeight: 700,
-                    color: theme.palette.primary.contrastText,
-                    bgcolor: "primary.main",
+                    color: "text.primary",
+                    bgcolor: tableHeaderBg(theme),
+                    borderBottom: `2px solid ${theme.palette.primary.main}`,
                     p: { xs: 0.85, sm: 1.25 },
                     fontSize: { xs: "0.75rem", sm: "0.875rem" },
                     width: { xs: "27%", sm: "auto" },
-                    borderBottom: 0,
                   }}
                 >
                   Target
@@ -2321,12 +2213,12 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                   align="center"
                   sx={{
                     fontWeight: 700,
-                    color: theme.palette.primary.contrastText,
-                    bgcolor: "primary.main",
+                    color: "text.primary",
+                    bgcolor: tableHeaderBg(theme),
+                    borderBottom: `2px solid ${theme.palette.primary.main}`,
                     p: { xs: 0.85, sm: 1.25 },
                     fontSize: { xs: "0.75rem", sm: "0.875rem" },
                     width: { xs: "27%", sm: "auto" },
-                    borderBottom: 0,
                   }}
                 >
                   Achieved
@@ -2336,18 +2228,18 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                   align="center"
                   sx={{
                     fontWeight: 700,
-                    color: theme.palette.primary.contrastText,
-                    bgcolor: "primary.main",
+                    color: "text.primary",
+                    bgcolor: tableHeaderBg(theme),
+                    borderBottom: `2px solid ${theme.palette.primary.main}`,
                     p: { xs: 0.85, sm: 1.25 },
                     fontSize: { xs: "0.75rem", sm: "0.875rem" },
                     width: { xs: "28%", sm: "auto" },
-                    borderBottom: 0,
                   }}
                 >
                   Balance
                 </TableCell>
               </TableRow>
-              <TableRow sx={{ bgcolor: "secondary.main" }}>
+              <TableRow sx={{ bgcolor: tableSubHeaderBandBg(theme) }}>
                 {Array(3)
                   .fill()
                   .map((_, i) => (
@@ -2356,12 +2248,12 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                         align="center"
                         sx={{
                           fontWeight: 700,
-                          color: (t) => t.palette.getContrastText(t.palette.secondary.main),
+                          color: "text.secondary",
                           p: { xs: 0.65, sm: 1.15 },
                           fontSize: { xs: "0.7rem", sm: "0.8rem" },
                           lineHeight: { xs: 1.35, sm: 1.5 },
                           borderTop: 1,
-                          borderColor: alpha(theme.palette.common.black, theme.palette.mode === "dark" ? 0.2 : 0.08),
+                          borderColor: "divider",
                         }}
                       >
                         PC
@@ -2370,7 +2262,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                         align="center"
                         sx={{
                           fontWeight: 700,
-                          color: (t) => t.palette.getContrastText(t.palette.secondary.main),
+                          color: "text.secondary",
                           p: { xs: 0.65, sm: 1.15 },
                           fontSize: { xs: "0.7rem", sm: "0.8rem" },
                           lineHeight: { xs: 1.35, sm: 1.5 },
@@ -2392,13 +2284,13 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                   sx={{
                     transition: "background-color 0.15s ease",
                     "&:nth-of-type(odd)": {
-                      bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.14 : 0.05),
+                      bgcolor: theme.palette.mode === "dark" ? alpha(theme.palette.common.white, 0.05) : theme.palette.grey[50],
                     },
                     "&:nth-of-type(even)": {
-                      bgcolor: alpha(theme.palette.secondary.main, theme.palette.mode === "dark" ? 0.12 : 0.07),
+                      bgcolor: "background.paper",
                     },
                     "&:hover": {
-                      bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.22 : 0.1),
+                      bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.12 : 0.06),
                     },
                   }}
                 >
@@ -2651,8 +2543,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
             position="sticky"
             elevation={0}
             sx={{
-              bgcolor: alpha(theme.palette.background.paper, 0.95),
-              backdropFilter: "blur(12px)",
+              bgcolor: "background.paper",
               borderBottom: 1,
               borderColor: "divider",
               color: "text.primary",
@@ -2665,6 +2556,9 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                 </Typography>
                 <Typography variant="caption" color="text.secondary" noWrap>
                   {distributorName}
+                  {productRates?.products?.length
+                    ? ` · ${getCatalogSkusGrouped(productRates).all.length} products from catalogue`
+                    : ""}
                 </Typography>
               </Box>
               <IconButton
@@ -2840,11 +2734,6 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                           <Typography variant="body2" sx={{ fontWeight: 700, color: "text.primary" }}>
                             {row.name}
                           </Typography>
-                          {row.source === "Custom" ? (
-                            <Typography variant="caption" color="text.secondary">
-                              Custom product
-                            </Typography>
-                          ) : null}
                         </TableCell>
                         <TableCell align="center">
                           <Chip
@@ -2925,7 +2814,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
               headerLayout="flat"
               showTotalsRow
               maxHeight={{ xs: "calc(100vh - 220px)", sm: "60vh" }}
-              emptyMessage="When the admin uploads sales for your distributor code, lifts will appear here."
+              emptyMessage="When shipping marks your orders dispatched, stock lifts will appear here."
               {...stockLiftSkuHandlers}
             />
           </DialogContent>
@@ -2966,6 +2855,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
           showToast={showToast}
           onDialogOpened={handlePhysicalStockDialogOpened}
           onPhysicalStockAcknowledged={handlePhysicalStockAcknowledged}
+          productRates={productRates}
         />
 
         <Paper
@@ -2984,8 +2874,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
             borderRadius: "18px 18px 0 0",
             borderTop: "1px solid",
             borderColor: "divider",
-            bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === "dark" ? 0.96 : 0.98),
-            backdropFilter: "blur(14px)",
+            bgcolor: "background.paper",
           }}
         >
           <Box

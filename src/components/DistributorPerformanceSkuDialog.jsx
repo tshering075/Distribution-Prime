@@ -215,8 +215,8 @@ export default function DistributorPerformanceSkuDialog({
 
         {bounds.rowCount === 0 ? (
           <Typography color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
-            No uploaded sales rows matched this distributor. Upload sales Excel with a matching Party Name / Address or
-            distributor code.
+            No dispatched-order records matched this distributor yet. Achievement rows are created when shipping marks
+            orders dispatched.
           </Typography>
         ) : !hasAnySku ? (
           <Typography color="text.secondary" sx={{ py: 3, textAlign: "center" }}>

@@ -200,7 +200,8 @@ export default function FgStocksDialog({ open, onClose, onSaved, onNotify }) {
       <Box
         sx={{
           flexShrink: 0,
-          background: "linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%)",
+          background: (t) =>
+            `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
           color: "#fff",
           px: { xs: 1.5, sm: 2.5 },
           py: { xs: 1.25, sm: 1.5 },

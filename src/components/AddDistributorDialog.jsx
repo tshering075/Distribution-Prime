@@ -8,10 +8,10 @@ import {
   Box,
   TextField,
   Button,
-  Paper,
   Select,
   MenuItem,
   Grid,
+  Paper,
   Avatar,
   CircularProgress,
   LinearProgress,
@@ -22,15 +22,50 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  FormControl,
+  InputLabel,
+  Stack,
 } from "@mui/material";
+import { useTheme, alpha } from "@mui/material/styles";
 import CloseIcon from "@mui/icons-material/Close";
 import AddIcon from "@mui/icons-material/Add";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import DownloadIcon from "@mui/icons-material/Download";
-import PeopleIcon from "@mui/icons-material/People";
 import LockIcon from "@mui/icons-material/Lock";
+import BusinessIcon from "@mui/icons-material/Business";
 import { hashPasswordForStorage, isUsernameTaken, getDistributors } from "../utils/distributorAuth";
 import { getAllDistributors, supabase } from "../services/supabaseService";
+import DistributorPhoneField from "./DistributorPhoneField";
+import {
+  DEFAULT_PHONE_COUNTRY,
+  formatPhoneForStorage,
+  normalizeBulkPhone,
+  validateLocalPhone,
+} from "../utils/distributorPhone";
+
+const fieldSx = {
+  "& .MuiOutlinedInput-root": { borderRadius: 2 },
+};
+
+function SectionHeading({ icon: Icon, title, subtitle }) {
+  return (
+    <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: 2 }}>
+      <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main", color: "primary.contrastText" }}>
+        <Icon sx={{ fontSize: 20 }} />
+      </Avatar>
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+          {title}
+        </Typography>
+        {subtitle ? (
+          <Typography variant="caption" color="text.secondary">
+            {subtitle}
+          </Typography>
+        ) : null}
+      </Box>
+    </Stack>
+  );
+}
 
 /**
  * Props:
@@ -39,14 +74,18 @@ import { getAllDistributors, supabase } from "../services/supabaseService";
  * - canWrite - permission check
  */
 export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = true }) {
+  const theme = useTheme();
   const [form, setForm] = useState({
     name: "",
     code: "",
     region: "Southern",
+    phoneCountry: DEFAULT_PHONE_COUNTRY,
     phone: "",
     password: "",
     username: "",
     address: "",
+    gstin: "",
+    tpn: "",
   });
   const [codeUniqueness, setCodeUniqueness] = useState({ isUnique: null, message: "" });
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
@@ -64,7 +103,7 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
 
   const reset = () => {
     setCodeUniqueness({ isUnique: null, message: "" });
-    setForm({ name: "", code: "", region: "Southern", phone: "", password: "", username: "", address: "" });
+    setForm({ name: "", code: "", region: "Southern", phoneCountry: DEFAULT_PHONE_COUNTRY, phone: "", password: "", username: "", address: "", gstin: "", tpn: "" });
   };
 
   const handleChange = (k) => (e) => {
@@ -78,12 +117,6 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
     if (k === "code") {
       checkCodeUniqueness(value);
     }
-  };
-
-  const validatePhone = (phone) => {
-    const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/;
-    const digitsOnly = phone.replace(/\D/g, '');
-    return phoneRegex.test(phone) && digitsOnly.length >= 10 && digitsOnly.length <= 15;
   };
 
   const validateCode = (code) => {
@@ -134,12 +167,13 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
     }
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     // Trim all string inputs
     const trimmedName = (form.name || "").trim();
     const trimmedCode = (form.code || "").trim().toUpperCase();
     const trimmedUsername = (form.username || "").trim();
     const trimmedPhone = (form.phone || "").trim();
+    const phoneDial = form.phoneCountry || DEFAULT_PHONE_COUNTRY;
     
     // Validation
     if (!trimmedName || trimmedName.length < 2) { 
@@ -201,8 +235,9 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
     }
 
     // Validate phone if provided
-    if (trimmedPhone && !validatePhone(trimmedPhone)) {
-      alert("Please enter a valid phone number (10-15 digits)");
+    const phoneCheck = validateLocalPhone(phoneDial, trimmedPhone);
+    if (trimmedPhone && !phoneCheck.valid) {
+      alert(phoneCheck.message || "Please enter a valid phone number");
       return;
     }
     
@@ -211,8 +246,10 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
       name: trimmedName,
       code: trimmedCode,
       region: form.region,
-      phone: trimmedPhone || "",
-      address: form.address || "",
+      phone: trimmedPhone ? formatPhoneForStorage(phoneDial, trimmedPhone) : "",
+      address: (form.address || "").trim(),
+      gstin: (form.gstin || "").trim(),
+      tpn: (form.tpn || "").trim(),
       credentials: {
         username: trimmedUsername,
         passwordHash: hashPasswordForStorage(form.password),
@@ -351,7 +388,7 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
               name,
               code: code,
               region: region || "Southern",
-              phone: phone || "",
+              phone: normalizeBulkPhone(phone) || "",
               address: address || "",
               username: username,
               password,
@@ -555,7 +592,7 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
             continue;
           }
           
-          const validRegions = ["Southern", "Western", "Eastern", "PLING", "THIM"];
+          const validRegions = ["Southern", "Western", "Eastern", "Northern"];
           const region = validRegions.includes(distData.region) ? distData.region : "Southern";
           
           const payload = {
@@ -635,323 +672,270 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
 
   return (
     <>
-      <Dialog 
-        fullScreen 
-        open={open} 
+      <Dialog
+        fullScreen
+        open={open}
         onClose={() => { reset(); onClose && onClose(); }}
         disableEnforceFocus={false}
         disableAutoFocus={false}
+        PaperProps={{ sx: { bgcolor: "background.default", color: "text.primary" } }}
       >
-        <AppBar sx={{ position: "relative", bgcolor: "#d61916" }}>
-          <Toolbar>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexGrow: 1 }}>
-              <Avatar sx={{ bgcolor: "rgba(255,255,255,0.2)", width: 40, height: 40 }}>
+        <AppBar elevation={0} sx={{ position: "relative", bgcolor: "#1565c0" }}>
+          <Toolbar sx={{ gap: 1, minHeight: { xs: 56, sm: 64 } }}>
+            <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flexGrow: 1, minWidth: 0 }}>
+              <Avatar sx={{ bgcolor: alpha(theme.palette.common.white, 0.18), width: 40, height: 40 }}>
                 <AddIcon />
               </Avatar>
-              <Box>
-                <Typography variant="h6" sx={{ fontWeight: 600, color: "white" }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h6" noWrap sx={{ fontWeight: 700, color: "white", lineHeight: 1.2 }}>
                   Add New Distributor
                 </Typography>
-                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.8)" }}>
-                  Register a new distributor to the system
+                <Typography variant="caption" noWrap sx={{ color: alpha(theme.palette.common.white, 0.82), display: "block" }}>
+                  Register a distributor and set login credentials
                 </Typography>
               </Box>
-            </Box>
+            </Stack>
             <Button
               color="inherit"
-              onClick={() => { reset(); }}
-              sx={{ mr: 1, bgcolor: "rgba(255,255,255,0.2)", "&:hover": { bgcolor: "rgba(255,255,255,0.3)" } }}
+              onClick={() => reset()}
+              sx={{
+                display: { xs: "none", sm: "inline-flex" },
+                borderRadius: 2,
+                textTransform: "none",
+                fontWeight: 600,
+                bgcolor: alpha(theme.palette.common.white, 0.14),
+                "&:hover": { bgcolor: alpha(theme.palette.common.white, 0.24) },
+              }}
             >
-              Clear Form
+              Clear form
             </Button>
-            <IconButton edge="end" color="inherit" onClick={() => { reset(); onClose && onClose(); }} aria-label="close">
+            <IconButton color="inherit" onClick={() => { reset(); onClose && onClose(); }} aria-label="close">
               <CloseIcon />
             </IconButton>
           </Toolbar>
         </AppBar>
 
-        <Box sx={{ p: { xs: 2, sm: 3 }, maxHeight: "100vh", overflow: "auto" }}>
-          {/* Form Section */}
-          <Paper 
-            elevation={4} 
-            sx={{ 
-              p: { xs: 2.5, sm: 3.5 }, 
-              mb: 3, 
-              borderRadius: 4,
-              background: "linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)",
-              border: "1px solid #e0e0e0"
-            }}
-          >
-            <Box sx={{ 
-              display: "flex", 
-              alignItems: "center", 
-              gap: 2, 
-              mb: 3,
-              pb: 2,
-              borderBottom: "3px solid #d61916"
-            }}>
-              <Avatar sx={{ bgcolor: "#d61916", width: 48, height: 48 }}>
-                <AddIcon />
-              </Avatar>
-              <Box>
-                <Typography variant="h5" sx={{ fontWeight: 700, color: "#333", mb: 0.5 }}>
-                  Add New Distributor
-                </Typography>
-                <Typography variant="body2" sx={{ color: "#666" }}>
-                  Register a new distributor to the system
-                </Typography>
-              </Box>
-            </Box>
-            <Grid container spacing={3}>
-              {/* Personal Information Section */}
-              <Grid size={{ xs: 12 }}>
-                <Box sx={{ 
-                  display: "flex", 
-                  alignItems: "center", 
-                  gap: 1.5, 
-                  mb: 2,
-                  pb: 1.5,
-                  borderBottom: "2px solid #e0e0e0"
-                }}>
-                  <PeopleIcon sx={{ color: "#d61916", fontSize: 24 }} />
-                  <Typography variant="h6" sx={{ color: "#333", fontWeight: 700, fontSize: "1.1rem" }}>
-                    Personal Information
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                <TextField 
-                  fullWidth 
-                  label="Name *" 
-                  value={form.name} 
-                  onChange={handleChange("name")}
-                  required
-                  sx={{ 
-                    bgcolor: "#fff",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <TextField 
-                  fullWidth 
-                  label="Code *" 
-                  value={form.code} 
-                  onChange={handleChange("code")}
-                  required
-                  error={codeUniqueness.isUnique === false}
-                  helperText={
-                    codeUniqueness.message || "Enter a unique distributor code (2-20 alphanumeric characters)"
-                  }
-                  FormHelperTextProps={{
-                    sx: {
-                      color: codeUniqueness.isUnique === true ? "success.main" : 
-                             codeUniqueness.isUnique === false ? "error.main" : "inherit"
-                    }
-                  }}
-                  sx={{ 
-                    bgcolor: "#fff",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      },
-                      "&.Mui-focused fieldset": {
-                        borderColor: codeUniqueness.isUnique === true ? "success.main" : 
-                                     codeUniqueness.isUnique === false ? "error.main" : undefined,
-                        borderWidth: 2
-                      }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Select 
-                  fullWidth 
-                  value={form.region} 
-                  onChange={handleChange("region")}
-                  sx={{ 
-                    bgcolor: "#fff",
-                    borderRadius: 2,
-                    "& .MuiOutlinedInput-notchedOutline": {
-                      borderRadius: 2
-                    },
-                    "&:hover": {
-                      "& .MuiOutlinedInput-notchedOutline": {
-                        borderColor: "#d61916"
-                      }
-                    }
+        <Box
+          sx={{
+            p: { xs: 1.5, sm: 2.5, md: 3 },
+            overflow: "auto",
+            maxHeight: "calc(100vh - 64px)",
+            bgcolor: "background.default",
+          }}
+        >
+          <Box sx={{ maxWidth: 960, mx: "auto" }}>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, lg: 8 }}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: { xs: 2, sm: 2.5 },
+                    borderRadius: 2.5,
+                    bgcolor: "background.paper",
+                    borderColor: "divider",
+                    boxShadow: (t) => `0 8px 28px ${alpha(t.palette.common.black, t.palette.mode === "dark" ? 0.25 : 0.06)}`,
                   }}
                 >
-                  <MenuItem value="Southern">Southern</MenuItem>
-                  <MenuItem value="Western">Western</MenuItem>
-                  <MenuItem value="Eastern">Eastern</MenuItem>
-                  <MenuItem value="PLING">PLING</MenuItem>
-                  <MenuItem value="THIM">THIM</MenuItem>
-                </Select>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <TextField
-                  fullWidth
-                  label="Phone Number"
-                  value={form.phone}
-                  onChange={handleChange("phone")}
-                  type="tel"
-                  placeholder="+1234567890"
-                  helperText="Optional: Enter phone number (10-15 digits)"
-                  sx={{ 
-                    bgcolor: "#fff",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <TextField
-                  fullWidth
-                  label="Address"
-                  value={form.address}
-                  onChange={handleChange("address")}
-                  multiline
-                  minRows={2}
-                  sx={{ 
-                    bgcolor: "#fff",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
-                />
-              </Grid>
+                  <SectionHeading
+                    icon={BusinessIcon}
+                    title="Business details"
+                    subtitle="Name, region, contact and tax information"
+                  />
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Name *"
+                        value={form.name}
+                        onChange={handleChange("name")}
+                        required
+                        sx={fieldSx}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 3 }}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Code *"
+                        value={form.code}
+                        onChange={handleChange("code")}
+                        required
+                        error={codeUniqueness.isUnique === false}
+                        helperText={codeUniqueness.message || "Unique alphanumeric code"}
+                        FormHelperTextProps={{
+                          sx: {
+                            color: codeUniqueness.isUnique === true ? "success.main"
+                              : codeUniqueness.isUnique === false ? "error.main" : "text.secondary",
+                          },
+                        }}
+                        sx={fieldSx}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 3 }}>
+                      <FormControl fullWidth size="small">
+                        <InputLabel id="add-dist-region">Region *</InputLabel>
+                        <Select
+                          labelId="add-dist-region"
+                          label="Region *"
+                          value={form.region}
+                          onChange={handleChange("region")}
+                          sx={{ borderRadius: 2 }}
+                        >
+                          <MenuItem value="Southern">Southern</MenuItem>
+                          <MenuItem value="Western">Western</MenuItem>
+                          <MenuItem value="Eastern">Eastern</MenuItem>
+                          <MenuItem value="Northern">Northern</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 8 }}>
+                      <DistributorPhoneField
+                        countryDial={form.phoneCountry || DEFAULT_PHONE_COUNTRY}
+                        localValue={form.phone}
+                        onCountryChange={(dial) => setForm((prev) => ({ ...prev, phoneCountry: dial, phone: "" }))}
+                        onLocalChange={(local) => setForm((prev) => ({ ...prev, phone: local }))}
+                        fieldSx={fieldSx}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 4 }}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="GSTIN No."
+                        value={form.gstin}
+                        onChange={handleChange("gstin")}
+                        placeholder="Optional"
+                        sx={fieldSx}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 4 }}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="TPN No."
+                        value={form.tpn}
+                        onChange={handleChange("tpn")}
+                        placeholder="Optional · for invoices"
+                        sx={fieldSx}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12 }}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Address"
+                        value={form.address}
+                        onChange={handleChange("address")}
+                        multiline
+                        minRows={2}
+                        placeholder="Optional"
+                        sx={fieldSx}
+                      />
+                    </Grid>
+                  </Grid>
 
-              {/* Credentials Section */}
-              <Grid size={{ xs: 12 }} sx={{ mt: 2 }}>
-                <Box sx={{ 
-                  display: "flex", 
-                  alignItems: "center", 
-                  gap: 1.5, 
-                  mb: 2,
-                  pb: 1.5,
-                  borderBottom: "2px solid #e0e0e0"
-                }}>
-                  <LockIcon sx={{ color: "#d61916", fontSize: 24 }} />
-                  <Typography variant="h6" sx={{ color: "#333", fontWeight: 700, fontSize: "1.1rem" }}>
-                    Login Credentials
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField 
-                  fullWidth 
-                  label="Username *" 
-                  value={form.username} 
-                  onChange={handleChange("username")}
-                  required
-                  helperText="Used for distributor login"
-                  sx={{ 
-                    bgcolor: "#fff",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField 
-                  fullWidth 
-                  type="password" 
-                  label="Password *" 
-                  value={form.password} 
-                  onChange={handleChange("password")}
-                  required
-                  helperText="Minimum 4 characters"
-                  sx={{ 
-                    bgcolor: "#fff",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
-                />
-              </Grid>
+                  <Box sx={{ mt: 3, pt: 2.5, borderTop: 1, borderColor: "divider" }}>
+                    <SectionHeading
+                      icon={LockIcon}
+                      title="Login credentials"
+                      subtitle="Used when the distributor signs in"
+                    />
+                    <Grid container spacing={2}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          label="Username *"
+                          value={form.username}
+                          onChange={handleChange("username")}
+                          required
+                          sx={fieldSx}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          type="password"
+                          label="Password *"
+                          value={form.password}
+                          onChange={handleChange("password")}
+                          required
+                          helperText="Minimum 4 characters"
+                          sx={fieldSx}
+                        />
+                      </Grid>
+                    </Grid>
+                  </Box>
 
-              {/* Action Buttons */}
-              <Grid size={{ xs: 12 }} sx={{ mt: 3, pt: 3, borderTop: "2px solid #e0e0e0" }}>
-                <Box sx={{ display: "flex", gap: 2, justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
-                  <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={1.5}
+                    justifyContent="flex-end"
+                    sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: "divider" }}
+                  >
                     <Button
                       variant="outlined"
-                      color="primary"
-                      startIcon={loadingFile ? <CircularProgress size={18} /> : <UploadFileIcon />}
-                      onClick={triggerBulkUpload}
-                      disabled={loadingFile}
-                      sx={{
-                        borderRadius: 2,
-                        px: 3,
-                        py: 1,
-                        fontWeight: 600,
-                        textTransform: "none",
-                        borderWidth: 2,
-                        transition: "all 0.2s",
-                        "&:hover": {
-                          borderWidth: 2,
-                          transform: "translateY(-2px)",
-                          boxShadow: 3
-                        }
-                      }}
+                      onClick={() => reset()}
+                      sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
                     >
-                      {loadingFile ? "Uploading..." : "Bulk Upload"}
+                      Clear
                     </Button>
                     <Button
+                      variant="contained"
+                      startIcon={<AddIcon />}
+                      onClick={handleAdd}
+                      disabled={!canWrite}
+                      sx={{ borderRadius: 2, textTransform: "none", fontWeight: 700, minWidth: 140, boxShadow: 2 }}
+                      title={!canWrite ? "You don't have permission to add distributors." : ""}
+                    >
+                      Register distributor
+                    </Button>
+                  </Stack>
+                </Paper>
+              </Grid>
+
+              <Grid size={{ xs: 12, lg: 4 }}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: { xs: 2, sm: 2.25 },
+                    borderRadius: 2.5,
+                    bgcolor: (t) => alpha(t.palette.primary.main, t.palette.mode === "dark" ? 0.08 : 0.04),
+                    borderColor: (t) => alpha(t.palette.primary.main, 0.25),
+                    height: { lg: "100%" },
+                  }}
+                >
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                    <UploadFileIcon color="primary" fontSize="small" />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                      Bulk import
+                    </Typography>
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.5 }}>
+                    Upload an Excel file to register many distributors at once, or download the template first.
+                  </Typography>
+                  <Stack spacing={1.25}>
+                    <Button
+                      fullWidth
                       variant="outlined"
-                      color="secondary"
+                      startIcon={loadingFile ? <CircularProgress size={16} /> : <UploadFileIcon />}
+                      onClick={triggerBulkUpload}
+                      disabled={loadingFile || !canWrite}
+                      sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600, bgcolor: "background.paper" }}
+                    >
+                      {loadingFile ? "Uploading…" : "Bulk upload Excel"}
+                    </Button>
+                    <Button
+                      fullWidth
+                      variant="text"
                       startIcon={<DownloadIcon />}
                       onClick={downloadDistributorTemplate}
                       disabled={loadingFile}
-                      sx={{
-                        borderRadius: 2,
-                        px: 3,
-                        py: 1,
-                        fontWeight: 600,
-                        textTransform: "none",
-                        borderWidth: 2,
-                        transition: "all 0.2s",
-                        "&:hover": {
-                          borderWidth: 2,
-                          transform: "translateY(-2px)",
-                          boxShadow: 3
-                        }
-                      }}
+                      sx={{ textTransform: "none", fontWeight: 600 }}
                     >
-                      Download Template
+                      Download template
                     </Button>
                     <input
                       ref={hiddenFileRef}
@@ -960,41 +944,31 @@ export default function AddDistributorDialog({ open, onClose, onAdd, canWrite = 
                       onChange={onBulkUploadFileChange}
                       style={{ display: "none" }}
                     />
-                    <Typography variant="caption" sx={{ color: "#666", fontStyle: "italic", ml: 1 }}>
-                      Excel columns: name, code, region, phone, address, username, password
+                  </Stack>
+                  <Box
+                    sx={{
+                      mt: 2,
+                      p: 1.25,
+                      borderRadius: 1.5,
+                      bgcolor: "background.paper",
+                      border: 1,
+                      borderColor: "divider",
+                    }}
+                  >
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block", mb: 0.5 }}>
+                      Excel columns
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" component="p" sx={{ lineHeight: 1.45 }}>
+                      name, code, region, phone, address, username, password
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.75, lineHeight: 1.45 }}>
+                      Optional: gstin, tpn
                     </Typography>
                   </Box>
-                  <Box sx={{ display: "flex", gap: 2 }}>
-                    <Button 
-                      variant="contained" 
-                      startIcon={<AddIcon />}
-                      onClick={handleAdd}
-                      disabled={!canWrite}
-                      sx={{ 
-                        minWidth: 140,
-                        borderRadius: 2,
-                        px: 4,
-                        py: 1,
-                        fontWeight: 700,
-                        textTransform: "none",
-                        background: "linear-gradient(135deg, #d61916 0%, #b71c1c 100%)",
-                        boxShadow: 3,
-                        transition: "all 0.2s",
-                        "&:hover": {
-                          background: "linear-gradient(135deg, #b71c1c 0%, #8e0000 100%)",
-                          transform: "translateY(-2px)",
-                          boxShadow: 5
-                        }
-                      }}
-                      title={!canWrite ? "You don't have permission to add distributors. Only admins can add distributors." : ""}
-                    >
-                      Register
-                    </Button>
-                  </Box>
-                </Box>
+                </Paper>
               </Grid>
             </Grid>
-          </Paper>
+          </Box>
         </Box>
       </Dialog>
 

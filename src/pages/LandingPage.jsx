@@ -22,8 +22,12 @@ import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
 import DayNightThemeToggle from "../components/DayNightThemeToggle";
-import { APP_NAME, BRAND_MARK_SRC, PRIVACY_POLICY_PATH, TERMS_OF_SERVICE_PATH } from "../constants/brand";
+import { InstallAppButton } from "../components/InstallAppBanner";
+import { BRAND_MARK_SRC, PRIVACY_POLICY_PATH, TERMS_OF_SERVICE_PATH } from "../constants/brand";
+import { logoSrcWithPublicUrl } from "../utils/organizationBrand";
+import { PLATFORM_NAME, PLATFORM_TAGLINE, PLATFORM_DESCRIPTION } from "../constants/saas";
 import { markLandingSeen } from "../utils/landingSeen";
+import { appPageShellBackground } from "../theme/contrastSurfaces";
 
 const publicUrl = process.env.PUBLIC_URL || "";
 
@@ -51,7 +55,7 @@ const PREVIEW_STATS = [
   { label: "Active Products", value: "23", tone: "info" },
 ];
 
-const TRUST_POINTS = ["Admin controlled", "Distributor ready", "Mobile friendly"];
+const TRUST_POINTS = ["Isolated workspaces", "Team invites", "Role-based access"];
 
 const WORKFLOW_STEPS = [
   "Set targets and product rates",
@@ -61,7 +65,7 @@ const WORKFLOW_STEPS = [
 
 export default function LandingPage() {
   const theme = useTheme();
-  const brand = theme.palette.error.main;
+  const brand = theme.palette.primary.main;
   const isDark = theme.palette.mode === "dark";
 
   useEffect(() => {
@@ -70,7 +74,7 @@ export default function LandingPage() {
 
   const previewBg = isDark
     ? alpha(theme.palette.background.paper, 0.72)
-    : alpha(theme.palette.common.white, 0.86);
+    : alpha(theme.palette.background.paper, 0.92);
 
   return (
     <Box
@@ -81,7 +85,7 @@ export default function LandingPage() {
         bgcolor: "background.default",
         backgroundImage: isDark
           ? `radial-gradient(circle at 18% 10%, ${alpha(brand, 0.22)} 0, transparent 28%), radial-gradient(circle at 84% 18%, ${alpha(theme.palette.info.main, 0.16)} 0, transparent 30%), linear-gradient(180deg, ${alpha(theme.palette.background.paper, 0.45)} 0%, transparent 50%)`
-          : `radial-gradient(circle at 18% 10%, ${alpha(brand, 0.12)} 0, transparent 28%), radial-gradient(circle at 84% 18%, ${alpha(theme.palette.info.light, 0.28)} 0, transparent 30%), linear-gradient(180deg, #fff 0%, ${alpha(theme.palette.grey[50], 0.96)} 58%, #fff 100%)`,
+          : appPageShellBackground(theme),
       }}
     >
       <Box
@@ -101,22 +105,23 @@ export default function LandingPage() {
             <Stack direction="row" alignItems="center" spacing={1.25} sx={{ minWidth: 0 }}>
               <Box
                 component="img"
-                src={`${publicUrl}${BRAND_MARK_SRC}`}
+                src={logoSrcWithPublicUrl(BRAND_MARK_SRC, publicUrl)}
                 alt=""
                 sx={{ width: { xs: 38, sm: 44 }, height: { xs: 38, sm: 44 }, objectFit: "contain", flexShrink: 0 }}
               />
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 900, lineHeight: 1.15 }} noWrap>
-                  {APP_NAME}
+                  {PLATFORM_NAME}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "none", sm: "block" } }}>
-                  Tashi Beverages Ltd
+                  Distribution management
                 </Typography>
               </Box>
             </Stack>
 
             <Stack direction="row" alignItems="center" spacing={{ xs: 0.75, sm: 1 }}>
               <DayNightThemeToggle />
+              <InstallAppButton size="small" sx={{ display: { xs: "none", sm: "inline-flex" } }} />
               <Button
                 component={RouterLink}
                 to="/login"
@@ -191,7 +196,7 @@ export default function LandingPage() {
               <Stack spacing={{ xs: 2.25, sm: 3 }} alignItems={{ xs: "center", md: "flex-start" }} textAlign={{ xs: "center", md: "left" }}>
                 <Chip
                   icon={<VerifiedUserOutlinedIcon />}
-                  label="Private business workspace"
+                  label="Multi-tenant SaaS"
                   sx={{
                     height: 34,
                     px: 0.75,
@@ -209,7 +214,7 @@ export default function LandingPage() {
                     variant="overline"
                     sx={{ fontWeight: 900, letterSpacing: 1.2, color: "text.secondary", mb: 0.75 }}
                   >
-                    {APP_NAME}
+                    {PLATFORM_NAME}
                   </Typography>
                   <Typography
                     component="h1"
@@ -222,7 +227,7 @@ export default function LandingPage() {
                       maxWidth: 690,
                     }}
                   >
-                    Distribution operations, organized.
+                    {PLATFORM_TAGLINE}
                   </Typography>
                   <Typography
                     variant="h6"
@@ -235,7 +240,7 @@ export default function LandingPage() {
                       fontSize: { xs: "1rem", sm: "1.15rem" },
                     }}
                   >
-                    CokeSales brings distributor orders, product prices, targets, and stock updates into a focused workspace for daily operations.
+                    {PLATFORM_DESCRIPTION}
                   </Typography>
                 </Box>
 
@@ -248,7 +253,7 @@ export default function LandingPage() {
                   <Button
                     component={RouterLink}
                     to="/login"
-                    variant="contained"
+                    variant="outlined"
                     size="large"
                     startIcon={<LoginIcon />}
                     sx={{
@@ -257,13 +262,18 @@ export default function LandingPage() {
                       fontWeight: 950,
                       borderRadius: 2.25,
                       px: 3.25,
-                      bgcolor: brand,
-                      boxShadow: `0 16px 32px ${alpha(brand, 0.3)}`,
-                      "&:hover": { bgcolor: theme.palette.error.dark },
                     }}
                   >
-                    Sign in securely
+                    Sign in
                   </Button>
+                  <InstallAppButton
+                    size="large"
+                    sx={{
+                      minHeight: 50,
+                      borderRadius: 2.25,
+                      px: 3.25,
+                    }}
+                  />
                   <Button
                     component="a"
                     href={`${publicUrl}${TERMS_OF_SERVICE_PATH}`}
@@ -323,8 +333,8 @@ export default function LandingPage() {
                   <Stack direction="row" spacing={1.5} alignItems="center">
                     <Box
                       component="img"
-                      src={`${publicUrl}${BRAND_MARK_SRC}`}
-                      alt={APP_NAME}
+                      src={logoSrcWithPublicUrl(BRAND_MARK_SRC, publicUrl)}
+                      alt={PLATFORM_NAME}
                       sx={{ width: { xs: 58, sm: 70 }, height: "auto", flexShrink: 0 }}
                     />
                     <Box sx={{ minWidth: 0 }}>
@@ -511,6 +521,7 @@ export default function LandingPage() {
               </Stack>
             </Paper>
           </Box>
+
         </Container>
       </Box>
 
@@ -524,9 +535,15 @@ export default function LandingPage() {
             textAlign={{ xs: "center", sm: "left" }}
           >
             <Typography variant="caption" color="text.secondary">
-              &copy; {new Date().getFullYear()} Tashi Beverages Ltd
+              &copy; {new Date().getFullYear()} {PLATFORM_NAME}
             </Typography>
             <Typography variant="caption" component="nav" aria-label="Legal">
+              <Link component={RouterLink} to="/platform/login" underline="hover" color="text.secondary" fontWeight={800}>
+                Platform console
+              </Link>
+              <Box component="span" sx={{ mx: 1, color: "text.disabled" }}>
+                |
+              </Box>
               <Link href={`${publicUrl}${PRIVACY_POLICY_PATH}`} underline="hover" color="text.secondary" fontWeight={800}>
                 Privacy Policy
               </Link>

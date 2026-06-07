@@ -47,17 +47,11 @@ import CardGiftcardOutlinedIcon from "@mui/icons-material/CardGiftcardOutlined";
 import CurrencyRupeeIcon from "@mui/icons-material/CurrencyRupee";
 import AppSnackbar from "./AppSnackbar";
 import StatCard from "./StatCard";
-
-const PRODUCT_SKUS = {
-  "CSD 300ml": ["COKE 300 ML", "FANTA 300 ML", "SPRITE 300 ML", "CHARGED 300 ML"],
-  "CSD 500ml": ["COKE 500 ML", "FANTA 500 ML", "SPRITE 500 ML"],
-  "CSD 1.25L": ["COKE 1.25 L", "FANTA 1.25 L", "SPRITE 1.25 L"],
-  "Water 200ml": ["KINLEY WATER 200 ML"],
-  "Water 500ml": ["KINLEY WATER 500 ML"],
-  "Water 1L": ["KINLEY WATER 1 L"],
-};
-
-const ALL_SKUS = Object.values(PRODUCT_SKUS).flat();
+import {
+  getAllCatalogLineNames,
+  getCatalogProductsGrouped,
+  inferSchemeAppliesTo,
+} from "../utils/productCatalog";
 
 function formatDateRange(start, end) {
   if (!start || !end) return "—";
@@ -357,6 +351,8 @@ export default function SchemeDiscountDialog({
   schemes = [],
   onSaveScheme,
   onDeleteScheme,
+  productRates = null,
+  onOpenRateMaster,
 }) {
   const theme = useTheme();
   const [schemeType, setSchemeType] = useState("csd_scheme");
@@ -405,6 +401,18 @@ export default function SchemeDiscountDialog({
       prevDistributorsRef.current = selectedDistributors;
     }
   }, [selectedDistributors]);
+
+  const catalogProductsGrouped = useMemo(
+    () => getCatalogProductsGrouped(productRates),
+    [productRates]
+  );
+
+  const allCatalogSkus = useMemo(
+    () => getAllCatalogLineNames(productRates),
+    [productRates]
+  );
+
+  const hasCatalogProducts = allCatalogSkus.length > 0;
 
   const validDistributors = useMemo(
     () =>
@@ -508,24 +516,9 @@ export default function SchemeDiscountDialog({
       return;
     }
 
-    const csdSKUs = validSKUs.filter(
-      (sku) =>
-        PRODUCT_SKUS["CSD 300ml"].includes(sku) ||
-        PRODUCT_SKUS["CSD 500ml"].includes(sku) ||
-        PRODUCT_SKUS["CSD 1.25L"].includes(sku)
-    );
-    const waterSKUs = validSKUs.filter(
-      (sku) =>
-        PRODUCT_SKUS["Water 200ml"].includes(sku) ||
-        PRODUCT_SKUS["Water 500ml"].includes(sku) ||
-        PRODUCT_SKUS["Water 1L"].includes(sku)
-    );
-    let appliesTo = "csd";
-    if (csdSKUs.length > 0 && waterSKUs.length > 0) appliesTo = "both";
-    else if (waterSKUs.length > 0) appliesTo = "water";
-
     const distributorsArray = validSelectedDistributors.map((d) => String(d).trim()).filter((d) => d.length > 0);
     const skusArray = validSKUs.map((s) => String(s).trim()).filter((s) => s.length > 0);
+    const appliesTo = inferSchemeAppliesTo(skusArray, productRates);
 
     if (distributorsArray.length === 0) {
       showToast("error", "Invalid selection", "Selected distributors have no valid codes. Check distributor setup.");
@@ -722,8 +715,22 @@ export default function SchemeDiscountDialog({
                     <SectionHeader
                       icon={Inventory2OutlinedIcon}
                       title="Products"
-                      subtitle="SKUs this offer applies to"
+                      subtitle="From Product & Rate Master — active SKUs only"
                     />
+                    {!hasCatalogProducts ? (
+                      <Alert severity="warning" variant="outlined" sx={{ mb: 1.5 }}>
+                        No products in this workspace catalogue. Add products in{" "}
+                        <strong>Product &amp; Rate Master</strong> first.
+                        {onOpenRateMaster ? (
+                          <>
+                            {" "}
+                            <Button size="small" onClick={onOpenRateMaster} sx={{ textTransform: "none", fontWeight: 700 }}>
+                              Open catalogue
+                            </Button>
+                          </>
+                        ) : null}
+                      </Alert>
+                    ) : null}
                     <TextField
                       fullWidth
                       size="small"
@@ -745,11 +752,14 @@ export default function SchemeDiscountDialog({
                       <Button
                         size="small"
                         variant="outlined"
+                        disabled={!hasCatalogProducts}
                         onClick={() =>
-                          setSelectedSKUs(selectedSKUs.length === ALL_SKUS.length ? [] : [...ALL_SKUS])
+                          setSelectedSKUs(
+                            selectedSKUs.length === allCatalogSkus.length ? [] : [...allCatalogSkus]
+                          )
                         }
                       >
-                        {selectedSKUs.length === ALL_SKUS.length ? "Clear all" : "Select all"}
+                        {selectedSKUs.length === allCatalogSkus.length ? "Clear all" : "Select all"}
                       </Button>
                       <Chip label={`${selectedSKUs.length} selected`} size="small" color="primary" variant="outlined" />
                     </Stack>
@@ -757,7 +767,7 @@ export default function SchemeDiscountDialog({
                       variant="outlined"
                       sx={{ maxHeight: 220, overflow: "auto", borderRadius: 2, mb: 2.5 }}
                     >
-                      {Object.entries(PRODUCT_SKUS).map(([category, skuList]) => {
+                      {Object.entries(catalogProductsGrouped).map(([category, skuList]) => {
                         const filteredSKUs = skuList.filter((sku) =>
                           sku.toLowerCase().includes(skuSearchTerm.toLowerCase())
                         );

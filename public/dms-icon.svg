@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">Distribution Prime</title>
+  <desc id="logoDesc">Distribution Prime app mark - connected distribution network.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1565c0"/>
+      <stop offset="100%" stop-color="#0d47a1"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="26" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.92">
+    <circle cx="60" cy="38" r="5" fill="#ffffff" stroke="none"/>
+    <circle cx="38" cy="68" r="4" fill="#ffffff" stroke="none"/>
+    <circle cx="82" cy="68" r="4" fill="#ffffff" stroke="none"/>
+    <path d="M60 43v12M48 64l9-9M72 64l-9-9"/>
+  </g>
+  <text
+    x="60"
+    y="96"
+    text-anchor="middle"
+    fill="#ffffff"
+    font-family="Segoe UI, system-ui, Arial, sans-serif"
+    font-size="26"
+    font-weight="700"
+    letter-spacing="-0.5"
+  >DP</text>
+</svg>

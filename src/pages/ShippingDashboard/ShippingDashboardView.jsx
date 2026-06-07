@@ -57,7 +57,15 @@ import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import InboxOutlinedIcon from "@mui/icons-material/InboxOutlined";
 import DayNightThemeToggle from "../../components/DayNightThemeToggle";
+import WorkspaceChip from "../../components/WorkspaceChip";
+import SaasAppBarTitle from "../../components/saas/SaasAppBarTitle";
 import { tableHeaderBg, tableStripeAt } from "../../theme/contrastSurfaces";
+import {
+  saasAppBarSx,
+  saasAppBarToolbarSx,
+  saasPageBackdropSx,
+  saasContentColumnSx,
+} from "../../theme/saasChrome";
 import {
   ORDER_STATUS,
   getOrderStatusLabel,
@@ -237,10 +245,10 @@ function OrderMobileCard({
             onClick={onRequestDeliver}
             sx={{ fontWeight: 800, textTransform: "none" }}
           >
-            Deliver
+            Dispatch
           </Button>
         ) : isDelivered ? (
-          <Chip icon={<CheckCircleOutlineIcon />} label="Done" size="small" color="success" variant="outlined" />
+          <Chip icon={<CheckCircleOutlineIcon />} label="Dispatched" size="small" color="success" variant="outlined" />
         ) : isIncoming ? (
           <Chip label="Awaiting approval" size="small" color="warning" variant="outlined" sx={{ fontWeight: 700 }} />
         ) : null}
@@ -391,7 +399,7 @@ export default function ShippingDashboardView({
         </TableCell>
         <TableCell align="center" onClick={stop(() => {})}>
           {isApproved ? (
-            <Tooltip title={hasInvoice ? "Mark delivered" : "Attach invoices and deliver"}>
+            <Tooltip title={hasInvoice ? "Mark dispatched" : "Attach invoices and dispatch"}>
               <span>
                 <Button
                   variant={hasInvoice ? "contained" : "outlined"}
@@ -404,12 +412,12 @@ export default function ShippingDashboardView({
                   onClick={stop(() => onRequestDeliver(order))}
                   sx={{ fontWeight: 800, textTransform: "none", minWidth: 88 }}
                 >
-                  Deliver
+                  Dispatch
                 </Button>
               </span>
             </Tooltip>
           ) : isDelivered ? (
-            <Chip icon={<CheckCircleOutlineIcon />} label="Delivered" size="small" color="success" variant="outlined" />
+            <Chip icon={<CheckCircleOutlineIcon />} label="Dispatched" size="small" color="success" variant="outlined" />
           ) : isIncoming ? (
             <Chip label="Awaiting approval" size="small" color="warning" variant="outlined" sx={{ fontWeight: 700 }} />
           ) : (
@@ -420,27 +428,20 @@ export default function ShippingDashboardView({
     );
   };
 
+  const shippingSubtitle = [
+    todayLabel,
+    lastRefreshedAt
+      ? `Updated ${lastRefreshedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+      : null,
+    currentUser?.name || null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        bgcolor: "background.default",
-        background:
-          theme.palette.mode === "dark"
-            ? `radial-gradient(ellipse at top, ${alpha(theme.palette.primary.main, 0.12)}, transparent 55%)`
-            : `radial-gradient(ellipse at top, ${alpha(theme.palette.primary.main, 0.06)}, transparent 50%)`,
-      }}
-    >
-      <AppBar
-        position="sticky"
-        elevation={0}
-        sx={{
-          bgcolor: alpha(theme.palette.primary.main, 0.97),
-          backdropFilter: "blur(12px)",
-          borderBottom: `1px solid ${alpha(theme.palette.primary.contrastText, 0.1)}`,
-        }}
-      >
-        <Toolbar sx={{ gap: 1, flexWrap: "wrap", py: { xs: 0.75, sm: 1 } }}>
+    <Box sx={saasPageBackdropSx(theme)}>
+      <AppBar elevation={0} sx={saasAppBarSx(theme, { position: "sticky" })}>
+        <Toolbar sx={{ ...saasAppBarToolbarSx(), flexWrap: "wrap" }}>
           <Box
             sx={{
               width: 40,
@@ -450,25 +451,13 @@ export default function ShippingDashboardView({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              flexShrink: 0,
             }}
           >
-            <LocalShippingIcon sx={{ color: "primary.contrastText" }} />
+            <LocalShippingIcon sx={{ color: "inherit" }} />
           </Box>
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 850, color: "primary.contrastText", lineHeight: 1.2 }}>
-              Shipping
-            </Typography>
-            <Typography variant="caption" sx={{ color: alpha(theme.palette.primary.contrastText, 0.85), fontWeight: 600 }}>
-              {todayLabel}
-              {lastRefreshedAt ? ` · Updated ${lastRefreshedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : ""}
-              {currentUser?.name ? (
-                <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
-                  {" "}
-                  · {currentUser.name}
-                </Box>
-              ) : null}
-            </Typography>
-          </Box>
+          <SaasAppBarTitle title="Shipping" subtitle={shippingSubtitle} />
+          <WorkspaceChip sx={{ display: { xs: "none", sm: "flex" } }} />
           {currentUser ? (
             <Tooltip title={currentUser.email || "Signed in"}>
               <Chip
@@ -512,10 +501,10 @@ export default function ShippingDashboardView({
         {loading ? <LinearProgress color="secondary" sx={{ height: 2 }} /> : null}
       </AppBar>
 
-      <Box sx={{ p: { xs: 1.5, sm: 2.5, md: 3 }, maxWidth: 1280, mx: "auto" }}>
+      <Box sx={{ ...saasContentColumnSx(1280), p: { xs: 1.5, sm: 2.5, md: 3 } }}>
         <Alert severity="info" icon={<LocalShippingIcon />} sx={{ mb: 2, borderRadius: 2 }}>
           <strong>Workflow:</strong> New distributor orders appear here right away (pending GM approval). After approval,
-          attach one or more invoice files (PNG, JPG, PDF) → tap <strong>Deliver</strong> to upload and mark shipped in one
+          attach one or more invoice files (PNG, JPG, PDF) → tap <strong>Dispatch</strong> to upload and mark shipped in one
           step if you prefer. Admin and distributor are notified automatically.
         </Alert>
 
@@ -539,7 +528,7 @@ export default function ShippingDashboardView({
                   Approved ({approvedCount})
                 </ToggleButton>
                 <ToggleButton value="delivered" sx={{ textTransform: "none", fontWeight: 700, px: 2 }}>
-                  Delivered ({deliveredCount})
+                  Dispatched ({deliveredCount})
                 </ToggleButton>
               </ToggleButtonGroup>
               {hasActiveFilters ? (
@@ -589,7 +578,7 @@ export default function ShippingDashboardView({
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 360, mx: "auto" }}>
               {shippingRelevantOrders.length === 0
-                ? "Orders appear here when a distributor submits them. Invoice upload and delivery unlock after GM approval."
+                ? "Orders appear here when a distributor submits them. Invoice upload and dispatch unlock after GM approval."
                 : "Try adjusting search, dates, or status tabs."}
             </Typography>
             {hasActiveFilters ? (
@@ -649,7 +638,7 @@ export default function ShippingDashboardView({
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  {["Order #", "Distributor", "Date", "Total UC", "Status", "Invoice", "Deliver"].map((h, i) => (
+                  {["Order #", "Distributor", "Date", "Total UC", "Status", "Invoice", "Dispatch"].map((h, i) => (
                     <TableCell
                       key={h}
                       align={i === 3 ? "right" : i >= 4 ? "center" : "left"}
@@ -675,7 +664,7 @@ export default function ShippingDashboardView({
         }}
         PaperProps={{ sx: { width: { xs: "100%", sm: 360 } } }}
       >
-        <Box sx={{ p: 2, bgcolor: "primary.main", color: "primary.contrastText" }}>
+        <Box sx={{ p: 2, bgcolor: "grey.50", color: "text.primary", borderBottom: 1, borderColor: "divider" }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
             Activity
           </Typography>
@@ -710,7 +699,7 @@ export default function ShippingDashboardView({
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 800 }}>Deliver order</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>Dispatch order</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ mb: 2 }}>
             Order{" "}
@@ -718,7 +707,7 @@ export default function ShippingDashboardView({
               {deliverConfirmOrder?.orderNumber ||
                 (deliverConfirmOrder && getOrderId(deliverConfirmOrder))}
             </strong>
-            . Attach invoice files (you can select multiple), then mark as delivered.
+            . Attach invoice files (you can select multiple), then mark as dispatched.
           </DialogContentText>
           {deliverConfirmOrder && orderHasShippingInvoice(deliverConfirmOrder) ? (
             <Alert
@@ -743,7 +732,7 @@ export default function ShippingDashboardView({
             </Alert>
           ) : (
             <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-              At least one invoice file is required before delivery.
+              At least one invoice file is required before dispatch.
             </Alert>
           )}
           <Button
@@ -806,8 +795,8 @@ export default function ShippingDashboardView({
             sx={{ fontWeight: 800 }}
           >
             {deliverPendingFiles.length > 0
-              ? `Save ${deliverPendingFiles.length} file${deliverPendingFiles.length !== 1 ? "s" : ""} & deliver`
-              : "Mark delivered"}
+              ? `Save ${deliverPendingFiles.length} file${deliverPendingFiles.length !== 1 ? "s" : ""} & dispatch`
+              : "Mark dispatched"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -88,7 +88,7 @@ function HeaderActions({
               py: { xs: 0.5, sm: 0.65 },
               fontSize: { xs: "0.72rem", sm: "0.85rem" },
               fontWeight: 750,
-              boxShadow: `0 8px 18px ${alpha(theme.palette.error.main, 0.24)}`,
+              boxShadow: `0 8px 18px ${alpha(theme.palette.primary.main, 0.24)}`,
               minWidth: { xs: 0, sm: 128 },
               height: 34,
               flex: { xs: "1 1 0", sm: "0 0 auto" },
@@ -187,7 +187,7 @@ function HeaderActions({
               height: 34,
               flex: { xs: "1 1 0", sm: "0 0 auto" },
               "&:hover": {
-                bgcolor: alpha(theme.palette.error.main, theme.palette.mode === "dark" ? 0.15 : 0.08),
+                bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.15 : 0.08),
                 borderColor: "error.dark",
                 transform: { xs: "none", sm: "translateY(-2px)" },
               },

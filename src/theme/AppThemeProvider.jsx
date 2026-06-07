@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
+import { useOrganizationOptional } from "../context/OrganizationProvider";
+import { applyBrandToTheme } from "./tenantTheme";
 
 const STORAGE_KEY = "coke_day_night_view";
 const LEGACY_PRESET_KEY = "coke_theme_preset";
@@ -8,22 +10,55 @@ const LEGACY_PRESET_KEY = "coke_theme_preset";
 /** `night` = light theme (current look). `day` = dark theme (high-contrast). */
 const VALID_VIEWS = new Set(["day", "night"]);
 
+/** Light-mode surfaces — soft grey instead of pure white (easier on eyes). */
+export const LIGHT_SURFACE = {
+  default: "#e4e8ec",
+  paper: "#eef0f3",
+  elevated: "#f4f5f7",
+};
+
+/** Crisp labels — avoid rgba text + blur compositing on chrome bars. */
+const sharpTextBaseline = {
+  MuiCssBaseline: {
+    styleOverrides: {
+      body: {
+        WebkitFontSmoothing: "antialiased",
+        MozOsxFontSmoothing: "auto",
+      },
+    },
+  },
+  MuiTypography: {
+    styleOverrides: {
+      root: {
+        WebkitFontSmoothing: "antialiased",
+      },
+    },
+  },
+  MuiFormLabel: {
+    styleOverrides: {
+      root: {
+        WebkitFontSmoothing: "antialiased",
+      },
+    },
+  },
+};
+
 function createNightTheme() {
   return createTheme({
     palette: {
       mode: "light",
-      primary: { main: "#e53935", dark: "#c62828", light: "#ff6b6b" },
-      secondary: { main: "#fbc02d", dark: "#f9a825", light: "#ffdf7e" },
-      background: { default: "#eceff1", paper: "#ffffff" },
-      error: { main: "#c62828" },
-      info: { main: "#0277bd" },
-      warning: { main: "#e65100" },
-      success: { main: "#1b5e20" },
+      primary: { main: "#1565c0", dark: "#0d47a1", light: "#42a5f5", contrastText: "#ffffff" },
+      secondary: { main: "#00acc1", dark: "#00838f", light: "#4dd0e1", contrastText: "#ffffff" },
+      background: { default: LIGHT_SURFACE.default, paper: LIGHT_SURFACE.paper },
+      error: { main: "#d32f2f" },
+      info: { main: "#0288d1" },
+      warning: { main: "#ed6c02" },
+      success: { main: "#2e7d32" },
       /** Stronger than MUI default 0.6 secondary — improves labels on tinted cards & sidebars */
       text: {
-        primary: "rgba(0, 0, 0, 0.9)",
-        secondary: "rgba(0, 0, 0, 0.72)",
-        disabled: "rgba(0, 0, 0, 0.48)",
+        primary: "#1a1a1a",
+        secondary: "#5f6368",
+        disabled: "#9aa0a6",
       },
       divider: "rgba(0, 0, 0, 0.14)",
       action: {
@@ -35,12 +70,89 @@ function createNightTheme() {
       },
     },
     typography: {
-      fontFamily: '"Roboto","Helvetica","Arial",sans-serif',
+      fontFamily: '"Segoe UI","Roboto","Helvetica","Arial",sans-serif',
+      h4: { fontWeight: 800, letterSpacing: "-0.02em" },
+      h5: { fontWeight: 800 },
+      h6: { fontWeight: 700, letterSpacing: "-0.01em" },
+      subtitle1: { fontWeight: 600 },
+      subtitle2: { fontWeight: 600 },
+      button: { textTransform: "none", fontWeight: 600 },
     },
-    shape: { borderRadius: 8 },
+    shape: { borderRadius: 10 },
     components: {
+      ...sharpTextBaseline,
+      MuiCssBaseline: {
+        styleOverrides: {
+          body: {
+            WebkitFontSmoothing: "antialiased",
+            MozOsxFontSmoothing: "auto",
+            backgroundColor: LIGHT_SURFACE.default,
+          },
+        },
+      },
+      MuiPaper: {
+        styleOverrides: {
+          root: {
+            backgroundImage: "none",
+            backgroundColor: LIGHT_SURFACE.paper,
+          },
+        },
+      },
+      MuiDialog: {
+        styleOverrides: {
+          paper: {
+            backgroundImage: "none",
+            backgroundColor: LIGHT_SURFACE.paper,
+          },
+        },
+      },
       MuiAppBar: {
         defaultProps: { color: "primary", enableColorOnDark: true },
+      },
+      MuiButton: {
+        defaultProps: { disableElevation: false },
+        styleOverrides: {
+          root: {
+            textTransform: "none",
+            borderRadius: 10,
+            fontWeight: 600,
+          },
+          containedPrimary: {
+            boxShadow: "0 4px 14px rgba(21, 101, 192, 0.22)",
+          },
+        },
+      },
+      MuiCard: {
+        styleOverrides: {
+          root: {
+            borderRadius: 12,
+            border: "1px solid",
+            borderColor: "rgba(0, 0, 0, 0.08)",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            backgroundImage: "none",
+          },
+        },
+      },
+      MuiListItemButton: {
+        styleOverrides: {
+          root: {
+            borderRadius: 10,
+          },
+        },
+      },
+      MuiToolbar: {
+        styleOverrides: {
+          root: {
+            minHeight: 56,
+          },
+        },
+      },
+      MuiChip: {
+        styleOverrides: {
+          colorPrimary: {
+            backgroundColor: "rgba(21, 101, 192, 0.12)",
+          },
+        },
       },
       MuiOutlinedInput: {
         styleOverrides: {
@@ -60,21 +172,21 @@ function createNightTheme() {
       MuiInputLabel: {
         styleOverrides: {
           root: {
-            color: "rgba(0, 0, 0, 0.68)",
+            color: "#424242",
           },
         },
       },
       MuiFormHelperText: {
         styleOverrides: {
           root: {
-            color: "rgba(0, 0, 0, 0.65)",
+            color: "#616161",
           },
         },
       },
       MuiTableCell: {
         styleOverrides: {
           body: {
-            color: "rgba(0, 0, 0, 0.88)",
+            color: "#212121",
           },
         },
       },
@@ -86,8 +198,8 @@ function createDayTheme() {
   return createTheme({
     palette: {
       mode: "dark",
-      primary: { main: "#ff6b6b" },
-      secondary: { main: "#ffd54f" },
+      primary: { main: "#64b5f6", dark: "#42a5f5", light: "#90caf9", contrastText: "#ffffff" },
+      secondary: { main: "#4dd0e1", dark: "#26c6da", light: "#80deea", contrastText: "#ffffff" },
       background: { default: "#121212", paper: "#1e1e1e" },
       error: { main: "#ff8a80" },
       info: { main: "#4fc3f7" },
@@ -95,9 +207,9 @@ function createDayTheme() {
       success: { main: "#81c784" },
       divider: "rgba(255, 255, 255, 0.12)",
       text: {
-        primary: "rgba(255, 255, 255, 0.95)",
-        secondary: "rgba(255, 255, 255, 0.68)",
-        disabled: "rgba(255, 255, 255, 0.38)",
+        primary: "#f5f5f5",
+        secondary: "#b0b0b0",
+        disabled: "#757575",
       },
       action: {
         active: "rgba(255, 255, 255, 0.56)",
@@ -112,6 +224,7 @@ function createDayTheme() {
     },
     shape: { borderRadius: 8 },
     components: {
+      ...sharpTextBaseline,
       MuiAppBar: {
         defaultProps: { color: "primary", enableColorOnDark: true },
       },
@@ -161,14 +274,14 @@ function createDayTheme() {
       MuiInputLabel: {
         styleOverrides: {
           root: {
-            color: "rgba(255, 255, 255, 0.72)",
+            color: "#d0d0d0",
           },
         },
       },
       MuiFormHelperText: {
         styleOverrides: {
           root: {
-            color: "rgba(255, 255, 255, 0.65)",
+            color: "#a3a3a3",
           },
         },
       },
@@ -199,6 +312,9 @@ export function useDayNightTheme() {
 }
 
 export function AppThemeProvider({ children }) {
+  const orgCtx = useOrganizationOptional();
+  const tenantBrand = orgCtx?.brand;
+
   const [view, setViewState] = useState(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -227,7 +343,10 @@ export function AppThemeProvider({ children }) {
     setViewState((v) => (v === "day" ? "night" : "day"));
   }, []);
 
-  const theme = useMemo(() => (view === "day" ? createDayTheme() : createNightTheme()), [view]);
+  const theme = useMemo(() => {
+    const base = view === "day" ? createDayTheme() : createNightTheme();
+    return applyBrandToTheme(base, tenantBrand);
+  }, [view, tenantBrand]);
 
   const value = useMemo(
     () => ({

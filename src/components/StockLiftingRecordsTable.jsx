@@ -14,6 +14,7 @@ import {
   useTheme,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
+import { tableHeaderBg, tableSubHeaderBandBg } from "../theme/contrastSurfaces";
 
 export function formatStockLiftDate(record) {
   if (!record) return "—";
@@ -81,8 +82,8 @@ export default function StockLiftingRecordsTable({
     totalsFooterBorder = theme.palette.divider;
     totalsFooterColor = theme.palette.text.primary;
   } else {
-    totalsFooterBg = alpha(theme.palette.error.main, isDark ? 0.2 : 0.12);
-    totalsFooterBorder = theme.palette.error.main;
+    totalsFooterBg = alpha(theme.palette.primary.main, isDark ? 0.2 : 0.12);
+    totalsFooterBorder = theme.palette.primary.main;
     totalsFooterColor = theme.palette.text.primary;
   }
   const totalsFooterShadow = stickyTotals
@@ -91,14 +92,13 @@ export default function StockLiftingRecordsTable({
       : "0 -6px 16px rgba(0,0,0,0.12)"
     : "none";
 
-  const headBg = theme.palette.primary.main;
-  const headFg = theme.palette.primary.contrastText;
-  const subBg = theme.palette.secondary.main;
-  const subFg = theme.palette.getContrastText(theme.palette.secondary.main);
-  const subBorder = theme.palette.primary.dark;
+  const headBg = tableHeaderBg(theme);
+  const headFg = "text.primary";
+  const subBg = tableSubHeaderBandBg(theme);
+  const subFg = "text.primary";
+  const subBorder = theme.palette.divider;
 
-  /** Stronger than old yellow 12% tint — works in light + dark; never hardcode #fff rows */
-  const zebraOdd = alpha(theme.palette.primary.main, isDark ? 0.22 : 0.1);
+  const zebraOdd = isDark ? alpha(theme.palette.common.white, 0.05) : theme.palette.grey[50];
   const zebraEven = theme.palette.background.paper;
 
   const headSx = {
@@ -298,7 +298,7 @@ export default function StockLiftingRecordsTable({
                   "&:nth-of-type(odd)": { bgcolor: zebraOdd },
                   "&:nth-of-type(even)": { bgcolor: zebraEven },
                   "&:hover": {
-                    bgcolor: alpha(theme.palette.primary.main, isDark ? 0.14 : 0.08),
+                    bgcolor: alpha(theme.palette.primary.main, isDark ? 0.12 : 0.06),
                   },
                 }}
               >

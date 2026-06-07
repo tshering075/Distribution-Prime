@@ -17,6 +17,7 @@ import GetAppIcon from "@mui/icons-material/GetApp";
 import IosShareIcon from "@mui/icons-material/IosShare";
 import { usePwaInstall } from "../hooks/usePwaInstall";
 import { APP_SHORT_NAME, BRAND_MARK_SRC } from "../constants/brand";
+import { logoSrcWithPublicUrl } from "../utils/organizationBrand";
 
 /**
  * Bottom banner + iOS instructions for “Install app” (PWA).
@@ -24,7 +25,7 @@ import { APP_SHORT_NAME, BRAND_MARK_SRC } from "../constants/brand";
  */
 export default function InstallAppBanner() {
   const theme = useTheme();
-  const brand = theme.palette.error.main;
+  const brand = theme.palette.primary.main;
   const {
     canNativeInstall,
     showBanner,
@@ -68,14 +69,13 @@ export default function InstallAppBanner() {
           borderRadius: 3,
           border: "1px solid",
           borderColor: alpha(brand, 0.25),
-          bgcolor: alpha(theme.palette.background.paper, 0.97),
-          backdropFilter: "blur(12px)",
+          bgcolor: "background.paper",
         }}
       >
         <Stack direction="row" alignItems="center" spacing={1.5}>
           <Box
             component="img"
-            src={BRAND_MARK_SRC}
+            src={logoSrcWithPublicUrl(BRAND_MARK_SRC)}
             alt=""
             sx={{ width: 44, height: 44, flexShrink: 0, objectFit: "contain" }}
           />
@@ -144,7 +144,7 @@ export default function InstallAppBanner() {
 /** Compact install button for landing / login headers. */
 export function InstallAppButton({ size = "medium", sx = {} }) {
   const theme = useTheme();
-  const brand = theme.palette.error.main;
+  const brand = theme.palette.primary.main;
   const { canNativeInstall, showIosGuide, isStandalone, promptInstall } = usePwaInstall();
   const [iosOpen, setIosOpen] = useState(false);
   const [installing, setInstalling] = useState(false);

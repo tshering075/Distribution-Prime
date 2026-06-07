@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   AppBar,
@@ -28,25 +28,78 @@ import {
   ListItemText,
   Chip,
   Checkbox,
-  Tabs,
-  Tab,
+  Stack,
+  ToggleButtonGroup,
+  ToggleButton,
+  InputAdornment,
+  Tooltip,
+  FormControl,
+  InputLabel,
 } from "@mui/material";
 import { useTheme, alpha } from "@mui/material/styles";
-import { tableStripeAt } from "../theme/contrastSurfaces";
+import { tableStripeAt, tableHeadRowSx, tableHeaderBg } from "../theme/contrastSurfaces";
 import CloseIcon from "@mui/icons-material/Close";
 import SearchIcon from "@mui/icons-material/Search";
+import ClearIcon from "@mui/icons-material/Clear";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
-import LockIcon from "@mui/icons-material/Lock";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import DownloadIcon from "@mui/icons-material/Download";
 import PeopleIcon from "@mui/icons-material/People";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
+import PersonOffIcon from "@mui/icons-material/PersonOff";
 import Avatar from "@mui/material/Avatar";
 import { hashPasswordForStorage, isUsernameTaken, getDistributors } from "../utils/distributorAuth";
-import PasswordDialog from "./PasswordDialog";
 import AddDistributorDialog from "./AddDistributorDialog";
 import { getAllDistributors, supabase } from "../services/supabaseService";
+import DistributorPhoneField from "./DistributorPhoneField";
+import {
+  DEFAULT_PHONE_COUNTRY,
+  formatPhoneForStorage,
+  normalizeBulkPhone,
+  parsePhoneFromStorage,
+  validateLocalPhone,
+} from "../utils/distributorPhone";
+
+const REGION_TAB_MAP = {
+  South: "Southern",
+  West: "Western",
+  East: "Eastern",
+  North: "Northern",
+};
+const REGION_TABS = ["All", "South", "West", "East", "North"];
+const REGION_CHIP_COLOR = {
+  Southern: "warning",
+  Western: "info",
+  Eastern: "success",
+  Northern: "secondary",
+  PLING: "default",
+  THIM: "default",
+};
+
+function matchesSearch(d, search) {
+  if (!search) return true;
+  const q = search.toLowerCase();
+  return (
+    (d.name || "").toLowerCase().includes(q) ||
+    (d.code || "").toLowerCase().includes(q) ||
+    (d.region || "").toLowerCase().includes(q) ||
+    (d.credentials?.username || "").toLowerCase().includes(q)
+  );
+}
+
+function regionTabCount(list, tab, searchTerm) {
+  const targetRegion = tab === "All" ? "All" : (REGION_TAB_MAP[tab] || tab);
+  if (!searchTerm) {
+    return tab === "All" ? list.length : list.filter((d) => d.region === targetRegion).length;
+  }
+  return list.filter((d) => {
+    if (tab !== "All" && d.region !== targetRegion) return false;
+    return matchesSearch(d, searchTerm);
+  }).length;
+}
 
 /**
  * Props:
@@ -60,18 +113,19 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
     name: "",
     code: "",
     region: "Southern",
+    phoneCountry: DEFAULT_PHONE_COUNTRY,
     phone: "",
     password: "",
     username: "",
     address: "",
+    gstin: "",
+    tpn: "",
   });
   const [editingCode, setEditingCode] = useState(null);
   const [list, setList] = useState(distributors);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [distributorToDelete, setDistributorToDelete] = useState(null);
   const [selectedDistributors, setSelectedDistributors] = useState([]); // For bulk delete
-  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [tabRegion, setTabRegion] = useState("All");
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
@@ -79,61 +133,36 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
   const [bulkUploadResults, setBulkUploadResults] = useState({ success: [], failed: [], skipped: [] });
   const [codeUniqueness, setCodeUniqueness] = useState({ isUnique: null, message: "" }); // Track code uniqueness
   const [addDistributorDialogOpen, setAddDistributorDialogOpen] = useState(false);
+  const [visiblePasswords, setVisiblePasswords] = useState({});
 
-  // Track if dialog was just opened to prevent password dialog from reopening
-  const dialogJustOpenedRef = React.useRef(false);
-  
   useEffect(() => {
     setList(distributors);
   }, [distributors]);
-  
-  // Handle password dialog only when dialog opens/closes, not when distributors change
-  useEffect(() => {
-    if (open && !dialogJustOpenedRef.current) {
-      // Dialog just opened - show password dialog
-      setIsAuthenticated(false);
-      setPasswordDialogOpen(true);
-      dialogJustOpenedRef.current = true;
-    } else if (!open) {
-      // Dialog closed - reset flag
-      dialogJustOpenedRef.current = false;
-      setIsAuthenticated(false);
-    }
-  }, [open]);
 
-  // Filter distributors based on region and search
-  const filteredList = list.filter(d => {
-    // Filter by region first
+  const hasActiveFilters = tabRegion !== "All" || Boolean(searchTerm.trim());
+
+  const filteredList = useMemo(() => list.filter((d) => {
     if (tabRegion !== "All") {
-      const regionMap = { 
-        South: "Southern", 
-        West: "Western", 
-        East: "Eastern" 
-      };
-      const targetRegion = regionMap[tabRegion] || tabRegion;
-      if (d.region !== targetRegion) {
-        return false;
-      }
+      const targetRegion = REGION_TAB_MAP[tabRegion] || tabRegion;
+      if (d.region !== targetRegion) return false;
     }
-    
-    // Then filter by search term
-    if (!searchTerm) return true;
-    const search = searchTerm.toLowerCase();
-    return (
-      (d.name || "").toLowerCase().includes(search) ||
-      (d.code || "").toLowerCase().includes(search) ||
-      (d.region || "").toLowerCase().includes(search) ||
-      (d.credentials?.username || "").toLowerCase().includes(search)
-    );
-  });
+    return matchesSearch(d, searchTerm.trim());
+  }), [list, tabRegion, searchTerm]);
+
+  const togglePasswordVisible = (code) => {
+    setVisiblePasswords((prev) => ({ ...prev, [code]: !prev[code] }));
+  };
 
   const distributorHeaderCellSx = {
-    color: "#fff",
-    bgcolor: "#b71c1c",
+    color: "text.primary",
+    bgcolor: tableHeaderBg(theme),
     fontWeight: 700,
-    fontSize: "0.95rem",
-    letterSpacing: 0.5,
-    borderBottom: "1px solid rgba(255,255,255,0.2)",
+    fontSize: { xs: "0.75rem", sm: "0.82rem" },
+    letterSpacing: 0.2,
+    py: 0.9,
+    px: 1,
+    whiteSpace: "nowrap",
+    borderBottom: `2px solid ${theme.palette.primary.main}`,
   };
 
   const distributorRowSx = (index) => {
@@ -150,6 +179,10 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
       transition: "background-color 0.2s, box-shadow 0.2s",
       "& > td": {
         bgcolor: "inherit",
+        py: 0.55,
+        px: 1,
+        fontSize: { xs: "0.72rem", sm: "0.8rem" },
+        lineHeight: 1.2,
         borderBottom: "1px solid",
         borderColor: isDark ? alpha(theme.palette.common.white, 0.08) : "divider",
       },
@@ -165,22 +198,9 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
     };
   };
 
-  const handlePasswordSuccess = () => {
-    setIsAuthenticated(true);
-    setPasswordDialogOpen(false);
-  };
-
-  const handlePasswordClose = () => {
-    setPasswordDialogOpen(false);
-    if (!isAuthenticated) {
-      // If not authenticated, close the dialog
-      onClose && onClose();
-    }
-  };
-
   const reset = () => {
     setCodeUniqueness({ isUnique: null, message: "" });
-    setForm({ name: "", code: "", region: "Southern", phone: "", password: "", username: "", address: "" });
+    setForm({ name: "", code: "", region: "Southern", phoneCountry: DEFAULT_PHONE_COUNTRY, phone: "", password: "", username: "", address: "", gstin: "", tpn: "" });
     setEditingCode(null);
   };
 
@@ -195,14 +215,6 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
     if (k === "code") {
       checkCodeUniqueness(value);
     }
-  };
-
-  const validatePhone = (phone) => {
-    // Allow phone numbers with digits, spaces, dashes, parentheses, and + sign
-    // Minimum 10 digits, maximum 15 digits
-    const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/;
-    const digitsOnly = phone.replace(/\D/g, '');
-    return phoneRegex.test(phone) && digitsOnly.length >= 10 && digitsOnly.length <= 15;
   };
 
   const validateCode = (code) => {
@@ -275,6 +287,7 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
     const trimmedCode = (form.code || "").trim().toUpperCase();
     const trimmedUsername = (form.username || "").trim();
     const trimmedPhone = (form.phone || "").trim();
+    const phoneDial = form.phoneCountry || DEFAULT_PHONE_COUNTRY;
     
     // Validation
     if (!trimmedName || trimmedName.length < 2) { 
@@ -360,17 +373,22 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
     }
     
     // Phone number is optional, but if provided, it must be valid
-    if (trimmedPhone && !validatePhone(trimmedPhone)) {
-      alert("Please enter a valid phone number (10-15 digits) or leave it empty");
+    const phoneCheck = validateLocalPhone(phoneDial, trimmedPhone);
+    if (trimmedPhone && !phoneCheck.valid) {
+      alert(phoneCheck.message || "Please enter a valid phone number or leave it empty");
       return;
     }
+
+    const storedPhone = trimmedPhone ? formatPhoneForStorage(phoneDial, trimmedPhone) : "";
     
     const payload = {
       name: trimmedName,
       code: trimmedCode,
       region: form.region,
       address: (form.address || "").trim(),
-      phone: trimmedPhone,
+      gstin: (form.gstin || "").trim(),
+      tpn: (form.tpn || "").trim(),
+      phone: storedPhone,
       credentials: { 
         username: trimmedUsername, 
         passwordHash: hashPasswordForStorage(form.password),
@@ -385,7 +403,9 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
         code: form.code, 
         region: form.region, 
         address: form.address,
-        phone: trimmedPhone
+        gstin: (form.gstin || "").trim(),
+        tpn: (form.tpn || "").trim(),
+        phone: storedPhone
       };
       // Only update password if a new one is provided
       if (form.password) {
@@ -420,6 +440,7 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
   };
 
   const startEdit = (d) => {
+    const parsedPhone = parsePhoneFromStorage(d.phone || "");
     setEditingCode(d.code || d.name);
     setForm({
       name: d.name || "",
@@ -428,20 +449,20 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
       username: d.credentials?.username || "",
       password: "", // Don't show existing password hash
       address: d.address || "",
-      phone: d.phone || "",
+      phoneCountry: parsedPhone.dial,
+      phone: parsedPhone.local,
+      gstin: d.gstin || d.gstinNo || d.gstin_no || "",
+      tpn: d.tpn || d.tpnNo || d.tpn_no || "",
     });
   };
 
-  const [deletePasswordDialogOpen, setDeletePasswordDialogOpen] = useState(false);
-
   const handleDelete = (d) => {
-    console.log("Delete button clicked for distributor:", d);
     if (!d) {
       alert("Error: No distributor information available");
       return;
     }
     setDistributorToDelete(d);
-    setDeletePasswordDialogOpen(true);
+    setDeleteConfirmOpen(true);
   };
 
   // Toggle selection for bulk delete
@@ -461,23 +482,6 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
     } else {
       setSelectedDistributors(filteredList.map((d) => d.code).filter(Boolean));
     }
-  };
-
-  const confirmDeletePassword = () => {
-    console.log("Password validated, distributorToDelete:", distributorToDelete);
-    setDeletePasswordDialogOpen(false);
-    // If a single distributor is selected via row action
-    if (distributorToDelete) {
-      setDeleteConfirmOpen(true);
-      return;
-    }
-    // If bulk delete is requested
-    if (selectedDistributors.length > 0) {
-      setDeleteConfirmOpen(true);
-      return;
-    }
-    console.error("No distributor selected for deletion");
-    alert("Error: No distributor selected for deletion");
   };
 
   const confirmDelete = () => {
@@ -671,7 +675,7 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
               name,
               code: code, // Preserve code from Excel (now synced with username)
               region: region || "Southern",
-              phone: phone || "",
+              phone: normalizeBulkPhone(phone) || "",
               address: address || "",
               username: username, // Username matches code
               password,
@@ -902,7 +906,7 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
           }
           
           // Validate region
-          const validRegions = ["Southern", "Western", "Eastern", "PLING", "THIM"];
+          const validRegions = ["Southern", "Western", "Eastern", "Northern"];
           const region = validRegions.includes(distData.region) ? distData.region : "Southern";
           
           // Create payload - ensure username matches code
@@ -1000,49 +1004,6 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
     e.target.value = "";
   };
 
-  // Don't render content if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <>
-        <PasswordDialog
-          open={passwordDialogOpen}
-          onClose={handlePasswordClose}
-          onSuccess={handlePasswordSuccess}
-          title="Access Restricted"
-          message="This section is password protected. Please enter your admin password to manage distributors."
-        />
-        <Dialog fullScreen open={open} onClose={() => { reset(); onClose && onClose(); }} PaperProps={{ sx: { bgcolor: "background.default" } }}>
-          <AppBar sx={{ position: "relative", bgcolor: "#d61916" }}>
-            <Toolbar>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexGrow: 1 }}>
-                <Avatar sx={{ bgcolor: "rgba(255,255,255,0.2)", width: 40, height: 40 }}>
-                  <PeopleIcon />
-                </Avatar>
-                <Box>
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: "white" }}>
-                    Manage Distributors
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.8)" }}>
-                    Password protected
-                  </Typography>
-                </Box>
-              </Box>
-              <LockIcon sx={{ mr: 1 }} />
-              <IconButton edge="end" color="inherit" onClick={() => { reset(); onClose && onClose(); }} aria-label="close">
-                <CloseIcon />
-              </IconButton>
-            </Toolbar>
-          </AppBar>
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", bgcolor: "background.default" }}>
-            <Typography variant="h6" sx={{ color: "text.secondary" }}>
-              Please enter password to continue
-            </Typography>
-          </Box>
-        </Dialog>
-      </>
-    );
-  }
-
   return (
     <>
       <AddDistributorDialog
@@ -1051,26 +1012,19 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
         onAdd={onAdd}
         canWrite={canWrite}
       />
-      <PasswordDialog
-        open={passwordDialogOpen}
-        onClose={handlePasswordClose}
-        onSuccess={handlePasswordSuccess}
-        title="Access Restricted"
-        message="This section is password protected. Please enter your admin password to manage distributors."
-      />
       <Dialog fullScreen open={open} onClose={() => { reset(); onClose && onClose(); }} PaperProps={{ sx: { bgcolor: "background.default", color: "text.primary" } }}>
-        <AppBar sx={{ position: "relative", bgcolor: "#d61916" }}>
-          <Toolbar>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexGrow: 1 }}>
-              <Avatar sx={{ bgcolor: "rgba(255,255,255,0.2)", width: 40, height: 40 }}>
+        <AppBar elevation={0} sx={{ position: "relative", bgcolor: "#1565c0" }}>
+          <Toolbar sx={{ gap: 1, minHeight: { xs: 56, sm: 64 } }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexGrow: 1, minWidth: 0 }}>
+              <Avatar sx={{ bgcolor: alpha(theme.palette.common.white, 0.18), width: 40, height: 40 }}>
                 <PeopleIcon />
               </Avatar>
-              <Box>
-                <Typography variant="h6" sx={{ fontWeight: 600, color: "white" }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h6" noWrap sx={{ fontWeight: 700, color: "white", lineHeight: 1.2 }}>
                   Manage Distributors
                 </Typography>
-                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.8)" }}>
-                  {editingCode ? "Edit distributor information" : "View and manage distributor list"}
+                <Typography variant="caption" noWrap sx={{ color: alpha(theme.palette.common.white, 0.82), display: "block" }}>
+                  {editingCode ? `Editing ${form.name || form.code}` : `${list.length} registered · ${filteredList.length} shown`}
                 </Typography>
               </Box>
             </Box>
@@ -1079,18 +1033,44 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
               startIcon={<AddIcon />}
               onClick={() => setAddDistributorDialogOpen(true)}
               disabled={!canWrite}
-              sx={{ mr: 1, bgcolor: "rgba(255,255,255,0.2)", "&:hover": { bgcolor: "rgba(255,255,255,0.3)" } }}
+              sx={{
+                display: { xs: "none", sm: "inline-flex" },
+                mr: 0.5,
+                borderRadius: 2,
+                textTransform: "none",
+                fontWeight: 600,
+                bgcolor: alpha(theme.palette.common.white, 0.14),
+                "&:hover": { bgcolor: alpha(theme.palette.common.white, 0.24) },
+              }}
               title={!canWrite ? "You don't have permission to add distributors. Only admins can add distributors." : ""}
             >
               Add Distributor
             </Button>
+            <Tooltip title="Add distributor">
+              <span>
+                <IconButton
+                  color="inherit"
+                  onClick={() => setAddDistributorDialogOpen(true)}
+                  disabled={!canWrite}
+                  sx={{ display: { xs: "inline-flex", sm: "none" } }}
+                >
+                  <AddIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
             {editingCode && (
               <Button
                 color="inherit"
                 onClick={() => { reset(); }}
-                sx={{ mr: 1, bgcolor: "rgba(255,255,255,0.2)", "&:hover": { bgcolor: "rgba(255,255,255,0.3)" } }}
+                sx={{
+                  borderRadius: 2,
+                  textTransform: "none",
+                  fontWeight: 600,
+                  bgcolor: alpha(theme.palette.common.white, 0.14),
+                  "&:hover": { bgcolor: alpha(theme.palette.common.white, 0.24) },
+                }}
               >
-                Clear Form
+                Cancel Edit
               </Button>
             )}
             <IconButton edge="end" color="inherit" onClick={() => { reset(); onClose && onClose(); }} aria-label="close">
@@ -1099,109 +1079,57 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
           </Toolbar>
         </AppBar>
 
-        <Box sx={{ p: { xs: 2, sm: 3 }, maxHeight: "100vh", overflow: "auto", bgcolor: "background.default", color: "text.primary" }}>
-          {/* Search Bar */}
-          <Box sx={{ mb: 3 }}>
-            <TextField
-              fullWidth
-              placeholder="Search by name, code, region, or username..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <SearchIcon sx={{ color: "text.secondary", mr: 1 }} />
-                ),
-              }}
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: 3,
-                  bgcolor: "background.paper",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                  transition: "all 0.2s",
-                  "&:hover": {
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                  },
-                  "&.Mui-focused": {
-                    boxShadow: "0 4px 12px rgba(214, 25, 22, 0.2)",
-                  }
-                }
-              }}
-            />
-          </Box>
-
+        <Box sx={{ p: { xs: 1.5, sm: 2.5 }, maxHeight: "100vh", overflow: "auto", bgcolor: "background.default", color: "text.primary" }}>
           {/* Edit Form Section - Only show when editing */}
           {editingCode && (
-          <Paper 
-            elevation={4} 
-            sx={{ 
-              p: { xs: 2.5, sm: 3.5 }, 
-              mb: 3, 
-              borderRadius: 4,
-              background: "linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)",
-              border: "1px solid #e0e0e0"
+          <Paper
+            variant="outlined"
+            sx={{
+              p: { xs: 2, sm: 2.5 },
+              mb: 2,
+              borderRadius: 2.5,
+              bgcolor: "background.paper",
+              borderColor: "divider",
+              boxShadow: (t) => `0 8px 24px ${alpha(t.palette.common.black, t.palette.mode === "dark" ? 0.28 : 0.06)}`,
             }}
           >
-            <Box sx={{ 
-              display: "flex", 
-              alignItems: "center", 
-              gap: 2, 
-              mb: 3,
-              pb: 2,
-              borderBottom: "3px solid #d61916"
-            }}>
-              <Avatar sx={{ bgcolor: "#d61916", width: 48, height: 48 }}>
-                <EditIcon />
+            <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5, pb: 1.5, borderBottom: 2, borderColor: "primary.main" }}>
+              <Avatar sx={{ bgcolor: alpha(theme.palette.primary.main, 0.12), color: "primary.main", width: 40, height: 40 }}>
+                <EditIcon fontSize="small" />
               </Avatar>
               <Box>
-                <Typography variant="h5" sx={{ fontWeight: 700, color: "text.primary", mb: 0.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                   Edit Distributor
                 </Typography>
-                <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                  Update distributor information
+                <Typography variant="caption" color="text.secondary">
+                  Update details and login credentials
                 </Typography>
               </Box>
-            </Box>
-            <Grid container spacing={3}>
-              {/* Personal Information Section */}
+            </Stack>
+            <Grid container spacing={2}>
               <Grid size={{ xs: 12 }}>
-                <Box sx={{ 
-                  display: "flex", 
-                  alignItems: "center", 
-                  gap: 1.5, 
-                  mb: 2,
-                  pb: 1.5,
-                  borderBottom: "2px solid #e0e0e0"
-                }}>
-                  <PeopleIcon sx={{ color: "#d61916", fontSize: 24 }} />
-                  <Typography variant="h6" sx={{ color: "text.primary", fontWeight: 700, fontSize: "1.1rem" }}>
-                    Personal Information
-                  </Typography>
-                </Box>
+                <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 1 }}>
+                  Personal Information
+                </Typography>
               </Grid>
               <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                <TextField 
-                  fullWidth 
-                  label="Name *" 
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Name *"
                   value={form.name} 
                   onChange={handleChange("name")}
                   required
-                  sx={{ 
-                    bgcolor: "background.paper",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
+                  sx={{
+                    "& .MuiOutlinedInput-root": { borderRadius: 2 },
                   }}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <TextField 
-                  fullWidth 
-                  label="Code *" 
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Code *"
                   value={form.code} 
                   onChange={handleChange("code")}
                   required
@@ -1237,401 +1165,328 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Select 
-                  fullWidth 
-                  value={form.region} 
-                  onChange={handleChange("region")}
-                  sx={{ 
-                    bgcolor: "background.paper",
-                    borderRadius: 2,
-                    "& .MuiOutlinedInput-notchedOutline": {
-                      borderRadius: 2
-                    },
-                    "&:hover": {
-                      "& .MuiOutlinedInput-notchedOutline": {
-                        borderColor: "#d61916"
-                      }
-                    }
-                  }}
-                >
-                  <MenuItem value="Southern">Southern</MenuItem>
-                  <MenuItem value="Western">Western</MenuItem>
-                  <MenuItem value="Eastern">Eastern</MenuItem>
-                  <MenuItem value="PLING">PLING</MenuItem>
-                  <MenuItem value="THIM">THIM</MenuItem>
-                </Select>
+                <FormControl fullWidth size="small">
+                  <InputLabel id="edit-region-label">Region</InputLabel>
+                  <Select
+                    labelId="edit-region-label"
+                    label="Region"
+                    value={form.region}
+                    onChange={handleChange("region")}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    <MenuItem value="Southern">Southern</MenuItem>
+                    <MenuItem value="Western">Western</MenuItem>
+                    <MenuItem value="Eastern">Eastern</MenuItem>
+                    <MenuItem value="Northern">Northern</MenuItem>
+                  </Select>
+                </FormControl>
               </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <TextField
-                  fullWidth
-                  label="Phone Number"
-                  value={form.phone}
-                  onChange={handleChange("phone")}
-                  type="tel"
-                  placeholder="+1234567890"
-                  helperText="Optional: Enter phone number (10-15 digits)"
-                  sx={{ 
-                    bgcolor: "background.paper",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
+              <Grid size={{ xs: 12, sm: 6, md: 5 }}>
+                <DistributorPhoneField
+                  countryDial={form.phoneCountry || DEFAULT_PHONE_COUNTRY}
+                  localValue={form.phone}
+                  onCountryChange={(dial) => setForm((prev) => ({ ...prev, phoneCountry: dial, phone: "" }))}
+                  onLocalChange={(local) => setForm((prev) => ({ ...prev, phone: local }))}
+                  fieldSx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
                 />
               </Grid>
               <Grid size={{ xs: 12 }}>
                 <TextField
                   fullWidth
+                  size="small"
                   label="Address"
                   value={form.address}
                   onChange={handleChange("address")}
                   multiline
                   minRows={2}
-                  sx={{ 
-                    bgcolor: "background.paper",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="GSTIN No."
+                  value={form.gstin}
+                  onChange={handleChange("gstin")}
+                  placeholder="e.g. 11AAAAA0000A1Z5"
+                  helperText="Optional"
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="TPN No."
+                  value={form.tpn}
+                  onChange={handleChange("tpn")}
+                  placeholder="Tax payer number"
+                  helperText="Optional · used on invoices"
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
                 />
               </Grid>
 
-              {/* Credentials Section */}
-              <Grid size={{ xs: 12 }} sx={{ mt: 2 }}>
-                <Box sx={{ 
-                  display: "flex", 
-                  alignItems: "center", 
-                  gap: 1.5, 
-                  mb: 2,
-                  pb: 1.5,
-                  borderBottom: "2px solid #e0e0e0"
-                }}>
-                  <LockIcon sx={{ color: "#d61916", fontSize: 24 }} />
-                  <Typography variant="h6" sx={{ color: "text.primary", fontWeight: 700, fontSize: "1.1rem" }}>
-                    Login Credentials
-                  </Typography>
-                </Box>
+              <Grid size={{ xs: 12 }} sx={{ mt: 0.5 }}>
+                <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 1 }}>
+                  Login Credentials
+                </Typography>
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField 
-                  fullWidth 
-                  label="Username *" 
-                  value={form.username} 
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Username *"
+                  value={form.username}
                   onChange={handleChange("username")}
                   required
                   helperText="Used for distributor login"
-                  sx={{ 
-                    bgcolor: "background.paper",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField 
-                  fullWidth 
-                  type="password" 
-                  label={editingCode ? "New Password (leave blank to keep current)" : "Password *"} 
-                  value={form.password} 
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="password"
+                  label={editingCode ? "New Password (optional)" : "Password *"}
+                  value={form.password}
                   onChange={handleChange("password")}
                   required={!editingCode}
                   helperText={editingCode ? "Leave blank to keep current password" : "Minimum 4 characters"}
-                  sx={{ 
-                    bgcolor: "background.paper",
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 2
-                      }
-                    }
-                  }}
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
                 />
               </Grid>
 
-              {/* Action Buttons */}
-              <Grid size={{ xs: 12 }} sx={{ mt: 3, pt: 3, borderTop: "2px solid #e0e0e0" }}>
-                <Box sx={{ display: "flex", gap: 2, justifyContent: "flex-end", flexWrap: "wrap", alignItems: "center" }}>
-                  <Button 
-                    variant="outlined" 
-                    color="error" 
+              <Grid size={{ xs: 12 }} sx={{ mt: 1, pt: 2, borderTop: 1, borderColor: "divider" }}>
+                <Stack direction="row" spacing={1.5} justifyContent="flex-end" flexWrap="wrap">
+                  <Button
+                    variant="outlined"
+                    color="error"
                     startIcon={<DeleteIcon />}
                     onClick={() => { handleDelete({ code: editingCode, name: form.name }); reset(); }}
                     disabled={!canDelete}
                     title={!canDelete ? "You don't have permission to delete distributors. Only admins can delete distributors." : ""}
-                    sx={{
-                      borderRadius: 2,
-                      px: 3,
-                      py: 1,
-                      fontWeight: 600,
-                      textTransform: "none",
-                      borderWidth: 2,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        borderWidth: 2,
-                        transform: "translateY(-2px)",
-                        boxShadow: 3
-                      }
-                    }}
+                    sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
                   >
                     Delete
                   </Button>
-                  <Button 
-                    variant="contained" 
+                  <Button
+                    variant="contained"
                     startIcon={<EditIcon />}
                     onClick={handleAddOrUpdate}
                     disabled={!canWrite}
-                    sx={{ 
-                      minWidth: 140,
-                      borderRadius: 2,
-                      px: 4,
-                      py: 1,
-                      fontWeight: 700,
-                      textTransform: "none",
-                      background: "linear-gradient(135deg, #d61916 0%, #b71c1c 100%)",
-                      boxShadow: 3,
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        background: "linear-gradient(135deg, #b71c1c 0%, #8e0000 100%)",
-                        transform: "translateY(-2px)",
-                        boxShadow: 5
-                      }
-                    }}
+                    sx={{ borderRadius: 2, textTransform: "none", fontWeight: 700, minWidth: 120, boxShadow: 2 }}
                     title={!canWrite ? "You don't have permission to edit distributors. Only admins can edit distributors." : ""}
                   >
-                    Update
+                    Save Changes
                   </Button>
-                </Box>
+                </Stack>
               </Grid>
             </Grid>
           </Paper>
           )}
 
-          {/* Region Filter Tabs with Upload/Download buttons */}
-          <Paper elevation={4} sx={{ mb: 3, borderRadius: 3, overflow: "hidden", border: "1px solid", borderColor: "divider", color: "text.primary" }}>
-            <Box sx={{ p: 2, background: (t) => (t.palette.mode === "dark" ? alpha(t.palette.warning.main, 0.12) : "linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)"), display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
-              <Tabs
-                value={tabRegion}
-                onChange={(e, v) => setTabRegion(v)}
-                variant="scrollable"
-                scrollButtons="auto"
-                sx={{
-                  flexGrow: 1,
-                  minHeight: { xs: 40, sm: 56 },
-                  "& .MuiTab-root": { 
-                    fontWeight: 700, 
-                    textTransform: "none", 
-                    minHeight: { xs: 40, sm: 56 },
-                    fontSize: { xs: "0.7rem", sm: "1rem" },
-                    px: { xs: 1.5, sm: 3 },
-                    py: { xs: 0.5, sm: 1 },
-                    transition: "all 0.2s",
-                    color: "text.primary",
-                    "&:hover": {
-                      bgcolor: (t) => alpha(t.palette.common.white, t.palette.mode === "dark" ? 0.08 : 0.35),
-                    }
-                  },
-                  "& .Mui-selected": { 
-                    bgcolor: "#ff9800", 
-                    color: "#fff", 
-                    borderRadius: 2,
-                    fontWeight: 800,
-                    boxShadow: "0 2px 8px rgba(255, 152, 0, 0.3)"
-                  },
-                  "& .MuiTabs-scrollButtons": {
-                    color: "#ff9800",
-                    width: { xs: 32, sm: 40 }
-                  }
-                }}
+          {/* Search + region filters + bulk tools */}
+          <Paper variant="outlined" sx={{ mb: 2, borderRadius: 2.5, overflow: "hidden", bgcolor: "background.paper" }}>
+            <Box sx={{ p: { xs: 1.25, sm: 1.5 } }}>
+              <Stack
+                direction={{ xs: "column", lg: "row" }}
+                spacing={1.5}
+                alignItems={{ lg: "center" }}
               >
-                {["All","South","West","East"].map(t => {
-                  const regionMap = { 
-                    South: "Southern", 
-                    West: "Western", 
-                    East: "Eastern" 
-                  };
-                  const targetRegion = t === "All" ? "All" : (regionMap[t] || t);
-                  
-                  // Calculate count from full list (before search filter)
-                  let count = 0;
-                  if (t === "All") {
-                    count = list.length;
-                  } else {
-                    count = list.filter(d => d.region === targetRegion).length;
-                  }
-                  
-                  // Apply search filter to get filtered count for this region
-                  const searchFiltered = list.filter(d => {
-                    if (t !== "All" && d.region !== targetRegion) return false;
-                    if (!searchTerm) return true;
-                    const search = searchTerm.toLowerCase();
-                    return (
-                      (d.name || "").toLowerCase().includes(search) ||
-                      (d.code || "").toLowerCase().includes(search) ||
-                      (d.region || "").toLowerCase().includes(search) ||
-                      (d.credentials?.username || "").toLowerCase().includes(search)
-                    );
-                  });
-                  
-                  return (
-                    <Tab 
-                      key={t} 
-                      value={t} 
-                      label={`${t} (${searchTerm ? searchFiltered.length : count})`} 
+                <TextField
+                  placeholder="Search name, code, region, username…"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  size="small"
+                  sx={{
+                    flex: { lg: "0 1 300px" },
+                    minWidth: { xs: "100%", lg: 220 },
+                    maxWidth: { lg: 340 },
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon fontSize="small" color="action" />
+                      </InputAdornment>
+                    ),
+                    endAdornment: searchTerm ? (
+                      <InputAdornment position="end">
+                        <IconButton size="small" aria-label="Clear search" onClick={() => setSearchTerm("")} edge="end">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      </InputAdornment>
+                    ) : null,
+                  }}
+                />
+
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={tabRegion}
+                  onChange={(_, v) => v != null && setTabRegion(v)}
+                  sx={{
+                    flex: 1,
+                    flexWrap: "wrap",
+                    "& .MuiToggleButton-root": {
+                      textTransform: "none",
+                      fontWeight: 700,
+                      px: { xs: 1.25, sm: 1.75 },
+                      borderRadius: "8px !important",
+                      mx: 0.25,
+                      my: 0.25,
+                    },
+                  }}
+                >
+                  {REGION_TABS.map((t) => (
+                    <ToggleButton key={t} value={t}>
+                      {t} ({regionTabCount(list, t, searchTerm.trim())})
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+
+                {!editingCode && (
+                  <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: "wrap" }}>
+                    <input
+                      accept=".xlsx,.xls"
+                      style={{ display: "none" }}
+                      id="bulk-upload-input"
+                      type="file"
+                      onChange={handleFileInputChange}
                     />
-                  );
-                })}
-              </Tabs>
-              {/* Upload and Download buttons on the right */}
-              {!editingCode && (
-                <Box sx={{ display: "flex", gap: 1.5, alignItems: "center", flexWrap: "wrap" }}>
-                  <input
-                    accept=".xlsx,.xls"
-                    style={{ display: "none" }}
-                    id="bulk-upload-input"
-                    type="file"
-                    onChange={handleFileInputChange}
-                  />
-                  <label htmlFor="bulk-upload-input">
+                    <label htmlFor="bulk-upload-input">
+                      <Button
+                        variant="outlined"
+                        component="span"
+                        size="small"
+                        startIcon={<UploadFileIcon />}
+                        sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
+                      >
+                        Bulk Upload
+                      </Button>
+                    </label>
                     <Button
                       variant="outlined"
-                      color="primary"
-                      component="span"
+                      color="secondary"
                       size="small"
-                      startIcon={<UploadFileIcon />}
-                      sx={{
-                        borderRadius: 2,
-                        textTransform: "none",
-                        fontWeight: 600,
-                        minWidth: 140,
-                        px: 2,
-                        py: 0.75,
-                        borderWidth: 1.5,
-                        transition: "all 0.2s",
-                        bgcolor: "background.paper",
-                        "&:hover": {
-                          borderWidth: 1.5,
-                          transform: "translateY(-1px)",
-                          boxShadow: 2,
-                          bgcolor: "background.paper",
-                        }
-                      }}
+                      startIcon={<DownloadIcon />}
+                      onClick={downloadDistributorTemplate}
+                      sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
                     >
-                      Bulk Upload
+                      Template
                     </Button>
-                  </label>
+                  </Stack>
+                )}
+              </Stack>
+
+              {hasActiveFilters && (
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1.25, flexWrap: "wrap" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                    Active filters:
+                  </Typography>
+                  {tabRegion !== "All" && (
+                    <Chip
+                      size="small"
+                      label={`Region: ${tabRegion}`}
+                      onDelete={() => setTabRegion("All")}
+                      color="primary"
+                      variant="outlined"
+                    />
+                  )}
+                  {searchTerm.trim() && (
+                    <Chip
+                      size="small"
+                      label={`Search: "${searchTerm.trim()}"`}
+                      onDelete={() => setSearchTerm("")}
+                      variant="outlined"
+                    />
+                  )}
                   <Button
-                    variant="outlined"
-                    color="secondary"
                     size="small"
-                    startIcon={<DownloadIcon />}
-                    onClick={downloadDistributorTemplate}
-                    sx={{
-                      borderRadius: 2,
-                      textTransform: "none",
-                      fontWeight: 600,
-                      minWidth: 140,
-                      px: 2,
-                      py: 0.75,
-                      borderWidth: 1.5,
-                      transition: "all 0.2s",
-                      bgcolor: "background.paper",
-                      "&:hover": {
-                        borderWidth: 1.5,
-                        transform: "translateY(-1px)",
-                        boxShadow: 2,
-                        bgcolor: "background.paper",
-                      }
-                    }}
+                    onClick={() => { setTabRegion("All"); setSearchTerm(""); }}
+                    sx={{ textTransform: "none", fontWeight: 600, minWidth: "auto" }}
                   >
-                    Download Template
+                    Clear all
                   </Button>
-                </Box>
+                </Stack>
               )}
             </Box>
           </Paper>
 
-          {/* Bulk Delete Button - Show when distributors are selected */}
+          {/* Bulk selection bar */}
           {!editingCode && selectedDistributors.length > 0 && (
-            <Box sx={{ mb: 3, display: "flex", justifyContent: "flex-end" }}>
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<DeleteIcon />}
-                onClick={() => {
-                  setDistributorToDelete(null);
-                  setDeletePasswordDialogOpen(true);
-                }}
-                disabled={!canDelete}
-                title={
-                  !canDelete
-                    ? "You don't have permission to delete distributors. Only admins can delete distributors."
-                    : `Delete ${selectedDistributors.length} selected distributor(s)`
-                }
-                sx={{
-                  borderRadius: 2,
-                  px: 3,
-                  py: 1,
-                  fontWeight: 600,
-                  textTransform: "none",
-                  borderWidth: 2,
-                  transition: "all 0.2s",
-                  "&:hover": {
-                    borderWidth: 2,
-                    transform: "translateY(-2px)",
-                    boxShadow: 3,
-                  },
-                }}
-              >
-                Delete Selected ({selectedDistributors.length})
-              </Button>
-            </Box>
+            <Paper
+              variant="outlined"
+              sx={{
+                mb: 2,
+                p: 1.25,
+                borderRadius: 2,
+                bgcolor: (t) => alpha(t.palette.error.main, t.palette.mode === "dark" ? 0.12 : 0.06),
+                borderColor: "error.light",
+              }}
+            >
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} flexWrap="wrap">
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  {selectedDistributors.length} selected
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" onClick={() => setSelectedDistributors([])} sx={{ textTransform: "none", fontWeight: 600 }}>
+                    Clear selection
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    size="small"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => {
+                      setDistributorToDelete(null);
+                      setDeleteConfirmOpen(true);
+                    }}
+                    disabled={!canDelete}
+                    sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }}
+                  >
+                    Delete selected
+                  </Button>
+                </Stack>
+              </Stack>
+            </Paper>
           )}
 
           {/* Distributors List */}
-          <Paper elevation={4} sx={{ borderRadius: 4, overflow: "hidden", border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
-            <Box sx={{ 
-              p: 2.5, 
-              background: "linear-gradient(135deg, #d61916 0%, #b71c1c 100%)",
-              borderBottom: "3px solid #8e0000"
+          <Paper variant="outlined" sx={{ borderRadius: 2.5, overflow: "hidden", bgcolor: "background.paper" }}>
+            <Box sx={{
+              px: 1.5,
+              py: 1.25,
+              bgcolor: tableHeaderBg(theme),
+              borderBottom: `2px solid ${theme.palette.primary.main}`,
             }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <Avatar sx={{ bgcolor: "rgba(255,255,255,0.2)", width: 40, height: 40 }}>
-                  <PeopleIcon sx={{ color: "white" }} />
-                </Avatar>
-                <Box>
-                  <Typography variant="h6" sx={{ fontWeight: 700, color: "white", mb: 0.5 }}>
-                    Distributors List
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)" }}>
-                    {filteredList.length} {filteredList.length === 1 ? "distributor" : "distributors"} found
-                  </Typography>
-                </Box>
-              </Box>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} flexWrap="wrap">
+                <Stack direction="row" alignItems="center" spacing={1.25}>
+                  <Avatar sx={{ bgcolor: alpha(theme.palette.primary.main, 0.12), width: 32, height: 32 }}>
+                    <PeopleIcon sx={{ color: "primary.main", fontSize: 18 }} />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                      Distributors
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {filteredList.length} of {list.length} shown
+                    </Typography>
+                  </Box>
+                </Stack>
+                {selectedDistributors.length > 0 && (
+                  <Chip size="small" color="primary" label={`${selectedDistributors.length} selected`} sx={{ fontWeight: 700 }} />
+                )}
+              </Stack>
             </Box>
-            <TableContainer sx={{ maxHeight: { xs: "400px", sm: "600px" }, bgcolor: "background.paper" }}>
+            <TableContainer sx={{ maxHeight: { xs: "52vh", sm: "62vh" }, bgcolor: "background.paper" }}>
               <Table stickyHeader size="small">
                 <TableHead>
-                  <TableRow sx={{ background: "linear-gradient(135deg, #d61916 0%, #b71c1c 100%)" }}>
-                    <TableCell padding="checkbox" sx={{ ...distributorHeaderCellSx, bgcolor: "#d61916" }}>
+                  <TableRow sx={tableHeadRowSx(theme)}>
+                    <TableCell padding="checkbox" sx={distributorHeaderCellSx}>
                       <Checkbox
-                        sx={{ color: "#fff", "&.Mui-checked": { color: "#fff" } }}
+                        sx={{ color: "primary.main", "&.Mui-checked": { color: "primary.main" } }}
                         indeterminate={
                           selectedDistributors.length > 0 &&
                           selectedDistributors.length < filteredList.length
@@ -1653,16 +1508,47 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
                 <TableBody>
                   {filteredList.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} align="center" sx={{ py: 4, color: "text.secondary" }}>
-                        {searchTerm ? "No distributors found matching your search" : "No distributors registered yet"}
+                      <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                        <Stack alignItems="center" spacing={1.5}>
+                          <Avatar sx={{ bgcolor: alpha(theme.palette.text.secondary, 0.1), width: 56, height: 56 }}>
+                            <PersonOffIcon color="action" />
+                          </Avatar>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                            {searchTerm || tabRegion !== "All"
+                              ? "No distributors match your filters"
+                              : "No distributors yet"}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 360 }}>
+                            {searchTerm || tabRegion !== "All"
+                              ? "Try clearing filters or adjusting your search."
+                              : "Add your first distributor or import from Excel."}
+                          </Typography>
+                          {!searchTerm && tabRegion === "All" && canWrite && (
+                            <Stack direction="row" spacing={1} sx={{ pt: 0.5 }}>
+                              <Button
+                                variant="contained"
+                                size="small"
+                                startIcon={<AddIcon />}
+                                onClick={() => setAddDistributorDialogOpen(true)}
+                                sx={{ borderRadius: 2, textTransform: "none", fontWeight: 700 }}
+                              >
+                                Add Distributor
+                              </Button>
+                            </Stack>
+                          )}
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   ) : (
                     filteredList.map((d, i) => {
+                      const rowKey = d.code || d.name || i;
+                      const password = d.credentials?.password || d.password || "";
+                      const showPassword = visiblePasswords[rowKey];
                       return (
-                      <TableRow 
-                        key={d.code || d.name || i}
+                      <TableRow
+                        key={rowKey}
                         hover
+                        selected={selectedDistributors.includes(d.code)}
                         sx={distributorRowSx(i)}
                       >
                         <TableCell padding="checkbox" sx={{ color: "text.primary" }}>
@@ -1673,93 +1559,92 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
                             inputProps={{ "aria-label": `select distributor ${d.code}` }}
                           />
                         </TableCell>
-                        <TableCell sx={{ fontWeight: 500, color: "text.primary" }}>{d.name}</TableCell>
+                        <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>{d.name}</TableCell>
                         <TableCell sx={{ color: "text.primary" }}>
                           <Box sx={{ 
                             display: "inline-block", 
-                            px: 1.5, 
-                            py: 0.75, 
-                            borderRadius: 2, 
+                            px: 1.1, 
+                            py: 0.35, 
+                            borderRadius: 1.3, 
                             background: (t) =>
                               t.palette.mode === "dark"
                                 ? alpha(t.palette.info.main, 0.2)
                                 : "linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)",
                             color: "info.main",
                             fontWeight: 700,
-                            fontSize: "0.875rem",
+                            fontSize: "0.74rem",
                             border: "1px solid",
                             borderColor: "info.light",
-                            boxShadow: (t) => `0 2px 4px ${alpha(t.palette.info.main, 0.25)}`,
+                            boxShadow: (t) => `0 1px 2px ${alpha(t.palette.info.main, 0.22)}`,
                           }}>
                             {d.code}
                           </Box>
                         </TableCell>
-                        <TableCell sx={{ color: "text.primary" }}>{d.region}</TableCell>
-                        <TableCell sx={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "text.primary" }}>
-                          {d.address || "-"}
-                        </TableCell>
-                        <TableCell sx={{ color: "text.primary" }}>{d.credentials?.username || d.username || "-"}</TableCell>
                         <TableCell sx={{ color: "text.primary" }}>
-                          <Box sx={{ 
-                            display: "flex", 
-                            alignItems: "center", 
-                            gap: 0.5,
-                            fontFamily: "monospace",
-                            fontSize: "0.875rem"
-                          }}>
-                            {d.credentials?.password || d.password || "-"}
-                          </Box>
+                          {d.region ? (
+                            <Chip
+                              size="small"
+                              label={d.region}
+                              color={REGION_CHIP_COLOR[d.region] || "default"}
+                              variant="outlined"
+                              sx={{ fontWeight: 700, fontSize: "0.7rem", height: 24 }}
+                            />
+                          ) : "—"}
+                        </TableCell>
+                        <TableCell
+                          sx={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "text.primary" }}
+                          title={d.address || undefined}
+                        >
+                          {d.address || "—"}
+                        </TableCell>
+                        <TableCell sx={{ color: "text.primary", fontFamily: "monospace", fontSize: "0.78rem" }}>
+                          {d.credentials?.username || d.username || "—"}
+                        </TableCell>
+                        <TableCell sx={{ color: "text.primary" }}>
+                          <Stack direction="row" alignItems="center" spacing={0.25}>
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              sx={{ fontFamily: "monospace", minWidth: 56 }}
+                            >
+                              {password ? (showPassword ? password : "••••••••") : "—"}
+                            </Typography>
+                            {password ? (
+                              <Tooltip title={showPassword ? "Hide password" : "Show password"}>
+                                <IconButton size="small" onClick={() => togglePasswordVisible(rowKey)} aria-label="toggle password visibility">
+                                  {showPassword ? <VisibilityOffIcon fontSize="inherit" /> : <VisibilityIcon fontSize="inherit" />}
+                                </IconButton>
+                              </Tooltip>
+                            ) : null}
+                          </Stack>
                         </TableCell>
                         <TableCell align="center" sx={{ color: "text.primary" }}>
-                          <Box sx={{ display: "flex", gap: 1, justifyContent: "center" }}>
-                            <Button 
-                              size="small" 
-                              variant="outlined"
-                              startIcon={<EditIcon />}
-                              onClick={() => startEdit(d)}
-                              disabled={!canWrite}
-                              sx={{ 
-                                minWidth: 90,
-                                borderRadius: 2,
-                                fontWeight: 600,
-                                textTransform: "none",
-                                borderWidth: 2,
-                                transition: "all 0.2s",
-                                "&:hover": {
-                                  borderWidth: 2,
-                                  transform: "translateY(-2px)",
-                                  boxShadow: 2
-                                }
-                              }}
-                              title={!canWrite ? "You don't have permission to edit distributors. Only admins can edit distributors." : ""}
-                            >
-                              Edit
-                            </Button>
-                            <Button 
-                              size="small" 
-                              variant="outlined"
-                              color="error"
-                              startIcon={<DeleteIcon />}
-                              onClick={() => handleDelete(d)}
-                              disabled={!canDelete}
-                              sx={{ 
-                                minWidth: 90,
-                                borderRadius: 2,
-                                fontWeight: 600,
-                                textTransform: "none",
-                                borderWidth: 2,
-                                transition: "all 0.2s",
-                                "&:hover": {
-                                  borderWidth: 2,
-                                  transform: "translateY(-2px)",
-                                  boxShadow: 2
-                                }
-                              }}
-                              title={!canDelete ? "You don't have permission to delete distributors. Only admins can delete distributors." : ""}
-                            >
-                              Delete
-                            </Button>
-                          </Box>
+                          <Stack direction="row" spacing={0.25} justifyContent="center">
+                            <Tooltip title={canWrite ? "Edit distributor" : "No permission to edit"}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => startEdit(d)}
+                                  disabled={!canWrite}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title={canDelete ? "Delete distributor" : "No permission to delete"}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => handleDelete(d)}
+                                  disabled={!canDelete}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
                         </TableCell>
                       </TableRow>
                     );
@@ -1772,18 +1657,6 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
         </Box>
       </Dialog>
 
-
-      {/* Password Dialog for Delete */}
-      <PasswordDialog
-        open={deletePasswordDialogOpen}
-        onClose={() => {
-          setDeletePasswordDialogOpen(false);
-          setDistributorToDelete(null);
-        }}
-        onSuccess={confirmDeletePassword}
-        title="Confirm Delete Action"
-        message="Deleting a distributor is a critical action. Please enter your admin password to continue."
-      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog

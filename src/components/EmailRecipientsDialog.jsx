@@ -37,7 +37,9 @@ import {
   createRecipientGroupId,
 } from "../services/emailService";
 
-const BRAND = "#d61916";
+import { BRAND_PRIMARY } from "../constants/brand";
+
+const BRAND = BRAND_PRIMARY;
 
 function EmailRecipientsDialog({ open, onClose }) {
   const [groups, setGroups] = useState([]);

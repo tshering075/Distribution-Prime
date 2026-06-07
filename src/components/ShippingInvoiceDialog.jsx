@@ -44,7 +44,7 @@ export default function ShippingInvoiceDialog({ open, onClose, order, orderLabel
         ) : (
           <Typography color="text.secondary" sx={{ py: 2 }}>
             No shipping invoice is attached to this order yet. After shipping uploads an invoice and
-            marks the order delivered, refresh the Orders list and try again.
+            marks the order dispatched, refresh the Orders list and try again.
           </Typography>
         )}
       </DialogContent>

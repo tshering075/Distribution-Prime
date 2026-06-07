@@ -1,15 +1,28 @@
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { onAuthStateChange, getCurrentUser, signOutUser, getDistributorByUid, getAdminByUid } from "../services/supabaseService";
+import { loadOrganizationContext, getOrganizationBySlug } from "../services/organizationService";
+import {
+  clearActiveOrganization,
+  getActiveOrganizationId,
+  getLastWorkspaceSlug,
+  getWorkspaceLoginPath,
+} from "../services/tenantScope";
+import { clearDistributorSessionToken } from "../utils/distributorSession";
+import { checkPlatformAdmin } from "../services/platformAdminService";
 import { logActivity, ACTIVITY_TYPES } from "../services/activityService";
-import { BRAND_MARK_SRC } from "../constants/brand";
-import InstallGate from "../components/InstallGate";
+import SaasLoadingScreen from "../components/saas/SaasLoadingScreen";
 
 const LoginPage = lazy(() => import("../pages/LoginPage"));
+const SignUpPage = lazy(() => import("../pages/SignUpPage"));
+const WorkspaceLoginPage = lazy(() => import("../pages/WorkspaceLoginPage"));
+const InviteAcceptPage = lazy(() => import("../pages/InviteAcceptPage"));
 const LandingPage = lazy(() => import("../pages/LandingPage"));
 const DistributorDashboard = lazy(() => import("../pages/DistributorDashboard"));
 const AdminDashboard = lazy(() => import("../pages/AdminDashboard"));
 const ShippingDashboard = lazy(() => import("../pages/ShippingDashboard"));
+const PlatformLoginPage = lazy(() => import("../pages/PlatformLoginPage"));
+const PlatformDashboard = lazy(() => import("../pages/PlatformDashboard"));
 
 const SESSION_ROLE_KEY = "session_role";
 const SESSION_DISTRIBUTOR_INFO_KEY = "session_distributor_info";
@@ -21,32 +34,16 @@ const DISTRIBUTOR_LS_ROLE = "coke_dist_session_role";
 const DISTRIBUTOR_LS_INFO = "coke_dist_session_info";
 
 function AppRouteFallback() {
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #fff 0%, #fef2f2 50%, #fff 100%)'
-    }}>
-      <img
-        src={BRAND_MARK_SRC}
-        alt="CokeSales Management System"
-        style={{ width: 180, height: "auto", maxWidth: "min(84vw, 240px)" }}
-      />
-      <div style={{
-        marginTop: 28,
-        width: 38,
-        height: 38,
-        border: '4px solid #f3f3f3',
-        borderTop: '4px solid #E40521',
-        borderRadius: '50%',
-        animation: 'spin 0.8s linear infinite'
-      }} />
-      <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
+  return <SaasLoadingScreen />;
+}
+
+/** Full-page navigation to static legal HTML (avoids SPA catch-all → login redirect). */
+function StaticLegalRedirect({ targetPath }) {
+  useEffect(() => {
+    const base = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    window.location.replace(`${base}${targetPath}`);
+  }, [targetPath]);
+  return <SaasLoadingScreen message="Opening document…" />;
 }
 
 function readPersistedDistributorInfo() {
@@ -145,18 +142,20 @@ function AppRouterInner() {
       return matches;
     }
     
-    // For general check, allow admin, viewer, distributor, or shipping
+    // For general check, allow admin, viewer, distributor, shipping, or platform operator
     const roleLower = currentRole.toLowerCase();
     return (
       roleLower === "admin" ||
       roleLower === "viewer" ||
       roleLower === "distributor" ||
-      roleLower === "shipping"
+      roleLower === "shipping" ||
+      roleLower === "platform_admin"
     );
   };
 
   const getHomePathForRole = (r) => {
     const roleLower = (r || "").toLowerCase();
+    if (roleLower === "platform_admin") return "/platform";
     if (roleLower === "distributor") return "/distributor";
     if (roleLower === "shipping") return "/shipping";
     return "/admin";
@@ -192,13 +191,43 @@ function AppRouterInner() {
           return;
         }
 
-        // User is signed in, check if they're admin or distributor
+        // User is signed in, check if they're platform operator or tenant user
         try {
-          const admin = await getAdminByUid(user.id);
+          const storedRole = sessionStorage.getItem(SESSION_ROLE_KEY);
+          if (storedRole === "platform_admin") {
+            const isPlatform = await checkPlatformAdmin();
+            if (isPlatform && isMounted) {
+              clearActiveOrganization();
+              setRole("platform_admin");
+              setDistributorInfo(null);
+              localStorage.setItem("userRole", "platform_admin");
+              setAuthLoading(false);
+              return;
+            }
+          }
+
+          let preferredOrgId = getActiveOrganizationId();
+          if (!preferredOrgId && getLastWorkspaceSlug()) {
+            try {
+              const org = await getOrganizationBySlug(getLastWorkspaceSlug());
+              preferredOrgId = org?.id || null;
+            } catch {
+              /* use first matching admin row */
+            }
+          }
+
+          const admin = await getAdminByUid(user.id, preferredOrgId || undefined);
           if (admin && isMounted) {
             // Get actual role from Supabase (admin or viewer)
             const actualRole = admin.role || "admin"; // admin | viewer | shipping
             clearDistributorLocalPersistence();
+            if (admin.organization_id) {
+              try {
+                await loadOrganizationContext(admin.organization_id);
+              } catch (orgErr) {
+                console.warn("Could not load organization context:", orgErr);
+              }
+            }
             setRole(actualRole);
             setDistributorInfo(null);
             sessionStorage.setItem(SESSION_ROLE_KEY, actualRole);
@@ -214,6 +243,13 @@ function AppRouterInner() {
           
           const distributor = await getDistributorByUid(user.id);
           if (distributor && isMounted) {
+            if (distributor.organization_id) {
+              try {
+                await loadOrganizationContext(distributor.organization_id);
+              } catch (orgErr) {
+                console.warn("Could not load organization context:", orgErr);
+              }
+            }
             setRole("distributor");
             const info = { name: distributor.name, code: distributor.code };
             setDistributorInfo(info);
@@ -293,7 +329,11 @@ function AppRouterInner() {
 
   const handleLogin = (newRole, distributor = null) => {
     sessionStorage.setItem(SESSION_AUTH_ACTIVE_KEY, "true");
-    if (newRole === "distributor" && distributor) {
+    if (newRole === "platform_admin") {
+      clearActiveOrganization();
+      clearDistributorLocalPersistence();
+      setDistributorInfo(null);
+    } else if (newRole === "distributor" && distributor) {
       const info = { name: distributor.name, code: distributor.code };
       setDistributorInfo(info);
       sessionStorage.setItem(SESSION_DISTRIBUTOR_INFO_KEY, JSON.stringify(info));
@@ -324,6 +364,8 @@ function AppRouterInner() {
     sessionStorage.removeItem(SESSION_ROLE_KEY);
     sessionStorage.removeItem(SESSION_DISTRIBUTOR_INFO_KEY);
     clearDistributorLocalPersistence();
+    clearDistributorSessionToken();
+    clearActiveOrganization();
 
     // Navigate immediately - don't wait for async operations
     navigate("/", { replace: true });
@@ -408,68 +450,53 @@ function AppRouterInner() {
   // This ensures that on refresh, if we have a role in localStorage, we render immediately
   // and preserve the current route
   if (authLoading && !hasStoredRole) {
-    return (
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh',
-        background: 'linear-gradient(135deg, #fff 0%, #fef2f2 50%, #fff 100%)'
-      }}>
-        <img 
-          src={BRAND_MARK_SRC}
-          alt="CokeSales Management System"
-          style={{ width: 200, height: "auto", maxWidth: "min(90vw, 260px)" }}
-        />
-        <div style={{
-          marginTop: 32,
-          width: 40,
-          height: 40,
-          border: '4px solid #f3f3f3',
-          borderTop: '4px solid #E40521',
-          borderRadius: '50%',
-          animation: 'spin 0.8s linear infinite'
-        }} />
-        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
+    return <SaasLoadingScreen message="Checking your session…" />;
   }
 
   return (
     <Suspense fallback={<AppRouteFallback />}>
     <Routes>
-      {/* Public home — OAuth verification: app purpose + name without login */}
-      {/* Install-first for anyone opening the link in a browser (not already installed) */}
-      <Route
-        path="/install"
-        element={
-          <InstallGate defaultContinuePath="/login">
-            <Navigate to="/login" replace />
-          </InstallGate>
-        }
-      />
+      <Route path="/install" element={<Navigate to="/" replace />} />
 
+      {/* Public home — OAuth verification: app purpose + name without login */}
       <Route
         path="/"
         element={
-          <InstallGate defaultContinuePath="/">
-            {isAuthenticated() ? (
-              <Navigate to={getHomePathForRole(getCurrentRole())} replace />
-            ) : (
-              <LandingPage />
-            )}
-          </InstallGate>
+          isAuthenticated() ? (
+            <Navigate to={getHomePathForRole(getCurrentRole())} replace />
+          ) : (
+            <LandingPage />
+          )
         }
       />
 
       {/* Login */}
+      <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
+
+      <Route path="/signup" element={<SignUpPage onLogin={handleLogin} />} />
+
+      <Route path="/w/:workspaceSlug/login" element={<WorkspaceLoginPage onLogin={handleLogin} />} />
+
       <Route
-        path="/login"
+        path="/invite/:token"
+        element={<InviteAcceptPage onLogin={handleLogin} />}
+      />
+
+      <Route
+        path="/platform/login"
+        element={<PlatformLoginPage onLogin={handleLogin} />}
+      />
+
+      <Route
+        path="/platform"
         element={
-          <InstallGate defaultContinuePath="/login">
-            <LoginPage onLogin={handleLogin} />
-          </InstallGate>
+          !isAuthenticated() ? (
+            <Navigate to="/platform/login" replace />
+          ) : !isAuthenticated("platform_admin") ? (
+            <Navigate to={getHomePathForRole(getCurrentRole())} replace />
+          ) : (
+            <PlatformDashboard onLogout={handleLogout} />
+          )
         }
       />
 
@@ -479,6 +506,8 @@ function AppRouterInner() {
         element={
           !isAuthenticated() ? (
             <Navigate to="/login" replace />
+          ) : !isAuthenticated("distributor") ? (
+            <Navigate to={getHomePathForRole(getCurrentRole())} replace />
           ) : (
             (() => {
               const fromSession = readSessionDistributorInfo();
@@ -500,29 +529,42 @@ function AppRouterInner() {
         element={
           !isAuthenticated() ? (
             <Navigate to="/login" replace />
+          ) : isAuthenticated("distributor") ? (
+            <Navigate to="/distributor" replace />
           ) : isAuthenticated("shipping") ? (
             <Navigate to="/shipping" replace />
-          ) : (
+          ) : isAuthenticated("admin") || isAuthenticated("viewer") ? (
             <AdminDashboard onLogout={handleLogout} />
+          ) : (
+            <Navigate to={getHomePathForRole(getCurrentRole())} replace />
           )
         }
       />
 
-      {/* Shipping Dashboard */}
+      {/* Shipping Dashboard — same workspace context as admin/distributor */}
       <Route
         path="/shipping"
         element={
           !isAuthenticated() ? (
-            <Navigate to="/login" replace />
+            <Navigate to={getWorkspaceLoginPath()} replace />
           ) : !isAuthenticated("shipping") ? (
             <Navigate to={getHomePathForRole(getCurrentRole())} replace />
+          ) : !getActiveOrganizationId() ? (
+            <Navigate to={getWorkspaceLoginPath()} replace />
           ) : (
             <ShippingDashboard onLogout={handleLogout} />
           )
         }
       />
 
-      {/* Firebase Test Route removed */}
+      <Route
+        path="/privacy-policy"
+        element={<StaticLegalRedirect targetPath="/privacy-policy.html" />}
+      />
+      <Route
+        path="/terms-of-service"
+        element={<StaticLegalRedirect targetPath="/terms-of-service.html" />}
+      />
 
       {/* Unknown paths */}
       <Route

@@ -46,7 +46,7 @@ const ACTIVITY_TYPE_FILTERS = [
   { value: "order_sent_for_approval", label: "Sent for approval" },
   { value: "order_approved", label: "Approved" },
   { value: "order_rejected", label: "Rejected" },
-  { value: "order_delivered", label: "Delivered" },
+  { value: "order_delivered", label: "Dispatched" },
   { value: "order_canceled", label: "Canceled" },
   { value: "shipping_invoice_uploaded", label: "Invoices" },
   { value: "sales_data_updated", label: "Sales data" },

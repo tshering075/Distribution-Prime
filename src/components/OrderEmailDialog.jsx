@@ -40,7 +40,9 @@ import {
 } from "../services/emailService";
 import AppSnackbar from "./AppSnackbar";
 
-const BRAND = "#d61916";
+import { BRAND_PRIMARY } from "../constants/brand";
+
+const BRAND = BRAND_PRIMARY;
 
 function getDistributorPrimaryName(name) {
   const cleaned = String(name || "Distributor")

@@ -1,6 +1,6 @@
-/* CokeSales PWA — required for Chrome/Edge “Install app” prompt */
-const CACHE_NAME = "cokesales-pwa-v2";
-const PRECACHE = ["/index.html", "/manifest.json", "/coke-sales-icon-512.png", "/login"];
+/* Distribution Prime PWA — required for Chrome/Edge “Install app” prompt */
+const CACHE_NAME = "distribution-prime-v2";
+const PRECACHE = ["/index.html", "/manifest.json", "/distribution-prime-icon-512.png", "/distribution-prime-icon.svg", "/login"];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

@@ -23,7 +23,6 @@ import { useTheme, alpha } from "@mui/material/styles";
 import { tableStripeAt } from "../theme/contrastSurfaces";
 import CloseIcon from "@mui/icons-material/Close";
 import SearchIcon from "@mui/icons-material/Search";
-import LockIcon from "@mui/icons-material/Lock";
 import SaveIcon from "@mui/icons-material/Save";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
@@ -33,7 +32,6 @@ import EventIcon from "@mui/icons-material/Event";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { getTargetPeriod, saveTargetPeriod } from "../utils/targetPeriod";
 import { supabase, saveGlobalTargetPeriod } from "../services/supabaseService";
-import PasswordDialog from "./PasswordDialog";
 import {
   DialogTitle,
   DialogContent,
@@ -44,8 +42,24 @@ import {
   ListItemText,
   Chip,
   CircularProgress,
-  Avatar,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Stack,
 } from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+
+const DENSE_CELL = { py: 0.35, px: 0.5, fontSize: "0.7rem", lineHeight: 1.2, fontWeight: 700 };
+const GRID_BORDER = {
+  borderRight: 1,
+  borderBottom: 1,
+  borderColor: "divider",
+};
+const DIST_COL_WIDTH = 220;
+const COMPACT_INPUT = {
+  "& .MuiInputBase-root": { fontSize: "0.75rem", height: 28, fontWeight: 700 },
+  "& .MuiInputBase-input": { py: 0.25, px: 0.5, textAlign: "center", fontWeight: 700 },
+};
 
 /** Achieved PC/UC from sales can be floating-point; show whole units with grouping. */
 function formatAchievedMetric(value) {
@@ -80,8 +94,6 @@ export default function TargetsDialog({
     });
     return map;
   });
-  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [bulkUploadProgress, setBulkUploadProgress] = useState({ total: 0, processed: 0, success: 0, failed: 0, skipped: 0 });
@@ -89,15 +101,10 @@ export default function TargetsDialog({
   const [loadingFile, setLoadingFile] = useState(false);
   const hiddenFileRef = React.useRef(null);
   const [selectedDistributorKeys, setSelectedDistributorKeys] = useState([]);
-  const [deletePasswordDialogOpen, setDeletePasswordDialogOpen] = useState(false);
-
   const getDistributorKey = React.useCallback((d) => d?.code || d?.name || "", []);
 
-  // Reset authentication when dialog opens
   React.useEffect(() => {
     if (open) {
-      setIsAuthenticated(false);
-      setPasswordDialogOpen(true);
       setSelectedDistributorKeys([]);
     }
   }, [open]);
@@ -147,19 +154,6 @@ export default function TargetsDialog({
       }
     }
   }, [distributorsKey, open, distributors]);
-
-  const handlePasswordSuccess = () => {
-    setIsAuthenticated(true);
-    setPasswordDialogOpen(false);
-  };
-
-  const handlePasswordClose = () => {
-    setPasswordDialogOpen(false);
-    if (!isAuthenticated) {
-      // If not authenticated, close the dialog
-      onClose && onClose();
-    }
-  };
 
   const filtered = useMemo(() => {
     if (!distributors || !Array.isArray(distributors)) {
@@ -229,8 +223,6 @@ export default function TargetsDialog({
     setEditing(prev => ({ ...prev, [name]: { ...(prev[name]||{}), [field]: v === "" ? 0 : v } }));
   };
 
-  const [applyPasswordDialogOpen, setApplyPasswordDialogOpen] = useState(false);
-
   const apply = () => {
     // Validate date range
     if (start && end) {
@@ -254,13 +246,6 @@ export default function TargetsDialog({
       alert("Target values must be non-negative numbers");
       return;
     }
-    
-    // Require password confirmation for applying changes
-    setApplyPasswordDialogOpen(true);
-  };
-
-  const confirmApply = () => {
-    setApplyPasswordDialogOpen(false);
     
     // Save target period to storage
     if (start && end) {
@@ -288,11 +273,17 @@ export default function TargetsDialog({
       alert("Please select at least one distributor target to delete.");
       return;
     }
-    setDeletePasswordDialogOpen(true);
+    if (
+      !window.confirm(
+        `Delete targets for ${selectedDistributorKeys.length} selected distributor(s)? This removes targets from the workspace.`
+      )
+    ) {
+      return;
+    }
+    confirmDeleteSelectedTargets();
   };
 
   const confirmDeleteSelectedTargets = async () => {
-    setDeletePasswordDialogOpen(false);
     const selected = distributors.filter((d) => selectedDistributorKeys.includes(getDistributorKey(d)));
     if (selected.length === 0) {
       alert("No selected distributors found to delete.");
@@ -598,93 +589,72 @@ export default function TargetsDialog({
     e.target.value = null;
   };
 
+  const summaryTotals = useMemo(() => {
+    let targetUc = 0;
+    let achievedUc = 0;
+    filtered.forEach((d) => {
+      const target = editing[d.name] || d.target || {};
+      targetUc += (target.CSD_UC || 0) + (target.Water_UC || 0);
+      achievedUc += (Number(d.achieved?.CSD_UC) || 0) + (Number(d.achieved?.Water_UC) || 0);
+    });
+    return { count: filtered.length, targetUc, achievedUc };
+  }, [filtered, editing]);
+
   const targetTablePastel = React.useMemo(
     () => ({
-      csdBand: {
-        fontWeight: "bold",
+      headMain: {
+        fontWeight: 700,
+        bgcolor: "#1565c0",
+        color: "#fff",
+        textAlign: "center",
+        ...DENSE_CELL,
+        px: 0.5,
+      },
+      headSub: {
+        fontWeight: 700,
+        bgcolor: "#ffcdd2",
+        color: theme.palette.getContrastText("#ffcdd2"),
+        textAlign: "center",
+        fontSize: "0.65rem",
+        py: 0.25,
+        px: 0.35,
+        whiteSpace: "nowrap",
+      },
+      csdSub: {
+        fontWeight: 700,
         bgcolor: "#fff3e0",
         color: theme.palette.getContrastText("#fff3e0"),
         textAlign: "center",
-        fontSize: "0.85rem",
+        fontSize: "0.65rem",
+        py: 0.25,
+        px: 0.35,
       },
-      waterBand: {
-        fontWeight: "bold",
+      waterSub: {
+        fontWeight: 700,
         bgcolor: "#e3f2fd",
         color: theme.palette.getContrastText("#e3f2fd"),
         textAlign: "center",
-        fontSize: "0.85rem",
+        fontSize: "0.65rem",
+        py: 0.25,
+        px: 0.35,
       },
       pinkCorner: {
-        fontWeight: "bold",
+        fontWeight: 700,
         bgcolor: "#ffcdd2",
         color: theme.palette.getContrastText("#ffcdd2"),
         position: "sticky",
         left: 0,
         zIndex: 10,
-      },
-      pinkCell75: {
-        fontWeight: "bold",
-        bgcolor: "#ffcdd2",
-        color: theme.palette.getContrastText("#ffcdd2"),
-        textAlign: "center",
-        fontSize: "0.75rem",
+        fontSize: "0.7rem",
+        py: 0.35,
+        px: 0.75,
       },
     }),
     [theme]
   );
 
-  // Don't render content if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <>
-        <PasswordDialog
-          open={passwordDialogOpen}
-          onClose={handlePasswordClose}
-          onSuccess={handlePasswordSuccess}
-          title="Access Restricted"
-          message="This section is password protected. Please enter your admin password to manage targets."
-        />
-        <Dialog fullScreen open={open} onClose={onClose} PaperProps={{ sx: { bgcolor: "background.default" } }}>
-          <AppBar sx={{ position: 'relative', bgcolor: "#d61916" }}>
-            <Toolbar>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexGrow: 1 }}>
-                <Avatar sx={{ bgcolor: "rgba(255,255,255,0.2)", width: 40, height: 40 }}>
-                  <TrackChangesIcon />
-                </Avatar>
-                <Box>
-                  <Typography variant="h6" component="div" sx={{ fontWeight: 600, color: "white" }}>
-                    Manage Targets
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.8)" }}>
-                    Password protected
-                  </Typography>
-                </Box>
-              </Box>
-              <LockIcon sx={{ mr: 1 }} />
-              <IconButton edge="end" color="inherit" onClick={onClose} aria-label="close">
-                <CloseIcon />
-              </IconButton>
-            </Toolbar>
-          </AppBar>
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", bgcolor: "background.default" }}>
-            <Typography variant="h6" sx={{ color: "text.secondary" }}>
-              Please enter password to continue
-            </Typography>
-          </Box>
-        </Dialog>
-      </>
-    );
-  }
-
   return (
     <>
-      <PasswordDialog
-        open={passwordDialogOpen}
-        onClose={handlePasswordClose}
-        onSuccess={handlePasswordSuccess}
-        title="Access Restricted"
-        message="This section is password protected. Please enter your admin password to manage targets."
-      />
       <Dialog 
         fullScreen 
         open={open} 
@@ -693,237 +663,100 @@ export default function TargetsDialog({
         disableAutoFocus={false}
         PaperProps={{ sx: { bgcolor: "background.default", color: "text.primary" } }}
       >
-        <AppBar sx={{ position: 'relative', bgcolor: "#d61916" }}>
-          <Toolbar>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexGrow: 1 }}>
-              <Avatar sx={{ bgcolor: "rgba(255,255,255,0.2)", width: 40, height: 40 }}>
-                <TrackChangesIcon />
-              </Avatar>
-              <Box>
-                <Typography variant="h6" component="div" sx={{ fontWeight: 600, color: "white" }}>
-                  Manage Targets
-                </Typography>
-                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.8)" }}>
-                  Set and update distributor targets
-                </Typography>
-              </Box>
+        <AppBar sx={{ position: "relative", bgcolor: "#1565c0" }}>
+          <Toolbar variant="dense" sx={{ minHeight: 48, gap: 0.5 }}>
+            <TrackChangesIcon sx={{ fontSize: 22 }} />
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.15, fontSize: "0.95rem" }}>
+                Targets
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.85, fontSize: "0.65rem" }}>
+                {summaryTotals.count} dist · Tgt UC {summaryTotals.targetUc.toLocaleString()} · Ach UC{" "}
+                {formatAchievedMetric(summaryTotals.achievedUc)}
+              </Typography>
             </Box>
-            <Button 
-              color="inherit" 
+            <Button
+              size="small"
+              color="inherit"
               onClick={apply}
-              startIcon={<SaveIcon />}
-              sx={{ mr: 1, fontWeight: 600, bgcolor: "rgba(255,255,255,0.2)", "&:hover": { bgcolor: "rgba(255,255,255,0.3)" } }}
+              startIcon={<SaveIcon sx={{ fontSize: 18 }} />}
+              sx={{ textTransform: "none", fontWeight: 700, fontSize: "0.75rem" }}
             >
-              Save Changes
+              Save
             </Button>
-            <IconButton edge="end" color="inherit" onClick={onClose} aria-label="close">
-              <CloseIcon />
+            <IconButton size="small" color="inherit" onClick={onClose} aria-label="close">
+              <CloseIcon fontSize="small" />
             </IconButton>
           </Toolbar>
         </AppBar>
 
-        <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: "background.default", color: "text.primary" }}>
-          {/* Summary Cards - First Row */}
-          {filtered.length > 0 && (
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2, mb: 3 }}>
-              <Paper elevation={2} sx={{ p: 2, borderRadius: 2, bgcolor: (t) => alpha(t.palette.info.main, t.palette.mode === "dark" ? 0.2 : 0.12), color: "text.primary" }}>
-                <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600 }}>
-                  Total Distributors
-                </Typography>
-                <Typography variant="h4" sx={{ fontWeight: "bold", color: "info.main" }}>
-                  {filtered.length}
-                </Typography>
-              </Paper>
-              <Paper elevation={2} sx={{ p: 2, borderRadius: 2, bgcolor: (t) => alpha(t.palette.warning.main, t.palette.mode === "dark" ? 0.2 : 0.12), color: "text.primary" }}>
-                <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600 }}>
-                  Total Target UC
-                </Typography>
-                <Typography variant="h4" sx={{ fontWeight: "bold", color: "warning.dark" }}>
-                  {filtered.reduce((sum, d) => {
-                    const target = editing[d.name] || d.target || {};
-                    return sum + (target.CSD_UC || 0) + (target.Water_UC || 0);
-                  }, 0).toLocaleString()}
-                </Typography>
-              </Paper>
-              <Paper elevation={2} sx={{ p: 2, borderRadius: 2, bgcolor: (t) => alpha(t.palette.success.main, t.palette.mode === "dark" ? 0.2 : 0.12), color: "text.primary" }}>
-                <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600 }}>
-                  Total Achieved UC
-                </Typography>
-                <Typography variant="h4" sx={{ fontWeight: "bold", color: "success.dark" }}>
-                  {formatAchievedMetric(
-                    filtered.reduce((sum, d) => {
-                      return sum + (Number(d.achieved?.CSD_UC) || 0) + (Number(d.achieved?.Water_UC) || 0);
-                    }, 0)
-                  )}
-                </Typography>
-              </Paper>
-            </Box>
-          )}
-
-          {/* Target Period - Second Row */}
-          <Paper elevation={4} sx={{ p: { xs: 2, sm: 3 }, mb: 3, borderRadius: 3, background: (t) => (t.palette.mode === "dark" ? alpha(t.palette.warning.main, 0.14) : "linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)"), border: "2px solid", borderColor: "warning.main", color: "text.primary" }}>
-            <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap", mb: 2, pb: 2, borderBottom: "2px solid", borderColor: "warning.main" }}>
-              <Avatar sx={{ bgcolor: "#ff9800", width: 40, height: 40 }}>
-                <EventIcon sx={{ color: "white" }} />
-              </Avatar>
-              <Typography variant="h6" sx={{ fontWeight: 700, color: "warning.dark" }}>
-                Target Period
-              </Typography>
-            </Box>
-            <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
-              <TextField 
-                label="Start Date" 
-                type="date" 
-                value={start} 
-                onChange={(e) => setStart(e.target.value)} 
-                InputLabelProps={{ shrink: true }}
-                size="small"
-                sx={{ bgcolor: "background.paper", borderRadius: 1 }}
-              />
-              <TextField 
-                label="End Date" 
-                type="date" 
-                value={end} 
-                onChange={(e) => setEnd(e.target.value)} 
-                InputLabelProps={{ shrink: true }}
-                size="small"
-                sx={{ bgcolor: "background.paper", borderRadius: 1 }}
-              />
-              <Box sx={{ flex: 1 }} />
-            </Box>
-            <Typography variant="body2" sx={{ color: "text.primary", mt: 1.5, lineHeight: 1.5, maxWidth: 720 }}>
-              Start and end can be any dates you need—the range does not have to sit inside a single calendar month.
-              Set them to match your commercial cycle. Sales are counted toward <strong>Achieved</strong> on the
-              performance table only when the invoice date falls between start and end (inclusive).
-            </Typography>
-          </Paper>
-
-          {/* Region tabs with colored selected tab and buttons - Third Row */}
-          <Paper elevation={4} sx={{ mb: 3, borderRadius: 3, overflow: "visible", border: "1px solid", borderColor: "divider", color: "text.primary" }}>
-            <Box sx={{ 
-              p: { xs: 1.5, sm: 2 }, 
-              background: (t) => (t.palette.mode === "dark" ? alpha(t.palette.warning.main, 0.12) : "linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)"), 
-              display: "flex", 
-              flexDirection: { xs: "column", sm: "row" },
-              alignItems: { xs: "stretch", sm: "center" },
-              justifyContent: "space-between", 
-              gap: 2, 
-              flexWrap: "wrap" 
-            }}>
-              <Box sx={{ width: { xs: "100%", sm: "auto" }, overflowX: { xs: "auto", sm: "visible" }, flexGrow: 1 }}>
+        <Box sx={{ p: { xs: 1, sm: 1.5 }, bgcolor: "background.default", color: "text.primary" }}>
+          <Stack spacing={1}>
+            <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+              <Box
+                sx={{
+                  px: 1,
+                  py: 0.5,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 0.75,
+                  bgcolor: (t) => alpha(t.palette.warning.main, t.palette.mode === "dark" ? 0.12 : 0.08),
+                }}
+              >
                 <Tabs
                   value={tabRegion}
                   onChange={(e, v) => setTabRegion(v)}
                   variant="scrollable"
                   scrollButtons="auto"
                   sx={{
-                    width: { xs: "100%", sm: "auto" },
-                    minHeight: { xs: 36, sm: 56 },
-                    "& .MuiTab-root": { 
-                      fontWeight: 700, 
-                      textTransform: "none", 
-                      minHeight: { xs: 36, sm: 56 },
-                      fontSize: { xs: "0.7rem", sm: "1rem" },
-                      px: { xs: 1.25, sm: 3 },
-                      py: { xs: 0.5, sm: 1 },
-                      transition: "all 0.2s",
-                      color: "text.primary",
-                      "&:hover": {
-                        bgcolor: (t) => alpha(t.palette.common.white, t.palette.mode === "dark" ? 0.08 : 0.35),
-                      }
+                    minHeight: 32,
+                    "& .MuiTab-root": {
+                      minHeight: 32,
+                      py: 0.25,
+                      px: 1.25,
+                      fontSize: "0.7rem",
+                      fontWeight: 700,
+                      textTransform: "none",
                     },
-                    "& .Mui-selected": { 
-                      bgcolor: "#ff9800", 
-                      color: "#fff", 
-                      borderRadius: 2,
-                      fontWeight: 800,
-                      boxShadow: "0 2px 8px rgba(255, 152, 0, 0.3)"
-                    },
-                    "& .MuiTabs-scrollButtons": {
-                      color: "#ff9800",
-                      width: { xs: 28, sm: 40 },
-                      "&.Mui-disabled": {
-                        opacity: 0.3
-                      }
-                    }
+                    "& .Mui-selected": { color: "warning.dark" },
                   }}
                 >
-                  {["All","South","West","East"].map(t => (
-                    <Tab 
-                      key={t} 
-                      value={t} 
-                      label={`${t} (${t === "All" ? filtered.length : filtered.filter(d => {
-                        const key = { South: "Southern", West: "Western", East: "Eastern" }[t];
-                        return d.region === key;
-                      }).length})`} 
+                  {["All", "South", "West", "East"].map((t) => (
+                    <Tab
+                      key={t}
+                      value={t}
+                      label={`${t} (${
+                        t === "All"
+                          ? filtered.length
+                          : filtered.filter((d) => {
+                              const key = { South: "Southern", West: "Western", East: "Eastern" }[t];
+                              return d.region === key;
+                            }).length
+                      })`}
                     />
                   ))}
                 </Tabs>
-              </Box>
-              {/* Bulk Upload and Download buttons on the right */}
-              <Box sx={{ 
-                display: "flex", 
-                gap: 1.5, 
-                alignItems: "center", 
-                flexWrap: "wrap",
-                width: { xs: "100%", sm: "auto" },
-                justifyContent: { xs: "center", sm: "flex-end" }
-              }}>
+                <Box sx={{ flex: 1 }} />
                 <Button
-                  variant="outlined"
-                  color="primary"
                   size="small"
-                  startIcon={loadingFile ? <CircularProgress size={16} /> : <UploadFileIcon />}
+                  variant="outlined"
+                  startIcon={loadingFile ? <CircularProgress size={14} /> : <UploadFileIcon />}
                   onClick={triggerBulkUpload}
                   disabled={loadingFile}
-                  sx={{
-                    borderRadius: 2,
-                    textTransform: "none",
-                    fontWeight: 600,
-                    minWidth: { xs: 120, sm: 140 },
-                    px: { xs: 1.5, sm: 2 },
-                    py: 0.75,
-                    borderWidth: 1.5,
-                    transition: "all 0.2s",
-                    bgcolor: "background.paper",
-                    fontSize: { xs: "0.75rem", sm: "0.875rem" },
-                    "&:hover": {
-                      borderWidth: 1.5,
-                      transform: "translateY(-1px)",
-                      boxShadow: 2,
-                      bgcolor: "background.paper",
-                    }
-                  }}
+                  sx={{ textTransform: "none", fontSize: "0.7rem", py: 0.25 }}
                 >
-                  {loadingFile ? "Uploading..." : "Bulk Upload"}
+                  Upload
                 </Button>
                 <Button
-                  variant="outlined"
-                  color="secondary"
                   size="small"
+                  variant="outlined"
                   startIcon={<DownloadIcon />}
                   onClick={downloadTargetTemplate}
                   disabled={loadingFile}
-                  sx={{
-                    borderRadius: 2,
-                    textTransform: "none",
-                    fontWeight: 600,
-                    minWidth: { xs: 120, sm: 140 },
-                    px: { xs: 1.5, sm: 2 },
-                    py: 0.75,
-                    borderWidth: 1.5,
-                    transition: "all 0.2s",
-                    bgcolor: "background.paper",
-                    fontSize: { xs: "0.75rem", sm: "0.875rem" },
-                    "&:hover": {
-                      borderWidth: 1.5,
-                      transform: "translateY(-1px)",
-                      boxShadow: 2,
-                      bgcolor: "background.paper",
-                    }
-                  }}
+                  sx={{ textTransform: "none", fontSize: "0.7rem", py: 0.25 }}
                 >
-                  Download Template
+                  Template
                 </Button>
                 <input
                   ref={hiddenFileRef}
@@ -933,209 +766,233 @@ export default function TargetsDialog({
                   style={{ display: "none" }}
                 />
               </Box>
-            </Box>
-          </Paper>
+            </Paper>
 
-          {/* Search bar just above the table */}
-          <Box sx={{ mb: 2, display: "flex", gap: 2, alignItems: "center" }}>
-            <TextField
-              placeholder="Search distributors..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <SearchIcon sx={{ color: "text.secondary", mr: 1 }} />
-                ),
-              }}
-              sx={{
-                flexGrow: 1,
-                minWidth: 200,
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: 3,
-                  bgcolor: "background.paper",
-                  boxShadow: (t) => `0 2px 8px ${alpha(t.palette.common.black, t.palette.mode === "dark" ? 0.35 : 0.1)}`,
-                  transition: "all 0.2s",
-                  "&:hover": {
-                    boxShadow: (t) => `0 4px 12px ${alpha(t.palette.common.black, t.palette.mode === "dark" ? 0.45 : 0.15)}`,
-                  },
-                  "&.Mui-focused": {
-                    boxShadow: (t) => `0 4px 12px ${alpha(t.palette.error.main, 0.25)}`,
-                  }
-                }
-              }}
-            />
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={requestDeleteSelectedTargets}
-              disabled={!canWrite || selectedDistributorKeys.length === 0}
-              sx={{ borderRadius: 2, minWidth: 170, textTransform: "none", fontWeight: 600 }}
+            <Accordion
+              disableGutters
+              elevation={0}
+              sx={{ border: 1, borderColor: "divider", borderRadius: 1, "&:before": { display: "none" } }}
             >
-              Delete Selected
-            </Button>
-          </Box>
+              <AccordionSummary expandIcon={<ExpandMoreIcon fontSize="small" />} sx={{ minHeight: 36, "& .MuiAccordionSummary-content": { my: 0.5 } }}>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                  <EventIcon sx={{ fontSize: 16, color: "warning.main" }} />
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                    Period {start && end ? `· ${start} → ${end}` : ""}
+                  </Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails sx={{ pt: 0, pb: 1, px: 1.5 }}>
+                <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
+                  <TextField
+                    label="Start"
+                    type="date"
+                    value={start}
+                    onChange={(e) => setStart(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    size="small"
+                    sx={{ width: 150, ...COMPACT_INPUT }}
+                  />
+                  <TextField
+                    label="End"
+                    type="date"
+                    value={end}
+                    onChange={(e) => setEnd(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    size="small"
+                    sx={{ width: 150, ...COMPACT_INPUT }}
+                  />
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                  Achieved counts invoices dated within this range (inclusive).
+                </Typography>
+              </AccordionDetails>
+            </Accordion>
 
-          {/* Editable targets table (two-rows per distributor) */}
-          <TableContainer 
-            component={Paper} 
-            sx={{ 
-              borderRadius: 2, 
+            <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+              <TextField
+                size="small"
+                placeholder="Search distributor…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                InputProps={{
+                  startAdornment: <SearchIcon sx={{ color: "text.secondary", fontSize: 18, mr: 0.5 }} />,
+                }}
+                sx={{
+                  flex: 1,
+                  minWidth: 140,
+                  "& .MuiInputBase-root": { fontSize: "0.8rem", height: 32 },
+                }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon sx={{ fontSize: 16 }} />}
+                onClick={requestDeleteSelectedTargets}
+                disabled={!canWrite || selectedDistributorKeys.length === 0}
+                sx={{ textTransform: "none", fontSize: "0.7rem", whiteSpace: "nowrap" }}
+              >
+                Delete ({selectedDistributorKeys.length})
+              </Button>
+            </Stack>
+          </Stack>
+
+          <TableContainer
+            component={Paper}
+            variant="outlined"
+            sx={{
+              mt: 1,
+              borderRadius: 1,
               overflow: "auto",
-              maxHeight: { xs: "calc(100vh - 400px)", sm: "calc(100vh - 350px)", md: "70vh" },
-              "&::-webkit-scrollbar": {
-                height: "8px",
-                width: "8px",
-              },
-              "&::-webkit-scrollbar-thumb": {
-                backgroundColor: alpha(theme.palette.text.primary, 0.26),
-                borderRadius: "4px",
-              },
+              maxHeight: "calc(100vh - 220px)",
             }}
           >
-            <Table size="small" stickyHeader sx={{ minWidth: { xs: 800, sm: 1000 } }}>
+            <Table
+              size="small"
+              stickyHeader
+              sx={{
+                minWidth: 860,
+                tableLayout: "fixed",
+                borderCollapse: "collapse",
+                "& .MuiTableCell-root": GRID_BORDER,
+              }}
+            >
             <TableHead>
               <TableRow>
-                <TableCell sx={{ fontWeight: "bold", bgcolor: "#d61916", color: "#fff", position: "sticky", left: 0, zIndex: 10, minWidth: 200 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <TableCell
+                  rowSpan={2}
+                  sx={{
+                    ...targetTablePastel.headMain,
+                    ...GRID_BORDER,
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 11,
+                    textAlign: "left",
+                    width: DIST_COL_WIDTH,
+                    minWidth: DIST_COL_WIDTH,
+                    borderRight: 2,
+                    borderColor: "divider",
+                    boxShadow: (t) => `2px 0 4px ${alpha(t.palette.common.black, 0.08)}`,
+                  }}
+                >
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.25 }}>
                     <Checkbox
                       size="small"
                       checked={allVisibleSelected}
                       indeterminate={someVisibleSelected}
                       onChange={toggleSelectAllVisible}
-                      sx={{ color: "#fff", "&.Mui-checked": { color: "#fff" }, p: 0.25 }}
+                      sx={{ color: "#fff", "&.Mui-checked": { color: "#fff" }, p: 0 }}
                     />
                     Distributor
                   </Box>
                 </TableCell>
-                <TableCell colSpan={4} sx={{ fontWeight: "bold", bgcolor: "#d61916", color: "#fff", textAlign: "center" }}>
+                <TableCell colSpan={4} sx={targetTablePastel.headMain}>
                   Target
                 </TableCell>
-                <TableCell colSpan={4} sx={{ fontWeight: "bold", bgcolor: "#d61916", color: "#fff", textAlign: "center" }}>
+                <TableCell colSpan={4} sx={targetTablePastel.headMain}>
                   Achieved
                 </TableCell>
-                <TableCell colSpan={4} sx={{ fontWeight: "bold", bgcolor: "#d61916", color: "#fff", textAlign: "center" }}>
+                <TableCell colSpan={4} sx={targetTablePastel.headMain}>
                   Balance
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell sx={targetTablePastel.pinkCorner} />
-                <TableCell colSpan={2} sx={targetTablePastel.csdBand}>
-                  CSD
-                </TableCell>
-                <TableCell colSpan={2} sx={targetTablePastel.waterBand}>
-                  Water
-                </TableCell>
-                <TableCell colSpan={2} sx={targetTablePastel.csdBand}>
-                  CSD
-                </TableCell>
-                <TableCell colSpan={2} sx={targetTablePastel.waterBand}>
-                  Water
-                </TableCell>
-                <TableCell colSpan={2} sx={targetTablePastel.csdBand}>
-                  CSD
-                </TableCell>
-                <TableCell colSpan={2} sx={targetTablePastel.waterBand}>
-                  Water
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell sx={targetTablePastel.pinkCorner} />
-                {/* Target Headers */}
-                <TableCell sx={targetTablePastel.pinkCell75}>PC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>UC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>PC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>UC</TableCell>
-                {/* Achieved Headers */}
-                <TableCell sx={targetTablePastel.pinkCell75}>PC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>UC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>PC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>UC</TableCell>
-                {/* Balance Headers */}
-                <TableCell sx={targetTablePastel.pinkCell75}>PC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>UC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>PC</TableCell>
-                <TableCell sx={targetTablePastel.pinkCell75}>UC</TableCell>
+                {[
+                  ["C PC", "C UC", "W PC", "W UC"],
+                  ["C PC", "C UC", "W PC", "W UC"],
+                  ["C PC", "C UC", "W PC", "W UC"],
+                ].map((group, gi) =>
+                  group.map((label, i) => (
+                    <TableCell
+                      key={`${gi}-${label}-${i}`}
+                      sx={i < 2 ? targetTablePastel.csdSub : targetTablePastel.waterSub}
+                    >
+                      {label}
+                    </TableCell>
+                  ))
+                )}
               </TableRow>
             </TableHead>
 
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={13} align="center" sx={{ py: 4, color: "text.secondary" }}>
-                    {searchTerm ? "No distributors found matching your search" : "No distributors available"}
+                  <TableCell colSpan={13} align="center" sx={{ py: 2, color: "text.secondary", fontSize: "0.8rem" }}>
+                    {searchTerm ? "No match" : "No distributors"}
                   </TableCell>
                 </TableRow>
               ) : (
                 filtered.map((d, rowIdx) => {
                   const rowBg = tableStripeAt(theme, rowIdx);
+                  const tgt = (f) => editing[d.name]?.[f] ?? d.target?.[f] ?? 0;
+                  const ach = (f) => d.achieved?.[f] ?? 0;
+                  const bal = (f) => Math.round(tgt(f) - ach(f));
+                  const balSx = (f) => ({
+                    ...DENSE_CELL,
+                    color: bal(f) >= 0 ? "text.secondary" : "error.main",
+                    fontWeight: 700,
+                    textAlign: "center",
+                  });
+                  const targetField = (field) => (
+                    <TableCell key={field} padding="none" align="center">
+                      <TextField
+                        size="small"
+                        value={tgt(field)}
+                        onChange={handleField(d.name, field)}
+                        disabled={!canWrite}
+                        sx={{ ...COMPACT_INPUT, width: "100%" }}
+                      />
+                    </TableCell>
+                  );
                   return (
-                  <TableRow key={d.name || d.code || `distributor-${d.id}`} sx={{ bgcolor: rowBg, color: "text.primary" }}>
-                    <TableCell sx={{ fontWeight: "bold", position: "sticky", left: 0, bgcolor: rowBg, color: "text.primary", zIndex: 9 }}>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <TableRow key={d.name || d.code || `distributor-${d.id}`} sx={{ bgcolor: rowBg, "& td": { ...DENSE_CELL, ...GRID_BORDER } }}>
+                    <TableCell
+                      sx={{
+                        ...DENSE_CELL,
+                        ...GRID_BORDER,
+                        fontWeight: 600,
+                        position: "sticky",
+                        left: 0,
+                        bgcolor: rowBg,
+                        zIndex: 9,
+                        width: DIST_COL_WIDTH,
+                        minWidth: DIST_COL_WIDTH,
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        verticalAlign: "middle",
+                        borderRight: 2,
+                        boxShadow: (t) => `2px 0 4px ${alpha(t.palette.common.black, 0.06)}`,
+                      }}
+                    >
+                      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5, py: 0.25 }}>
                         <Checkbox
                           size="small"
                           checked={selectedDistributorKeys.includes(getDistributorKey(d))}
                           onChange={() => toggleSelectOne(d)}
-                          sx={{ p: 0.25 }}
+                          sx={{ p: 0, mt: 0.15, flexShrink: 0 }}
                         />
-                        <span>{d.name}</span>
+                        <Typography component="span" variant="caption" sx={{ fontSize: "0.72rem", fontWeight: 600, lineHeight: 1.35 }}>
+                          {d.name}
+                          {d.code ? (
+                            <Typography component="span" display="block" variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem", fontWeight: 500 }}>
+                              {d.code}
+                            </Typography>
+                          ) : null}
+                        </Typography>
                       </Box>
                     </TableCell>
-
-                    {/* Target - CSD PC, CSD UC, Water PC, Water UC */}
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      <TextField size="small" value={editing[d.name]?.CSD_PC ?? d.target?.CSD_PC ?? 0} onChange={handleField(d.name, "CSD_PC")} disabled={!canWrite} inputProps={{ style: { textAlign: "center", width: 80 } }} />
-                    </TableCell>
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      <TextField size="small" value={editing[d.name]?.CSD_UC ?? d.target?.CSD_UC ?? 0} onChange={handleField(d.name, "CSD_UC")} disabled={!canWrite} inputProps={{ style: { textAlign: "center", width: 80 } }} />
-                    </TableCell>
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      <TextField size="small" value={editing[d.name]?.Water_PC ?? d.target?.Water_PC ?? 0} onChange={handleField(d.name, "Water_PC")} disabled={!canWrite} inputProps={{ style: { textAlign: "center", width: 80 } }} />
-                    </TableCell>
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      <TextField size="small" value={editing[d.name]?.Water_UC ?? d.target?.Water_UC ?? 0} onChange={handleField(d.name, "Water_UC")} disabled={!canWrite} inputProps={{ style: { textAlign: "center", width: 80 } }} />
-                    </TableCell>
-
-                    {/* Achieved - CSD PC, CSD UC, Water PC, Water UC */}
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      {formatAchievedMetric(d.achieved?.CSD_PC)}
-                    </TableCell>
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      {formatAchievedMetric(d.achieved?.CSD_UC)}
-                    </TableCell>
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      {formatAchievedMetric(d.achieved?.Water_PC)}
-                    </TableCell>
-                    <TableCell align="center" sx={{ color: "text.primary" }}>
-                      {formatAchievedMetric(d.achieved?.Water_UC)}
-                    </TableCell>
-
-                    {/* Balance - CSD PC, CSD UC, Water PC, Water UC */}
-                    <TableCell align="center" sx={{ 
-                      color: ((editing[d.name]?.CSD_PC ?? d.target?.CSD_PC ?? 0) - (d.achieved?.CSD_PC ?? 0)) >= 0 ? "text.secondary" : "error.main",
-                      fontWeight: ((editing[d.name]?.CSD_PC ?? d.target?.CSD_PC ?? 0) - (d.achieved?.CSD_PC ?? 0)) < 0 ? 600 : "normal"
-                    }}>
-                      {Math.round((editing[d.name]?.CSD_PC ?? d.target?.CSD_PC ?? 0) - (d.achieved?.CSD_PC ?? 0))}
-                    </TableCell>
-                    <TableCell align="center" sx={{ 
-                      color: ((editing[d.name]?.CSD_UC ?? d.target?.CSD_UC ?? 0) - (d.achieved?.CSD_UC ?? 0)) >= 0 ? "text.secondary" : "error.main",
-                      fontWeight: 600
-                    }}>
-                      {Math.round((editing[d.name]?.CSD_UC ?? d.target?.CSD_UC ?? 0) - (d.achieved?.CSD_UC ?? 0))}
-                    </TableCell>
-                    <TableCell align="center" sx={{ 
-                      color: ((editing[d.name]?.Water_PC ?? d.target?.Water_PC ?? 0) - (d.achieved?.Water_PC ?? 0)) >= 0 ? "text.secondary" : "error.main",
-                      fontWeight: ((editing[d.name]?.Water_PC ?? d.target?.Water_PC ?? 0) - (d.achieved?.Water_PC ?? 0)) < 0 ? 600 : "normal"
-                    }}>
-                      {Math.round((editing[d.name]?.Water_PC ?? d.target?.Water_PC ?? 0) - (d.achieved?.Water_PC ?? 0))}
-                    </TableCell>
-                    <TableCell align="center" sx={{ 
-                      color: ((editing[d.name]?.Water_UC ?? d.target?.Water_UC ?? 0) - (d.achieved?.Water_UC ?? 0)) >= 0 ? "text.secondary" : "error.main",
-                      fontWeight: 600
-                    }}>
-                      {Math.round((editing[d.name]?.Water_UC ?? d.target?.Water_UC ?? 0) - (d.achieved?.Water_UC ?? 0))}
-                    </TableCell>
+                    {targetField("CSD_PC")}
+                    {targetField("CSD_UC")}
+                    {targetField("Water_PC")}
+                    {targetField("Water_UC")}
+                    <TableCell align="center" sx={DENSE_CELL}>{formatAchievedMetric(ach("CSD_PC"))}</TableCell>
+                    <TableCell align="center" sx={DENSE_CELL}>{formatAchievedMetric(ach("CSD_UC"))}</TableCell>
+                    <TableCell align="center" sx={DENSE_CELL}>{formatAchievedMetric(ach("Water_PC"))}</TableCell>
+                    <TableCell align="center" sx={DENSE_CELL}>{formatAchievedMetric(ach("Water_UC"))}</TableCell>
+                    <TableCell align="center" sx={balSx("CSD_PC")}>{bal("CSD_PC")}</TableCell>
+                    <TableCell align="center" sx={balSx("CSD_UC")}>{bal("CSD_UC")}</TableCell>
+                    <TableCell align="center" sx={balSx("Water_PC")}>{bal("Water_PC")}</TableCell>
+                    <TableCell align="center" sx={balSx("Water_UC")}>{bal("Water_UC")}</TableCell>
                   </TableRow>
                 );
                 })
@@ -1144,58 +1001,40 @@ export default function TargetsDialog({
           </Table>
         </TableContainer>
 
-          {/* actions below table: Apply & Reset */}
-          <Box sx={{ display: "flex", gap: 2, mt: 3, justifyContent: "flex-end" }}>
-            <Button 
-              variant="outlined" 
-              startIcon={<RefreshIcon />}
+          <Box sx={{ display: "flex", gap: 0.75, mt: 1, justifyContent: "flex-end" }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<RefreshIcon sx={{ fontSize: 16 }} />}
               onClick={() => {
-                // reset edits to current distributor targets
                 const m = {};
-                distributors.forEach(d => m[d.name] = { ...(d.target || {}) });
+                distributors.forEach((d) => {
+                  m[d.name] = { ...(d.target || {}) };
+                });
                 setEditing(m);
                 setSearchTerm("");
               }}
-              sx={{ borderRadius: 2 }}
+              sx={{ textTransform: "none" }}
             >
-              Reset Changes
+              Reset
             </Button>
-            <Button 
-              variant="contained" 
-              color="error"
-              startIcon={<SaveIcon />}
+            <Button
+              size="small"
+              variant="contained"
+              color="primary"
+              startIcon={<SaveIcon sx={{ fontSize: 16 }} />}
               onClick={apply}
               disabled={!canWrite}
-              sx={{ 
-                borderRadius: 2,
-                minWidth: 150,
-              }}
-              title={!canWrite ? "You don't have permission to update targets. Only admins can update targets." : ""}
+              sx={{ textTransform: "none", fontWeight: 700 }}
+              title={!canWrite ? "Admin only" : ""}
             >
-              Save All Changes
+              Save
             </Button>
           </Box>
         </Box>
 
-        {/* Password Dialog for Apply */}
-        <PasswordDialog
-          open={applyPasswordDialogOpen}
-          onClose={() => setApplyPasswordDialogOpen(false)}
-          onSuccess={confirmApply}
-          title="Confirm Save Changes"
-          message="Saving target changes will update all distributor targets. Please enter your admin password to confirm."
-        />
-
-        <PasswordDialog
-          open={deletePasswordDialogOpen}
-          onClose={() => setDeletePasswordDialogOpen(false)}
-          onSuccess={confirmDeleteSelectedTargets}
-          title="Confirm Target Deletion"
-          message={`Delete targets for ${selectedDistributorKeys.length} selected distributor(s)? This will remove targets from Supabase and local storage.`}
-        />
-
-        {/* Bulk Upload Progress Dialog */}
-        <Dialog 
+        {/* Bulk upload progress */}
+        <Dialog
           open={bulkUploadOpen} 
           onClose={() => bulkUploadProgress.processed === bulkUploadProgress.total ? setBulkUploadOpen(false) : null}
           maxWidth="md"

@@ -87,7 +87,7 @@ export function createMailtoLink({ to, cc, subject, body }) {
 }
 
 /**
- * Convert order data to HTML table matching Coke Calculator format
+ * Convert order data to HTML table matching Order Calculator format
  * @param {Object} order - Order object
  * @returns {string} HTML string
  */
@@ -210,7 +210,7 @@ export function orderToHTML(order) {
             flex-grow: 1;
             font-size: 16px;
             font-weight: bold;
-            color: #e53935;
+            color: #1565c0;
           }
           .order-header-right {
             color: #000;
@@ -230,13 +230,13 @@ export function orderToHTML(order) {
             background-color: #fffde7;
           }
           th { 
-            background: linear-gradient(135deg, #e53935 0%, #c62828 100%);
+            background: linear-gradient(135deg, #1565c0 0%, #0d47a1 100%);
             color: #ffffff;
             font-weight: bold;
             padding: 10px 8px;
             text-align: left;
             font-size: 13px;
-            border: 1px solid #e53935;
+            border: 1px solid #1565c0;
             letter-spacing: 0.5px;
           }
           th:nth-child(2),

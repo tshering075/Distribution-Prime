@@ -115,7 +115,8 @@ function buildScheduledPeriods() {
 
 const SCHEDULED_PERIODS = buildScheduledPeriods();
 
-function getScheduledPeriodForDate(dateLike) {
+/** Target period (YYYY-MM-DD bounds) that contains this calendar date, if any. */
+export function getScheduledPeriodForDate(dateLike) {
   const d = startOfLocalDay(dateLike instanceof Date ? dateLike : new Date(dateLike));
   if (!SCHEDULED_PERIODS.length || Number.isNaN(d.getTime())) return null;
 
@@ -125,6 +126,62 @@ function getScheduledPeriodForDate(dateLike) {
     }
   }
   return null;
+}
+
+/** Period immediately after the given period end (next month / next closing window). */
+export function getNextScheduledPeriodAfter(periodStartYmd, periodEndYmd) {
+  const { end } = parseTargetPeriodBounds(periodStartYmd, periodEndYmd);
+  if (!end) return null;
+
+  const dayAfterEnd = addLocalDays(startOfLocalDay(end), 1);
+  const byDate = getScheduledPeriodForDate(dayAfterEnd);
+  if (byDate) return byDate;
+
+  if (!periodStartYmd || !periodEndYmd) return null;
+  const idx = SCHEDULED_PERIODS.findIndex(
+    (p) => toLocalYmd(p.start) === String(periodStartYmd) && toLocalYmd(p.end) === String(periodEndYmd)
+  );
+  if (idx >= 0 && idx < SCHEDULED_PERIODS.length - 1) {
+    const next = SCHEDULED_PERIODS[idx + 1];
+    return { start: toLocalYmd(next.start), end: toLocalYmd(next.end) };
+  }
+
+  const rolled = rollTargetPeriodForwardIfExpired({ start: periodStartYmd, end: periodEndYmd });
+  return rolled.changed ? rolled.period : null;
+}
+
+export function targetPeriodsMatch(a, b) {
+  if (!a || !b) return false;
+  return String(a.start || "") === String(b.start || "") && String(a.end || "") === String(b.end || "");
+}
+
+/**
+ * Which target period a dispatch date counts toward.
+ * After the active period closes, achievements roll into the next scheduled period.
+ */
+export function resolveDispatchAchievementPeriod(dispatchDate, activeViewPeriod = null) {
+  const scheduled = getScheduledPeriodForDate(dispatchDate);
+  if (scheduled) return scheduled;
+
+  if (!activeViewPeriod?.start || !activeViewPeriod?.end) {
+    return activeViewPeriod || defaultTargetPeriodWhenUnset();
+  }
+
+  const d = startOfLocalDay(dispatchDate instanceof Date ? dispatchDate : new Date(dispatchDate));
+  if (Number.isNaN(d.getTime())) return activeViewPeriod;
+
+  const { start, end } = parseTargetPeriodBounds(activeViewPeriod.start, activeViewPeriod.end);
+  if (!start || !end) return activeViewPeriod;
+
+  if (d.getTime() >= start.getTime() && d.getTime() <= end.getTime()) {
+    return activeViewPeriod;
+  }
+
+  if (d.getTime() > end.getTime()) {
+    return getNextScheduledPeriodAfter(activeViewPeriod.start, activeViewPeriod.end) || activeViewPeriod;
+  }
+
+  return activeViewPeriod;
 }
 
 /** Fallback when nothing is saved: first through last day of the current calendar month (neutral default). */

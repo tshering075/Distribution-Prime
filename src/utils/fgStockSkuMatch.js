@@ -236,6 +236,23 @@ export function aggregateQuantitiesByFingerprint(rows) {
   return map;
 }
 
+/** FG opening-stock rows whose description matches a calculator SKU. */
+export function fgRowsMatchingSku(skuName, rows) {
+  if (!skuName || !Array.isArray(rows) || rows.length === 0) return [];
+  const skuN = normalizeForStockMatch(skuName);
+  const skuNFuzzy = skuN.replace(/\bCAN\b/g, " ").replace(/\s+/g, " ").trim();
+  const skuTries = calculatorSkuIsCanFormat(skuName)
+    ? [skuN]
+    : [skuN, skuNFuzzy].filter((s, i, a) => s && a.indexOf(s) === i);
+
+  return rows.filter((r) => {
+    const desc = fgRowDescription(r);
+    if (!desc) return false;
+    const excelK = normalizeForStockMatch(desc);
+    return skuTries.some((skuTry) => linesMatchForSku(skuTry, excelK, skuName));
+  });
+}
+
 function linesMatchForSku(skuNorm, excelK, skuName) {
   if (!packagingMatchesSkuToExcel(skuName, excelK)) return false;
   if (skuNorm === excelK) return true;
