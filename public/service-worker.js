@@ -1,6 +1,7 @@
 /* Distribution Prime PWA — required for Chrome/Edge “Install app” prompt */
-const CACHE_NAME = "distribution-prime-v2";
+const CACHE_NAME = "distribution-prime-v3";
 const PRECACHE = ["/index.html", "/manifest.json", "/distribution-prime-icon-512.png", "/distribution-prime-icon.svg", "/login"];
+const LEGAL_HTML = new Set(["/privacy-policy.html", "/terms-of-service.html"]);
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -29,6 +30,19 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
+  const path = url.pathname;
+
+  // Legal static HTML: never substitute the React shell.
+  if (LEGAL_HTML.has(path)) {
+    event.respondWith(
+      fetch(event.request).then((response) => {
+        if (response && response.ok) return response;
+        return caches.match(event.request);
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -38,6 +52,11 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(event.request).then((r) => r || caches.match("/index.html")))
+      .catch(() => {
+        if (event.request.mode === "navigate") {
+          return caches.match(event.request).then((r) => r || caches.match("/index.html"));
+        }
+        return caches.match(event.request);
+      })
   );
 });

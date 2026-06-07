@@ -1,5 +1,15 @@
 # Cloudflare Pages / Netlify — SPA + static legal pages
-/privacy-policy    /privacy-policy.html    200
-/terms-of-service  /terms-of-service.html  200
-/legal/*           /legal/:splat            200
-/*                 /index.html             200
+/privacy-policy        /index.html    200
+/terms-of-service      /index.html    200
+/privacy-policy.html   /privacy-policy.html   200
+/terms-of-service.html /terms-of-service.html 200
+/legal/*               /legal/:splat          200
+/admin/*               /index.html            200
+/distributor/*         /index.html            200
+/shipping/*            /index.html            200
+/w/*                   /index.html            200
+/platform/*            /index.html            200
+/login                 /index.html            200
+/signup                /index.html            200
+/invite/*              /index.html            200
+/install               /index.html            200

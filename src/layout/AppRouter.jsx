@@ -23,6 +23,7 @@ const AdminDashboard = lazy(() => import("../pages/AdminDashboard"));
 const ShippingDashboard = lazy(() => import("../pages/ShippingDashboard"));
 const PlatformLoginPage = lazy(() => import("../pages/PlatformLoginPage"));
 const PlatformDashboard = lazy(() => import("../pages/PlatformDashboard"));
+const LegalDocumentPage = lazy(() => import("../pages/LegalDocumentPage"));
 
 const SESSION_ROLE_KEY = "session_role";
 const SESSION_DISTRIBUTOR_INFO_KEY = "session_distributor_info";
@@ -35,15 +36,6 @@ const DISTRIBUTOR_LS_INFO = "coke_dist_session_info";
 
 function AppRouteFallback() {
   return <SaasLoadingScreen />;
-}
-
-/** Full-page navigation to static legal HTML (avoids SPA catch-all → login redirect). */
-function StaticLegalRedirect({ targetPath }) {
-  useEffect(() => {
-    const base = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
-    window.location.replace(`${base}${targetPath}`);
-  }, [targetPath]);
-  return <SaasLoadingScreen message="Opening document…" />;
 }
 
 function readPersistedDistributorInfo() {
@@ -559,12 +551,14 @@ function AppRouterInner() {
 
       <Route
         path="/privacy-policy"
-        element={<StaticLegalRedirect targetPath="/privacy-policy.html" />}
+        element={<LegalDocumentPage title="Privacy Policy" htmlPath="/privacy-policy.html" />}
       />
       <Route
         path="/terms-of-service"
-        element={<StaticLegalRedirect targetPath="/terms-of-service.html" />}
+        element={<LegalDocumentPage title="Terms of Service" htmlPath="/terms-of-service.html" />}
       />
+      <Route path="/privacy-policy.html" element={<Navigate to="/privacy-policy" replace />} />
+      <Route path="/terms-of-service.html" element={<Navigate to="/terms-of-service" replace />} />
 
       {/* Unknown paths */}
       <Route

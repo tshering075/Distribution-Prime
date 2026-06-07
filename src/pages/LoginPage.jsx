@@ -785,16 +785,16 @@ function LoginPage({
                   </Box>
                   {" | "}
                   <Box
-                    component="a"
-                    href={`${publicUrl}${PRIVACY_POLICY_PATH}`}
+                    component={RouterLink}
+                    to={PRIVACY_POLICY_PATH}
                     sx={{ color: "primary.main", textDecoration: "none", fontWeight: 800, "&:hover": { textDecoration: "underline" } }}
                   >
                     Privacy
                   </Box>
                   {" | "}
                   <Box
-                    component="a"
-                    href={`${publicUrl}${TERMS_OF_SERVICE_PATH}`}
+                    component={RouterLink}
+                    to={TERMS_OF_SERVICE_PATH}
                     sx={{ color: "primary.main", textDecoration: "none", fontWeight: 800, "&:hover": { textDecoration: "underline" } }}
                   >
                     Terms

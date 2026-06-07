@@ -275,8 +275,8 @@ export default function LandingPage() {
                     }}
                   />
                   <Button
-                    component="a"
-                    href={`${publicUrl}${TERMS_OF_SERVICE_PATH}`}
+                    component={RouterLink}
+                    to={TERMS_OF_SERVICE_PATH}
                     variant="outlined"
                     size="large"
                     sx={{
@@ -544,13 +544,13 @@ export default function LandingPage() {
               <Box component="span" sx={{ mx: 1, color: "text.disabled" }}>
                 |
               </Box>
-              <Link href={`${publicUrl}${PRIVACY_POLICY_PATH}`} underline="hover" color="text.secondary" fontWeight={800}>
+              <Link component={RouterLink} to={PRIVACY_POLICY_PATH} underline="hover" color="text.secondary" fontWeight={800}>
                 Privacy Policy
               </Link>
               <Box component="span" sx={{ mx: 1, color: "text.disabled" }}>
                 |
               </Box>
-              <Link href={`${publicUrl}${TERMS_OF_SERVICE_PATH}`} underline="hover" color="text.secondary" fontWeight={800}>
+              <Link component={RouterLink} to={TERMS_OF_SERVICE_PATH} underline="hover" color="text.secondary" fontWeight={800}>
                 Terms of Service
               </Link>
             </Typography>
