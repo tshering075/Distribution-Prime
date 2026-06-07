@@ -2,7 +2,7 @@ import React from "react";
 import { Box, IconButton, Typography, Link } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { Link as RouterLink } from "react-router-dom";
-import { PRIVACY_POLICY_PATH, TERMS_OF_SERVICE_PATH } from "../../constants/brand";
+import { TERMS_OF_SERVICE_PATH } from "../../constants/brand";
 
 const legalSx = {
   page: {
