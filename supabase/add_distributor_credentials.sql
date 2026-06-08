@@ -11,3 +11,6 @@ COMMENT ON COLUMN public.distributors.credentials IS
   'Login credentials: { "username": "...", "passwordHash": "..." } — hash matches distributor_client_password_hash()';
 
 COMMENT ON COLUMN public.distributors.phone IS 'Contact phone (optional)';
+
+-- Verify (credentials should not be null for distributors who need to sign in):
+-- SELECT code, name, username, credentials FROM distributors ORDER BY name;

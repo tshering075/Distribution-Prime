@@ -280,8 +280,9 @@ function LoginPage({
           }
 
           supabaseAuthError = distributorError;
-          // Try admin login
-          try {
+          const looksLikeAdminEmail = trimmedUserId.includes("@");
+          // Only try admin auth when the user entered an email address.
+          if (looksLikeAdminEmail) try {
             const admin = await signInAdmin(trimmedUserId, trimmedPassword);
             if (admin) {
               // Store admin email for email sending
@@ -327,12 +328,11 @@ function LoginPage({
         if (supabaseAuthError) {
           const distributorMsg = distributorAuthError?.message || "";
           const adminMsg = supabaseAuthError?.message || "";
-          const looksLikeEmail = trimmedUserId.includes("@");
-          const distributorSpecific =
-            /distributor|wrong password|no distributor found/i.test(distributorMsg);
+          const looksLikeAdminEmail = trimmedUserId.includes("@");
 
-          if (distributorSpecific && !looksLikeEmail) {
-            normalizedSupabaseError = distributorMsg;
+          if (!looksLikeAdminEmail) {
+            normalizedSupabaseError =
+              distributorMsg || "Invalid distributor code or password";
           } else if (adminMsg.includes("Invalid login credentials")) {
             normalizedSupabaseError = "Invalid email or password";
           } else if (adminMsg.includes("Email not confirmed")) {

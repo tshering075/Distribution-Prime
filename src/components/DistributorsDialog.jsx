@@ -366,6 +366,19 @@ export default function DistributorsDialog({ open, onClose, distributors = [], o
       alert("Password is required for new distributor");
       return;
     }
+
+    if (editingCode) {
+      const existing = list.find(
+        (d) => d.code === editingCode || d.name === editingCode
+      );
+      const hasSavedPassword = Boolean(existing?.credentials?.passwordHash);
+      if (!hasSavedPassword && !form.password) {
+        alert(
+          "This distributor has no login password saved on the server. Enter a password below and save to enable sign-in."
+        );
+        return;
+      }
+    }
     
     if (form.password && form.password.length < 4) {
       alert("Password must be at least 4 characters");

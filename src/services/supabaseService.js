@@ -219,10 +219,15 @@ export async function signInDistributor(distributorCode, password) {
       }
       if (/wrong password/i.test(msg)) {
         throw new Error(
-          'Wrong password for this distributor code. The password must match the credentials saved on your distributor row in Supabase.'
+          'Wrong password for this distributor. Ask your admin to open Distributors, edit your account, and re-enter the password.'
         );
       }
-      throw error;
+      if (/credentials were not saved|credentials column/i.test(msg)) {
+        throw new Error(msg);
+      }
+      throw new Error(
+        msg || 'Distributor sign-in failed. Check your code/username, password, and workspace ID.'
+      );
     }
 
     const payload = data && typeof data === 'object' ? data : null;
@@ -752,6 +757,28 @@ export async function getDistributorByUsername(username) {
  * @param {Object} distributorData - Distributor data
  * @returns {Promise<Object>} Saved distributor data
  */
+function sanitizeDistributorCredentials(credentials) {
+  if (!credentials || typeof credentials !== 'object') return null;
+  const { password, ...rest } = credentials;
+  if (!rest.username && !rest.passwordHash) return null;
+  return rest;
+}
+
+function assertDistributorCredentialsSaved(savedRow, expectedHash) {
+  if (!expectedHash || !savedRow) return;
+  const savedCreds = savedRow.credentials;
+  const hashSaved =
+    savedCreds &&
+    typeof savedCreds === 'object' &&
+    savedCreds.passwordHash === expectedHash;
+  if (!hashSaved) {
+    throw new Error(
+      'Distributor login credentials were not saved to Supabase. ' +
+        'Run supabase/add_distributor_credentials.sql in the SQL Editor, then edit the distributor and set the password again.'
+    );
+  }
+}
+
 export async function saveDistributor(distributorData) {
   try {
     if (!supabase) {
@@ -783,13 +810,7 @@ export async function saveDistributor(distributorData) {
       username = distributorData.credentials.username;
     }
 
-    const credentialsForStorage =
-      distributorData.credentials && typeof distributorData.credentials === 'object'
-        ? {
-            ...distributorData.credentials,
-            password: undefined,
-          }
-        : null;
+    const credentialsForStorage = sanitizeDistributorCredentials(distributorData.credentials);
 
     const distributorDoc = {
       id: distributorData.code, // Use code as id (primary key)
@@ -883,17 +904,7 @@ export async function saveDistributor(distributorData) {
       }
 
       if (credentialsForStorage?.passwordHash && data) {
-        const savedCreds = data.credentials;
-        const hashSaved =
-          savedCreds &&
-          typeof savedCreds === 'object' &&
-          savedCreds.passwordHash === credentialsForStorage.passwordHash;
-        if (!hashSaved) {
-          throw new Error(
-            'Distributor login credentials were not saved to Supabase. ' +
-              'Run supabase/add_distributor_credentials.sql in the SQL Editor, then add the distributor again or reset the password.'
-          );
-        }
+        assertDistributorCredentialsSaved(data, credentialsForStorage.passwordHash);
       }
       
     } catch (upsertError) {
@@ -1011,6 +1022,14 @@ export async function updateDistributor(distributorId, updates) {
       throw new Error('Supabase not initialized');
     }
 
+    const payload = { ...updates, updated_at: new Date().toISOString() };
+    if (payload.credentials) {
+      payload.credentials = sanitizeDistributorCredentials(payload.credentials);
+      if (payload.credentials?.username) {
+        payload.username = payload.credentials.username;
+      }
+    }
+
     // First, try to find the distributor by code to get its id (primary key)
     // This ensures we update by primary key which is always unique
     const { data: existing, error: findError } = await fromTenant('distributors')
@@ -1021,10 +1040,7 @@ export async function updateDistributor(distributorId, updates) {
     if (findError) {
       // If find fails, try using distributorId as id directly
       const { data: dataById, error: errorById } = await fromTenant('distributors')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString()
-        })
+        .update(payload)
         .eq('id', distributorId)
         .select()
         .maybeSingle();
@@ -1033,16 +1049,16 @@ export async function updateDistributor(distributorId, updates) {
       if (!dataById) {
         throw new Error(`Distributor with code/id "${distributorId}" not found`);
       }
+      if (payload.credentials?.passwordHash) {
+        assertDistributorCredentialsSaved(dataById, payload.credentials.passwordHash);
+      }
       return dataById;
     }
 
     // If no distributor found by code, try using distributorId as id
     if (!existing || existing.length === 0) {
       const { data: dataById, error: errorById } = await fromTenant('distributors')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString()
-        })
+        .update(payload)
         .eq('id', distributorId)
         .select()
         .maybeSingle();
@@ -1050,6 +1066,9 @@ export async function updateDistributor(distributorId, updates) {
       if (errorById) throw errorById;
       if (!dataById) {
         throw new Error(`Distributor with code/id "${distributorId}" not found`);
+      }
+      if (payload.credentials?.passwordHash) {
+        assertDistributorCredentialsSaved(dataById, payload.credentials.passwordHash);
       }
       return dataById;
     }
@@ -1061,10 +1080,7 @@ export async function updateDistributor(distributorId, updates) {
     }
     
     const { data, error } = await fromTenant('distributors')
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString()
-      })
+      .update(payload)
       .eq('id', distributorIdValue)
       .select()
       .maybeSingle();
@@ -1076,10 +1092,7 @@ export async function updateDistributor(distributorId, updates) {
         // Fallback: try updating by code (only updates first matching row)
         // Note: This may still fail with 406 if multiple rows exist, but we try anyway
         const { data: fallbackData, error: fallbackError } = await fromTenant('distributors')
-          .update({
-            ...updates,
-            updated_at: new Date().toISOString()
-          })
+          .update(payload)
           .eq('code', distributorId)
           .select()
           .limit(1);
@@ -1092,13 +1105,21 @@ export async function updateDistributor(distributorId, updates) {
         if (!fallbackData || fallbackData.length === 0) {
           throw new Error(`Distributor with code "${distributorId}" not found`);
         }
-        return fallbackData[0];
+        const fallbackRow = fallbackData[0];
+        if (payload.credentials?.passwordHash) {
+          assertDistributorCredentialsSaved(fallbackRow, payload.credentials.passwordHash);
+        }
+        return fallbackRow;
       }
       throw error;
     }
 
     if (!data) {
       throw new Error(`Distributor with code "${distributorId}" not found`);
+    }
+
+    if (payload.credentials?.passwordHash) {
+      assertDistributorCredentialsSaved(data, payload.credentials.passwordHash);
     }
 
     return data;
