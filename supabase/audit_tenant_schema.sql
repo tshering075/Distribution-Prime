@@ -60,15 +60,15 @@ LEFT JOIN information_schema.columns c
  AND c.column_name = 'organization_id'
 ORDER BY t.table_name;
 
--- 4) gstin / tpn on distributors
+-- 4) distributor login / tax columns
 SELECT
-  '4_distributor_tax_cols' AS section,
+  '4_distributor_cols' AS section,
   column_name,
   data_type
 FROM information_schema.columns
 WHERE table_schema = 'public'
   AND table_name = 'distributors'
-  AND column_name IN ('gstin', 'tpn')
+  AND column_name IN ('credentials', 'phone', 'gstin', 'tpn')
 ORDER BY column_name;
 
 -- 5) RLS enabled?

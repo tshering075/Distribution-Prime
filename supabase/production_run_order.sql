@@ -8,14 +8,15 @@
 -- 3. workspace_signup_rpc.sql
 -- 4. distributor_orders_rpc.sql          (sessions + authenticate_distributor)
 -- 5. add_shipping_order_columns.sql      (if dispatch columns missing)
--- 6. add_distributor_gstin_tpn.sql         (optional)
--- 7. platform_admin_v2.sql
--- 8. fix_rls_linter_cleanup.sql
--- 9. fix_rls_consolidate_policies.sql
--- 10. fix_linter_security.sql
--- 11. fix_rls_function_grants.sql        (if Rate Master cloud save fails with RLS)
--- 12. fix_app_config_tenant_pkey.sql     (if duplicate key app_config_pkey on Rate Master)
--- 13. audit_tenant_schema.sql            (diagnostic — fix any MISSING rows)
+-- 6. add_distributor_credentials.sql       (login passwords — required for distributor sign-in)
+-- 7. add_distributor_gstin_tpn.sql         (optional)
+-- 8. platform_admin_v2.sql
+-- 9. fix_rls_linter_cleanup.sql
+-- 10. fix_rls_consolidate_policies.sql
+-- 11. fix_linter_security.sql
+-- 12. fix_rls_function_grants.sql        (if Rate Master cloud save fails with RLS)
+-- 13. fix_app_config_tenant_pkey.sql     (if duplicate key app_config_pkey on Rate Master)
+-- 14. audit_tenant_schema.sql            (diagnostic — fix any MISSING rows)
 -- Re-run distributor_orders_rpc.sql after updates (save_workspace_product_rates RPC).
 --
 -- Then seed platform admin:

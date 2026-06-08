@@ -783,8 +783,14 @@ export async function saveDistributor(distributorData) {
       username = distributorData.credentials.username;
     }
 
-    // Prepare distributor document with only core fields that definitely exist
-    // We'll save phone and credentials separately if those columns exist
+    const credentialsForStorage =
+      distributorData.credentials && typeof distributorData.credentials === 'object'
+        ? {
+            ...distributorData.credentials,
+            password: undefined,
+          }
+        : null;
+
     const distributorDoc = {
       id: distributorData.code, // Use code as id (primary key)
       code: distributorData.code,
@@ -794,7 +800,8 @@ export async function saveDistributor(distributorData) {
       uid: distributorData.uid || null,
       region: distributorData.region || null,
       address: distributorData.address || null,
-      // Note: phone and credentials excluded - will be saved separately if columns exist
+      phone: distributorData.phone || null,
+      credentials: credentialsForStorage,
       target: distributorData.target || {
         CSD_PC: 0,
         CSD_UC: 0,
@@ -815,16 +822,7 @@ export async function saveDistributor(distributorData) {
       distributorDoc.created_at = now;
     }
 
-    // Store optional fields separately for later update
     const optionalFields = {};
-    if (distributorData.phone) {
-      optionalFields.phone = distributorData.phone;
-    }
-    if (distributorData.credentials && typeof distributorData.credentials === 'object') {
-      if (distributorData.credentials.username || distributorData.credentials.passwordHash) {
-        optionalFields.credentials = distributorData.credentials;
-      }
-    }
     const gstin = distributorData.gstin ?? distributorData.gstinNo ?? distributorData.gstin_no;
     if (gstin != null && String(gstin).trim() !== '') {
       optionalFields.gstin = String(gstin).trim();
@@ -837,7 +835,6 @@ export async function saveDistributor(distributorData) {
     let data, error;
     
     try {
-      // Save core distributor data first (without phone and credentials)
       const result = await fromTenant('distributors')
         // Use primary key (id) as the conflict target so we don't get
         // "Key (id)=(CODE) already exists" errors when the row already exists.
@@ -866,18 +863,36 @@ export async function saveDistributor(distributorData) {
             
             const updatedRow = firstRow(updateResult.data);
             if (!updateResult.error && updatedRow) {
-              console.log('✅ Optional fields (phone/credentials) also saved to Supabase');
+              console.log('✅ Optional fields also saved to Supabase');
               data = updatedRow;
-            } else {
-              // Optional columns don't exist, that's okay
+            } else if (updateResult.error) {
               const missingFields = Object.keys(optionalFields).join(', ');
-              console.warn(`⚠️ Optional fields (${missingFields}) not found in Supabase schema. Core distributor data saved successfully.`);
+              throw new Error(
+                `Distributor saved but optional fields (${missingFields}) failed: ${updateResult.error.message || updateResult.error}. ` +
+                  'Run supabase/add_distributor_credentials.sql in Supabase SQL Editor if login credentials are missing.'
+              );
             }
           }
         } catch (updateError) {
-          // Optional fields update failed, but main save succeeded - that's okay
+          if (credentialsForStorage && updateError?.message) {
+            throw updateError;
+          }
           const missingFields = Object.keys(optionalFields).join(', ');
-          console.warn(`⚠️ Could not save optional fields (${missingFields}) to Supabase (columns may not exist). Main distributor data saved successfully.`);
+          console.warn(`⚠️ Could not save optional fields (${missingFields}) to Supabase:`, updateError);
+        }
+      }
+
+      if (credentialsForStorage?.passwordHash && data) {
+        const savedCreds = data.credentials;
+        const hashSaved =
+          savedCreds &&
+          typeof savedCreds === 'object' &&
+          savedCreds.passwordHash === credentialsForStorage.passwordHash;
+        if (!hashSaved) {
+          throw new Error(
+            'Distributor login credentials were not saved to Supabase. ' +
+              'Run supabase/add_distributor_credentials.sql in the SQL Editor, then add the distributor again or reset the password.'
+          );
         }
       }
       

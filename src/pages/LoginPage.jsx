@@ -183,7 +183,7 @@ function LoginPage({
       setFieldErrors(prev => ({
         ...prev,
         userId: isSupabaseConfigured
-          ? "Distributor code (or admin email) is required"
+          ? "Distributor code or username (or admin email) is required"
           : "User ID is required",
       }));
       hasErrors = true;
@@ -225,6 +225,7 @@ function LoginPage({
       // Try Supabase Auth first if configured
       if (isSupabaseConfigured) {
         let supabaseAuthError = null;
+        let distributorAuthError = null;
         try {
           // Distributor: code + password vs distributors.credentials in Supabase. Admin: email + Auth next.
           const distributor = await signInDistributor(trimmedUserId, trimmedPassword);
@@ -253,6 +254,7 @@ function LoginPage({
           }
         } catch (distributorError) {
           console.log("Supabase distributor login failed:", distributorError);
+          distributorAuthError = distributorError;
 
           const localDistributor = !isProductionAuthMode()
             ? validateDistributorLogin(trimmedUserId, trimmedPassword)
@@ -322,15 +324,23 @@ function LoginPage({
           }
         }
 
-        // Keep Supabase error message, but still allow local fallback below.
         if (supabaseAuthError) {
-          const rawMsg = supabaseAuthError?.message || "";
-          normalizedSupabaseError =
-            rawMsg.includes("Invalid login credentials")
-              ? "Invalid email or password"
-              : rawMsg.includes("Email not confirmed")
-              ? "Email not confirmed. Please confirm from inbox first, or disable email confirmation in Supabase Auth settings."
-              : rawMsg || "Login failed. Please try again.";
+          const distributorMsg = distributorAuthError?.message || "";
+          const adminMsg = supabaseAuthError?.message || "";
+          const looksLikeEmail = trimmedUserId.includes("@");
+          const distributorSpecific =
+            /distributor|wrong password|no distributor found/i.test(distributorMsg);
+
+          if (distributorSpecific && !looksLikeEmail) {
+            normalizedSupabaseError = distributorMsg;
+          } else if (adminMsg.includes("Invalid login credentials")) {
+            normalizedSupabaseError = "Invalid email or password";
+          } else if (adminMsg.includes("Email not confirmed")) {
+            normalizedSupabaseError =
+              "Email not confirmed. Please confirm from inbox first, or disable email confirmation in Supabase Auth settings.";
+          } else {
+            normalizedSupabaseError = adminMsg || distributorMsg || "Login failed. Please try again.";
+          }
         }
       }
 
@@ -591,7 +601,7 @@ function LoginPage({
                 )}
                 <TextField
                   fullWidth
-                  label={isSupabaseConfigured ? "Distributor code / admin email" : "User ID"}
+                  label={isSupabaseConfigured ? "Distributor code, username, or admin email" : "User ID"}
                   variant="outlined"
                   value={userId}
                   autoComplete="username"
