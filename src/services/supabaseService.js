@@ -24,6 +24,7 @@ import {
   clearDistributorSessionToken,
 } from '../utils/distributorSession';
 import { ensureProductCatalog } from '../utils/productCatalog';
+import { hashPasswordSync } from '../utils/distributorAuth';
 
 // Re-export supabase so other files can check if Supabase is configured
 export { supabase };
@@ -182,6 +183,61 @@ async function fetchWorkspaceOrderNumbersRpc(distributorCode) {
     .filter((n) => n != null && String(n).trim() !== '');
 }
 
+function distributorPasswordMatches(credentials, password) {
+  if (!credentials || !password) return false;
+  const hash = hashPasswordSync(password);
+  if (credentials.passwordHash && credentials.passwordHash === hash) return true;
+  if (credentials.password && credentials.password === password) return true;
+  return false;
+}
+
+async function signInDistributorViaLookup(slug, code, password) {
+  const { data, error } = await supabase.rpc('lookup_distributor_for_login', {
+    p_slug: slug,
+    p_code: code,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      throw new Error(
+        'Distributor login is not set up in Supabase. Run supabase/distributor_orders_rpc.sql in the SQL Editor.'
+      );
+    }
+    throw error;
+  }
+
+  const row = firstRow(Array.isArray(data) ? data : data ? [data] : []);
+  if (!row) {
+    throw new Error(
+      'No distributor found with this code or username. Use your distributor code (e.g. JD123), not your email.'
+    );
+  }
+
+  if (!distributorPasswordMatches(row.credentials, password)) {
+    if (!row.credentials?.passwordHash && !row.credentials?.password) {
+      throw new Error(
+        'This distributor has no password saved on the server. Ask your admin to edit the distributor in Distributors and set a password.'
+      );
+    }
+    throw new Error(
+      'Wrong password for this distributor. Check your password or ask your admin to reset it in Distributors.'
+    );
+  }
+
+  if (row.organization_id) {
+    await loadOrganizationContext(row.organization_id);
+  }
+
+  const { credentials: _creds, ...safeRow } = row;
+  const linkedEmail = getLinkedEmailFromDistributorRow(safeRow);
+
+  return {
+    uid: safeRow.uid || null,
+    email: linkedEmail || safeRow.email || null,
+    ...safeRow,
+  };
+}
+
 export async function signInDistributor(distributorCode, password) {
   try {
     if (!supabase) {
@@ -207,14 +263,13 @@ export async function signInDistributor(distributorCode, password) {
 
     if (error) {
       if (isMissingRpcError(error)) {
-        throw new Error(
-          'Distributor login RPC missing. In Supabase SQL Editor, run supabase/distributor_orders_rpc.sql (authenticate_distributor).'
-        );
+        console.warn('authenticate_distributor RPC missing; falling back to lookup_distributor_for_login');
+        return await signInDistributorViaLookup(slug, code, pass);
       }
       const msg = String(error.message || '');
       if (/no distributor found/i.test(msg)) {
         throw new Error(
-          'No distributor found with this code. Check the code or ask your admin. (Admins: sign in with your email in the same field.)'
+          'No distributor found with this code or username. Use your distributor code (e.g. JD123), not your email.'
         );
       }
       if (/wrong password/i.test(msg)) {

@@ -325,22 +325,31 @@ function LoginPage({
           }
         }
 
-        if (supabaseAuthError) {
+        if (distributorAuthError) {
           const distributorMsg = distributorAuthError?.message || "";
           const adminMsg = supabaseAuthError?.message || "";
-          const looksLikeAdminEmail = trimmedUserId.includes("@");
+          const distributorNotFound = /no distributor found/i.test(distributorMsg);
 
-          if (!looksLikeAdminEmail) {
+          if (!distributorNotFound) {
             normalizedSupabaseError =
               distributorMsg || "Invalid distributor code or password";
-          } else if (adminMsg.includes("Invalid login credentials")) {
-            normalizedSupabaseError = "Invalid email or password";
-          } else if (adminMsg.includes("Email not confirmed")) {
-            normalizedSupabaseError =
-              "Email not confirmed. Please confirm from inbox first, or disable email confirmation in Supabase Auth settings.";
+          } else if (trimmedUserId.includes("@") && adminMsg) {
+            normalizedSupabaseError = adminMsg.includes("Invalid login credentials")
+              ? "That email and password did not match an admin account."
+              : adminMsg.includes("Email not confirmed")
+              ? "Email not confirmed. Please confirm from inbox first, or disable email confirmation in Supabase Auth settings."
+              : adminMsg;
           } else {
-            normalizedSupabaseError = adminMsg || distributorMsg || "Login failed. Please try again.";
+            normalizedSupabaseError =
+              distributorMsg || "Invalid distributor code or password";
           }
+        } else if (supabaseAuthError) {
+          const adminMsg = supabaseAuthError?.message || "";
+          normalizedSupabaseError = adminMsg.includes("Invalid login credentials")
+            ? "That email and password did not match an admin account."
+            : adminMsg.includes("Email not confirmed")
+            ? "Email not confirmed. Please confirm from inbox first, or disable email confirmation in Supabase Auth settings."
+            : adminMsg || "Login failed. Please try again.";
         }
       }
 
@@ -613,7 +622,12 @@ function LoginPage({
                     setError(false);
                   }}
                   error={!!fieldErrors.userId}
-                  helperText={fieldErrors.userId || undefined}
+                  helperText={
+                    fieldErrors.userId ||
+                    (isSupabaseConfigured
+                      ? "Distributors: use your code (e.g. JD123) or username — not your email"
+                      : undefined)
+                  }
                   FormHelperTextProps={{ sx: { mx: 0 } }}
                   sx={{ mb: 2.25 }}
                   InputProps={{
