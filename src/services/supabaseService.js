@@ -183,6 +183,12 @@ async function fetchWorkspaceOrderNumbersRpc(distributorCode) {
     .filter((n) => n != null && String(n).trim() !== '');
 }
 
+async function ensureOrganizationContextAfterDistributorLogin(organizationId) {
+  if (!organizationId) return;
+  if (getActiveOrganizationId() === organizationId) return;
+  await loadOrganizationContext(organizationId);
+}
+
 function distributorPasswordMatches(credentials, password) {
   if (!credentials || !password) return false;
   const hash = hashPasswordSync(password);
@@ -225,7 +231,7 @@ async function signInDistributorViaLookup(slug, code, password) {
   }
 
   if (row.organization_id) {
-    await loadOrganizationContext(row.organization_id);
+    await ensureOrganizationContextAfterDistributorLogin(row.organization_id);
   }
 
   const { credentials: _creds, ...safeRow } = row;
@@ -296,7 +302,7 @@ export async function signInDistributor(distributorCode, password) {
     }
 
     if (byCode.organization_id) {
-      await loadOrganizationContext(byCode.organization_id);
+      await ensureOrganizationContextAfterDistributorLogin(byCode.organization_id);
     }
 
     const linkedEmail = getLinkedEmailFromDistributorRow(byCode);

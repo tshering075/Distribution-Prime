@@ -9,6 +9,7 @@
 -- 4. distributor_orders_rpc.sql          (sessions + authenticate_distributor)
 -- 5. add_shipping_order_columns.sql      (if dispatch columns missing)
 -- 6. add_distributor_credentials.sql       (login passwords — required for distributor sign-in)
+-- 6b. add_get_organization_by_id_rpc.sql   (anon distributor login — org context by id)
 -- 7. add_distributor_gstin_tpn.sql         (optional)
 -- 8. platform_admin_v2.sql
 -- 9. fix_rls_linter_cleanup.sql

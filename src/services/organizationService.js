@@ -108,6 +108,16 @@ export async function resolveOrganizationForLogin(slugInput) {
  */
 export async function fetchOrganizationById(organizationId) {
   if (!supabase || !organizationId) return null;
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc('get_organization_by_id', {
+    p_id: organizationId,
+  });
+  if (!rpcError) return firstRow(rpcData);
+  if (!isMissingRpcError(rpcError)) {
+    if (rpcError.code === '42P01') return null;
+    throw rpcError;
+  }
+
   const { data, error } = await supabase
     .from('organizations')
     .select('id, slug, name, plan, status, settings')

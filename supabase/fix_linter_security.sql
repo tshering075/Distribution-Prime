@@ -41,7 +41,7 @@ REVOKE ALL ON TABLE public.schemes FROM anon;
 REVOKE ALL ON TABLE public.targets FROM anon;
 
 -- 4) Revoke anon EXECUTE on internal / privileged RPCs
---    Keep anon on: get_organization_by_slug, lookup_distributor_for_login,
+--    Keep anon on: get_organization_by_slug, get_organization_by_id, lookup_distributor_for_login,
 --    get_invite_by_token, create_workspace_for_signup, delete_workspace_signup_rollback
 REVOKE EXECUTE ON FUNCTION public.is_org_member(text) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.is_org_admin(text) FROM anon;

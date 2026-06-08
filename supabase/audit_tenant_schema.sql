@@ -99,6 +99,7 @@ FROM (
     ('is_org_member'),
     ('is_org_admin'),
     ('get_organization_by_slug'),
+    ('get_organization_by_id'),
     ('lookup_distributor_for_login'),
     ('authenticate_distributor'),
     ('create_workspace_for_signup'),
