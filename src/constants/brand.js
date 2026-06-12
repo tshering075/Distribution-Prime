@@ -11,15 +11,14 @@ export const BRAND_LOGO_SRC = "/distribution-prime-icon-512.png";
 export const BRAND_WORDMARK_SRC = "/distribution-prime-wordmark.svg";
 /** OAuth / store listing logo */
 export const OAUTH_LOGO_SRC = "/oauth-app-logo.svg";
-/** In-app SPA routes (React legal pages). */
-export const PRIVACY_POLICY_PATH = "/privacy-policy";
-export const TERMS_OF_SERVICE_PATH = "/terms-of-service";
 /**
- * Static HTML paths for Google OAuth consent screen (must differ from homepage `/`).
- * Use full URLs in Google Cloud Console, e.g. https://distribution-prime.pages.dev/legal/privacy-policy
+ * Legal page paths (in-app + static HTML). Must differ from homepage `/` for Google OAuth.
+ * Google Cloud Console: https://distribution-prime.pages.dev/legal/privacy-policy
  */
-export const PRIVACY_POLICY_HTML = "/legal/privacy-policy";
-export const TERMS_OF_SERVICE_HTML = "/legal/terms-of-service";
+export const PRIVACY_POLICY_PATH = "/legal/privacy-policy";
+export const TERMS_OF_SERVICE_PATH = "/legal/terms-of-service";
+export const PRIVACY_POLICY_HTML = PRIVACY_POLICY_PATH;
+export const TERMS_OF_SERVICE_HTML = TERMS_OF_SERVICE_PATH;
 /** Production app URL for OAuth home page field. */
 export const OAUTH_APP_HOME_URL = "https://distribution-prime.pages.dev/";
 

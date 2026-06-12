@@ -5,22 +5,32 @@
 # Static legal pages must not fall through to the React shell (OAuth / Google verification).
 [[redirects]]
   from = "/privacy-policy"
-  to = "/legal/privacy-policy.html"
+  to = "/legal/privacy-policy/index.html"
   status = 200
 
 [[redirects]]
   from = "/privacy-policy.html"
-  to = "/legal/privacy-policy.html"
+  to = "/legal/privacy-policy/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/legal/privacy-policy"
+  to = "/legal/privacy-policy/index.html"
   status = 200
 
 [[redirects]]
   from = "/terms-of-service"
-  to = "/legal/terms-of-service.html"
+  to = "/legal/terms-of-service/index.html"
   status = 200
 
 [[redirects]]
   from = "/terms-of-service.html"
-  to = "/legal/terms-of-service.html"
+  to = "/legal/terms-of-service/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/legal/terms-of-service"
+  to = "/legal/terms-of-service/index.html"
   status = 200
 
 [[redirects]]

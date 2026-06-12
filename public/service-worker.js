@@ -1,14 +1,39 @@
 /* Distribution Prime PWA — required for Chrome/Edge “Install app” prompt */
-const CACHE_NAME = "distribution-prime-v3";
+const CACHE_NAME = "distribution-prime-v4";
 const PRECACHE = ["/index.html", "/manifest.json", "/distribution-prime-icon-512.png", "/distribution-prime-icon.svg", "/login"];
-const LEGAL_HTML = new Set([
-  "/privacy-policy.html",
-  "/terms-of-service.html",
-  "/legal/privacy-policy",
-  "/legal/privacy-policy.html",
-  "/legal/terms-of-service",
-  "/legal/terms-of-service.html",
-]);
+
+function isLegalPagePath(path) {
+  const p = String(path || "").replace(/\/$/, "");
+  return (
+    p === "/legal/privacy-policy" ||
+    p === "/legal/terms-of-service" ||
+    p === "/privacy-policy" ||
+    p === "/terms-of-service" ||
+    p.endsWith("/legal/privacy-policy.html") ||
+    p.endsWith("/legal/terms-of-service.html") ||
+    p.endsWith("/privacy-policy.html") ||
+    p.endsWith("/terms-of-service.html")
+  );
+}
+
+async function fetchLegalPage(request, path) {
+  const candidates = [path];
+  const normalized = path.replace(/\/$/, "");
+  if (!normalized.endsWith(".html")) {
+    candidates.push(`${normalized}.html`);
+    candidates.push(`${normalized}/index.html`);
+  }
+  for (const target of candidates) {
+    try {
+      const url = new URL(target, request.url);
+      const response = await fetch(url.toString(), { credentials: "same-origin" });
+      if (response && response.ok) return response;
+    } catch {
+      /* try next */
+    }
+  }
+  return fetch(request);
+}
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -39,14 +64,8 @@ self.addEventListener("fetch", (event) => {
 
   const path = url.pathname;
 
-  // Legal static HTML: never substitute the React shell.
-  if (LEGAL_HTML.has(path)) {
-    event.respondWith(
-      fetch(event.request).then((response) => {
-        if (response && response.ok) return response;
-        return caches.match(event.request);
-      })
-    );
+  if (isLegalPagePath(path)) {
+    event.respondWith(fetchLegalPage(event.request, path));
     return;
   }
 

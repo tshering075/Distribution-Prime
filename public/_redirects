@@ -1,18 +1,21 @@
-# Cloudflare Pages — legal static HTML first (Google OAuth must not resolve to homepage).
-/privacy-policy.html      /legal/privacy-policy.html      200
-/privacy-policy           /legal/privacy-policy.html      200
-/terms-of-service.html    /legal/terms-of-service.html    200
-/terms-of-service         /legal/terms-of-service.html    200
-/legal/*                  /legal/:splat                   200
+# Legal static HTML — must not resolve to React homepage (Google OAuth).
+/legal/privacy-policy       /legal/privacy-policy/index.html       200
+/legal/privacy-policy.html  /legal/privacy-policy/index.html       200
+/legal/terms-of-service     /legal/terms-of-service/index.html     200
+/legal/terms-of-service.html /legal/terms-of-service/index.html    200
+/privacy-policy             /legal/privacy-policy/index.html       200
+/privacy-policy.html        /legal/privacy-policy/index.html       200
+/terms-of-service           /legal/terms-of-service/index.html     200
+/terms-of-service.html      /legal/terms-of-service/index.html     200
 
 # SPA routes
-/admin/*                  /index.html   200
-/distributor/*            /index.html   200
-/shipping/*               /index.html   200
-/w/*                      /index.html   200
-/platform/*               /index.html   200
-/login                    /index.html   200
-/signup                   /index.html   200
-/invite/*                 /index.html   200
-/install                  /index.html   200
-/                         /index.html   200
+/admin/*                    /index.html   200
+/distributor/*              /index.html   200
+/shipping/*                 /index.html   200
+/w/*                        /index.html   200
+/platform/*                 /index.html   200
+/login                      /index.html   200
+/signup                     /index.html   200
+/invite/*                   /index.html   200
+/install                    /index.html   200
+/                           /index.html   200
