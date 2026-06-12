@@ -304,5 +304,5 @@ export function isUsernameTaken(username, excludeCode = null) {
  * Hash password for storage (used when creating/updating distributors)
  */
 export function hashPasswordForStorage(password) {
-  return hashPasswordSync(password);
+  return hashPasswordSync(String(password ?? "").trim());
 }

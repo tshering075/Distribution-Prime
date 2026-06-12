@@ -147,7 +147,7 @@ export function rowTotal(row) {
 
 function lotQtyComplete(lot) {
   const has = (v) => v !== "" && v != null && Number.isFinite(Number(v));
-  return has(lot?.openingStockQty) && has(lot?.primarySale) && has(lot?.physicalStockQty);
+  return has(lot?.primarySale) && has(lot?.physicalStockQty);
 }
 
 /** Progress for distributor UX: lots/SKUs with O, P, and Phy entered. */
@@ -168,7 +168,6 @@ export function getPhysicalStockCompletionStats(rows) {
       if (lotQtyComplete(lot)) lotsComplete += 1;
       else skuComplete = false;
       const started =
-        (lot?.openingStockQty !== "" && lot?.openingStockQty != null) ||
         (lot?.primarySale !== "" && lot?.primarySale != null) ||
         (lot?.physicalStockQty !== "" && lot?.physicalStockQty != null);
       if (started) skuStarted = true;
@@ -438,7 +437,7 @@ export function rowsHaveUserQuantityEntry(rows) {
   const hasQty = (v) => v !== "" && v != null && Number.isFinite(Number(v));
   for (const row of rows || []) {
     for (const lot of getLotsFromProductRow(row)) {
-      if (hasQty(lot.openingStockQty) || hasQty(lot.primarySale) || hasQty(lot.physicalStockQty)) {
+      if (hasQty(lot.primarySale) || hasQty(lot.physicalStockQty)) {
         return true;
       }
     }
@@ -464,7 +463,7 @@ export function rowsHaveCarryForwardSource(rows) {
 
 /**
  * Copy last-saved FIFO lines into a new report day: same MFG / batch / BBD;
- * prior physical stock → opening; primary / physical / secondary cleared (user may edit all).
+ * prior lot traceability carried forward; primary / physical / secondary cleared for the new day.
  */
 export function buildRowsCarriedFromPreviousDay(previousRows, productLines) {
   const base = mergePhysicalStockRows(previousRows, productLines);
@@ -475,10 +474,6 @@ export function buildRowsCarriedFromPreviousDay(previousRows, productLines) {
       next.mfgDate = lot.mfgDate || "";
       next.batchNo = lot.batchNo || "";
       next.bbdDate = lot.bbdDate || "";
-      const phy = lot.physicalStockQty;
-      if (phy !== "" && phy != null && Number.isFinite(Number(phy))) {
-        next.openingStockQty = Math.max(0, Math.round(Number(phy)));
-      }
       return next;
     }),
   }));

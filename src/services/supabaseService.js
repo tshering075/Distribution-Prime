@@ -190,8 +190,8 @@ async function ensureOrganizationContextAfterDistributorLogin(organizationId) {
 }
 
 function distributorPasswordMatches(credentials, password) {
-  if (!credentials || !password) return false;
-  const hash = hashPasswordSync(password);
+  if (!credentials || password == null || password === '') return false;
+  const hash = hashPasswordSync(String(password).trim());
   if (credentials.passwordHash && credentials.passwordHash === hash) return true;
   if (credentials.password && credentials.password === password) return true;
   return false;
@@ -252,7 +252,7 @@ export async function signInDistributor(distributorCode, password) {
 
     const code = String(distributorCode || '').trim();
     const pass = String(password ?? '');
-    if (!code || !pass) {
+    if (!code || !pass.trim()) {
       throw new Error('Distributor code and password are required');
     }
 
@@ -260,6 +260,7 @@ export async function signInDistributor(distributorCode, password) {
     if (!slug) {
       throw new Error('Workspace is required. Open your workspace sign-in link (/w/your-workspace/login).');
     }
+    const workspaceLabel = slug;
 
     const { data, error } = await supabase.rpc('authenticate_distributor', {
       p_slug: slug,
@@ -275,7 +276,7 @@ export async function signInDistributor(distributorCode, password) {
       const msg = String(error.message || '');
       if (/no distributor found/i.test(msg)) {
         throw new Error(
-          'No distributor found with this code or username. Use your distributor code (e.g. JD123), not your email.'
+          `No distributor found in workspace "${workspaceLabel}". Check your Workspace ID, distributor code/username, and that your admin saved login credentials.`
         );
       }
       if (/wrong password/i.test(msg)) {
@@ -1084,19 +1085,29 @@ export async function updateDistributor(distributorId, updates) {
     }
 
     const payload = { ...updates, updated_at: new Date().toISOString() };
-    if (payload.credentials) {
-      payload.credentials = sanitizeDistributorCredentials(payload.credentials);
-      if (payload.credentials?.username) {
-        payload.username = payload.credentials.username;
-      }
-    }
 
     // First, try to find the distributor by code to get its id (primary key)
     // This ensures we update by primary key which is always unique
     const { data: existing, error: findError } = await fromTenant('distributors')
-      .select('id, code')
+      .select('id, code, credentials')
       .eq('code', distributorId)
       .limit(1); // Only get one row even if duplicates exist
+
+    if (payload.credentials) {
+      let nextCreds = sanitizeDistributorCredentials(payload.credentials);
+      const existingRow = firstRow(existing);
+      if (nextCreds && !nextCreds.passwordHash && existingRow?.credentials) {
+        nextCreds = {
+          ...(typeof existingRow.credentials === 'object' ? existingRow.credentials : {}),
+          ...nextCreds,
+        };
+        delete nextCreds.password;
+      }
+      payload.credentials = nextCreds;
+      if (payload.credentials?.username) {
+        payload.username = payload.credentials.username;
+      }
+    }
 
     if (findError) {
       // If find fails, try using distributorId as id directly
@@ -1196,9 +1207,20 @@ export async function updateDistributor(distributorId, updates) {
       Object.prototype.hasOwnProperty.call(updates, 'physical_stock') &&
       typeof error.message === 'string' &&
       error.message.includes('physical_stock');
+    const isMissingPosSettings =
+      error?.code === 'PGRST204' &&
+      updates &&
+      Object.prototype.hasOwnProperty.call(updates, 'pos_settings') &&
+      typeof error.message === 'string' &&
+      error.message.includes('pos_settings');
     if (isMissingPhysicalStock) {
       console.warn(
         'Distributor update skipped on server: add column physical_stock (JSONB) to distributors. See ADD_PHYSICAL_STOCK_COLUMN.sql in the project.',
+        error.message
+      );
+    } else if (isMissingPosSettings) {
+      console.warn(
+        'Distributor update skipped on server: add column pos_settings (JSONB) to distributors. See add_distributor_pos_settings.sql in the project.',
         error.message
       );
     } else {

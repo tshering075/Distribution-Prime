@@ -407,7 +407,6 @@ export default function DistributorPhysicalStockDialog({
           }}
         />
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, alignItems: "center" }}>
-          <Chip label={`Open ${distTotals.opening.toLocaleString()}`} size="small" sx={{ fontWeight: 700 }} />
           <Chip label={`Pri ${distTotals.primary.toLocaleString()}`} size="small" sx={{ fontWeight: 700 }} />
           <Chip label={`Phy ${distTotals.physical.toLocaleString()}`} size="small" sx={{ fontWeight: 700 }} />
           <Chip label={`Sec ${distTotals.secondary.toLocaleString()}`} size="small" sx={{ fontWeight: 700 }} />
@@ -425,9 +424,9 @@ export default function DistributorPhysicalStockDialog({
 
       {carriedFromDate ? (
         <Alert severity="info" sx={{ mx: { xs: 1, sm: 2 }, mt: 1, flexShrink: 0, borderRadius: 2 }}>
-          MFG date, batch no., BBD, and opening stock were filled from your <strong>last saved</strong> stock
-          (report date <strong>{carriedFromDate}</strong>). You can change those fields if needed. Enter{" "}
-          <strong>primary sale</strong> and <strong>physical stock</strong> for each lot.
+          MFG date, batch no., and BBD were filled from your <strong>last saved</strong> stock (report date{" "}
+          <strong>{carriedFromDate}</strong>). You can change those fields if needed. Enter <strong>primary sale</strong>{" "}
+          and <strong>physical stock</strong> for each lot.
         </Alert>
       ) : null}
 

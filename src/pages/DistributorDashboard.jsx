@@ -42,8 +42,8 @@ import {
   Warehouse as WarehouseIcon,
   OpenInFull as OpenInFullIcon,
   WavingHand as WavingHandIcon,
+  PointOfSale as PointOfSaleIcon,
 } from "@mui/icons-material";
-import NuProductRateIcon from "../components/NuProductRateIcon";
 import WorkspaceChip from "../components/WorkspaceChip";
 import CokeCalculator from "../cokecalculator";
 import OrdersDialog from "../components/OrdersDialog";
@@ -61,6 +61,7 @@ import {
   DistributorBottomNavItem,
 } from "../components/DistributorDashboardChrome";
 import DistributorPhysicalStockDialog from "../components/DistributorPhysicalStockDialog";
+import DistributorPosSaleDialog from "../components/DistributorPosSaleDialog";
 import AppSnackbar from "../components/AppSnackbar";
 import { useLogoutConfirmation } from "../components/LogoutConfirmDialog";
 import DayNightThemeToggle from "../components/DayNightThemeToggle";
@@ -144,12 +145,6 @@ import {
   loadUsedOrderNumbersFromLocalStorage,
 } from "../utils/orderNumber";
 
-const PRODUCT_RATE_CATEGORY_COLORS = {
-  CSD: "#1565c0",
-  CAN: "#FF6F00",
-  Water: "#0288D1",
-};
-
 function formatDistributorOrderRow(order) {
   return {
     ...order,
@@ -186,7 +181,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
   const [shippingInvoiceOrder, setShippingInvoiceOrder] = useState(null);
   const [loadingInvoiceOrderId, setLoadingInvoiceOrderId] = useState(null);
   const [ordersRefreshing, setOrdersRefreshing] = useState(false);
-  const [openProductRateDialog, setOpenProductRateDialog] = useState(false);
+  const [openPosSaleDialog, setOpenPosSaleDialog] = useState(false);
   const [productRates, setProductRates] = useState(null);
   const [globalGstPolicy, setGlobalGstPolicy] = useState(() => readGlobalGstPolicyFromLocalStorage());
   const [openStockLiftingDialog, setOpenStockLiftingDialog] = useState(false);
@@ -562,16 +557,6 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       }).length,
     [orders]
   );
-
-  const productRateRows = useMemo(() => {
-    const grouped = getCatalogSkusGrouped(productRates);
-    return grouped.all.map((p) => ({
-      name: p.name,
-      category: p.category,
-      rate: Number.isFinite(Number(p.rate)) ? Number(p.rate) : null,
-      source: "Catalogue",
-    }));
-  }, [productRates]);
 
   const physicalStockPayload = useMemo(
     () => getRawPhysicalStockFromDistributor(distributor),
@@ -1279,7 +1264,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     }
     setShowCalculator(false);
     setOpenOrdersListDialog(false);
-    setOpenProductRateDialog(false);
+    setOpenPosSaleDialog(false);
     setOpenStockLiftingDialog(false);
     setOpenPhysicalStockDialog(false);
     setEditingOrder(null);
@@ -1295,7 +1280,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
   const isHomeActive =
     !showCalculator &&
     !openOrdersListDialog &&
-    !openProductRateDialog &&
+    !openPosSaleDialog &&
     !openPhysicalStockDialog &&
     !openStockLiftingDialog;
 
@@ -1312,16 +1297,16 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     setDistributorCurrentView("orders");
   };
 
-  const openRateList = async () => {
-    setOpenProductRateDialog(true);
-    setDistributorCurrentView("product_rates");
-    await loadProductRates();
+  const openPosSale = () => {
+    setOpenPosSaleDialog(true);
+    setDistributorCurrentView("pos_sale");
+    void loadProductRates();
   };
 
-  const openPhysicalStock = async () => {
-    await loadProductRates();
+  const openPhysicalStock = () => {
     setOpenPhysicalStockDialog(true);
     setDistributorCurrentView("physical_stock");
+    void loadProductRates();
   };
 
   useEffect(() => {
@@ -1330,10 +1315,14 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       if (!savedView) return;
 
       if (savedView === "orders") setOpenOrdersListDialog(true);
-      if (savedView === "product_rates") setOpenProductRateDialog(true);
+      if (savedView === "pos_sale" || savedView === "product_rates") {
+        setOpenPosSaleDialog(true);
+        void loadProductRates();
+      }
       if (savedView === "stock_lifting") setOpenStockLiftingDialog(true);
       if (savedView === "physical_stock") {
-        loadProductRates().finally(() => setOpenPhysicalStockDialog(true));
+        setOpenPhysicalStockDialog(true);
+        void loadProductRates();
       }
       if (savedView === "calculator") setShowCalculator(true);
     } catch (error) {
@@ -1827,7 +1816,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     openOrdersListDialog ||
     openShippingInvoiceDialog ||
     openOrderCalculatedDialog ||
-    openProductRateDialog ||
+    openPosSaleDialog ||
     openStockLiftingDialog ||
     openPhysicalStockDialog;
 
@@ -1862,8 +1851,8 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       setDistributorCurrentView("dashboard");
       return;
     }
-    if (openProductRateDialog) {
-      setOpenProductRateDialog(false);
+    if (openPosSaleDialog) {
+      setOpenPosSaleDialog(false);
       setDistributorCurrentView("dashboard");
       return;
     }
@@ -1883,7 +1872,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     openOrderCalculatedDialog,
     showCalculator,
     openOrdersListDialog,
-    openProductRateDialog,
+    openPosSaleDialog,
     openStockLiftingDialog,
     openPhysicalStockDialog,
     setDistributorCurrentView,
@@ -2643,129 +2632,22 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
           getOrderStatus={getOrderStatus}
         />
 
-        {/* Product Rate List Dialog */}
-        <Dialog
-          open={openProductRateDialog}
+        <DistributorPosSaleDialog
+          open={openPosSaleDialog}
           onClose={() => {
-            setOpenProductRateDialog(false);
+            setOpenPosSaleDialog(false);
             setDistributorCurrentView("dashboard");
           }}
-          fullWidth
-          maxWidth="md"
-          fullScreen={isMobile}
-          PaperProps={{ sx: { borderRadius: { xs: 0, sm: 3 }, overflow: "hidden" } }}
-        >
-          <DialogTitle
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              bgcolor: "primary.main",
-              color: "primary.contrastText",
-              gap: 2,
-            }}
-          >
-            <Box sx={{ minWidth: 0 }}>
-              <Stack direction="row" spacing={1.25} alignItems="center">
-                <NuProductRateIcon sx={{ width: 34, height: 34, bgcolor: alpha("#fff", 0.16), color: "#fff" }} />
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
-                    Product Prices
-                  </Typography>
-                  <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                    Current rates used in the order calculator
-                  </Typography>
-                </Box>
-              </Stack>
-            </Box>
-            <IconButton
-              onClick={() => {
-                setOpenProductRateDialog(false);
-                setDistributorCurrentView("dashboard");
-              }}
-              sx={{ color: "primary.contrastText" }}
-            >
-              <CloseIcon />
-            </IconButton>
-          </DialogTitle>
-          <DialogContent sx={{ p: { xs: 1.5, sm: 2.5 }, bgcolor: "background.default" }}>
-            <Paper
-              elevation={0}
-              variant="outlined"
-              sx={{
-                p: { xs: 1.5, sm: 2 },
-                mb: 2,
-                borderRadius: 2.5,
-                bgcolor: alpha(theme.palette.info.main, theme.palette.mode === "dark" ? 0.1 : 0.06),
-                borderColor: alpha(theme.palette.info.main, 0.2),
-              }}
-            >
-              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                These are read-only product prices published by the admin. If a price looks incorrect, contact the
-                admin before placing your order.
-              </Typography>
-            </Paper>
-
-            <TableContainer
-              component={Paper}
-              elevation={0}
-              variant="outlined"
-              sx={{
-                borderRadius: 2.5,
-                maxHeight: { xs: "calc(100vh - 230px)", sm: "62vh" },
-                overflow: "auto",
-              }}
-            >
-              <Table stickyHeader size="small" aria-label="Product price list">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 800, bgcolor: "background.paper" }}>Product</TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 800, bgcolor: "background.paper" }}>Type</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 800, bgcolor: "background.paper" }}>Price / case</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {productRateRows.map((row) => {
-                    const accent = PRODUCT_RATE_CATEGORY_COLORS[row.category] || theme.palette.primary.main;
-                    return (
-                      <TableRow key={row.name} hover>
-                        <TableCell sx={{ py: 1.25 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: "text.primary" }}>
-                            {row.name}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Chip
-                            label={row.category}
-                            size="small"
-                            sx={{ bgcolor: accent, color: "#fff", fontWeight: 800, minWidth: 58 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
-                          {row.rate == null
-                            ? "Not set"
-                            : `Nu. ${Number(row.rate).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </DialogContent>
-          <DialogActions sx={{ p: 2, bgcolor: "background.paper", borderTop: 1, borderColor: "divider" }}>
-            <Button
-              onClick={() => {
-                setOpenProductRateDialog(false);
-                setDistributorCurrentView("dashboard");
-              }}
-              variant="contained"
-              sx={{ textTransform: "none", fontWeight: 700 }}
-            >
-              Close
-            </Button>
-          </DialogActions>
-        </Dialog>
+          distributorCode={distributorCode}
+          distributorName={distributorName}
+          distributor={distributor}
+          setDistributor={setDistributor}
+          productRates={productRates}
+          orders={orders}
+          gstEnabled={distributorGstEnabled}
+          isSupabaseConfigured={isSupabaseConfigured}
+          showToast={showToast}
+        />
 
         <Dialog
           open={openStockLiftingDialog}
@@ -2916,21 +2798,10 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
               icon={<CalculateIcon fontSize="small" />}
             />
             <DistributorBottomNavItem
-              label="Prices"
-              active={openProductRateDialog}
-              onClick={openRateList}
-              icon={
-                <NuProductRateIcon
-                  sx={{
-                    width: 22,
-                    height: 22,
-                    fontSize: "0.65rem",
-                    borderRadius: "6px",
-                    bgcolor: alpha(theme.palette.primary.main, 0.12),
-                    color: "primary.main",
-                  }}
-                />
-              }
+              label="Sale"
+              active={openPosSaleDialog}
+              onClick={openPosSale}
+              icon={<PointOfSaleIcon fontSize="small" />}
             />
             <DistributorBottomNavItem
               label="Stock"

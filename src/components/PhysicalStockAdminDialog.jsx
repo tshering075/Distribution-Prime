@@ -586,16 +586,6 @@ export default function PhysicalStockAdminDialog({
                       {raw ? (
                         <>
                           <Chip
-                            label={`O ${distTotals.opening.toLocaleString()}`}
-                            size="small"
-                            sx={{
-                              height: 22,
-                              fontWeight: 700,
-                              fontSize: "0.62rem",
-                              "& .MuiChip-label": { px: 0.75 },
-                            }}
-                          />
-                          <Chip
                             label={`P ${distTotals.primary.toLocaleString()}`}
                             size="small"
                             sx={{

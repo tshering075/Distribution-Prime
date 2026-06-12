@@ -22,7 +22,7 @@ import {
   getLotsFromProductRow,
 } from "../utils/physicalStockTemplate";
 
-function applyOpeningPrimaryPhysicalSecondary(field, draft) {
+function applyPrimaryPhysicalSecondary(field, draft) {
   const toNumOrNull = (v) => {
     if (v === "" || v == null) return null;
     const n = Number(v);
@@ -30,11 +30,11 @@ function applyOpeningPrimaryPhysicalSecondary(field, draft) {
   };
   const toSafe = (n) => (n == null ? "" : Math.max(0, Math.round(n)));
 
-  if (field === "openingStockQty" || field === "primarySale" || field === "physicalStockQty") {
-    const opening = toNumOrNull(draft.openingStockQty);
+  if (field === "primarySale" || field === "physicalStockQty") {
+    const opening = toNumOrNull(draft.openingStockQty) ?? 0;
     const primary = toNumOrNull(draft.primarySale);
     const physical = toNumOrNull(draft.physicalStockQty);
-    if (opening != null && primary != null && physical != null) {
+    if (primary != null && physical != null) {
       draft.secondarySale = toSafe(opening + primary - physical);
     }
   }
@@ -71,14 +71,13 @@ export default function PhysicalStockMatrix({
     return (rows || []).reduce(
       (acc, row) => {
         for (const lot of getLotsFromProductRow(row)) {
-          acc.opening += Number(lot?.openingStockQty) || 0;
           acc.primary += Number(lot?.primarySale) || 0;
           acc.physical += Number(lot?.physicalStockQty) || 0;
           acc.secondary += Number(lot?.secondarySale) || 0;
         }
         return acc;
       },
-      { opening: 0, primary: 0, physical: 0, secondary: 0 }
+      { primary: 0, physical: 0, secondary: 0 }
     );
   }, [rows]);
 
@@ -94,14 +93,10 @@ export default function PhysicalStockMatrix({
           draft[field] = typeof value === "string" ? value.slice(0, 10) : "";
         } else if (field === "batchNo") {
           draft.batchNo = value;
-        } else if (
-          field === "openingStockQty" ||
-          field === "primarySale" ||
-          field === "physicalStockQty"
-        ) {
+        } else if (field === "primarySale" || field === "physicalStockQty") {
           const typedValue = value === "" ? "" : Math.max(0, Number(value) || 0);
           draft[field] = typedValue;
-          applyOpeningPrimaryPhysicalSecondary(field, draft);
+          applyPrimaryPhysicalSecondary(field, draft);
         }
 
         lots[lotIndex] = draft;
@@ -248,9 +243,8 @@ export default function PhysicalStockMatrix({
           }}
         >
           <Typography variant="caption" sx={{ fontWeight: 800, color: "text.primary" }}>
-            FIFO lots: add one row per batch (MFG / batch / BBD). Per lot: (Opening + Primary) − Physical stock = Secondary
-            sale (auto). MFG, batch, BBD, and opening are pre-filled from your last save—you can edit them. Enter primary and
-            physical stock for today.
+            FIFO lots: add one row per batch (MFG / batch / BBD). Enter primary sale and physical stock for each lot —
+            secondary sale is calculated automatically. MFG, batch, and BBD can be pre-filled from your last save.
           </Typography>
         </Box>
       ) : null}
@@ -268,12 +262,11 @@ export default function PhysicalStockMatrix({
           const lots = getLotsFromProductRow(row);
           const sub = lots.reduce(
             (a, l) => ({
-              opening: a.opening + (Number(l.openingStockQty) || 0),
               primary: a.primary + (Number(l.primarySale) || 0),
               physical: a.physical + (Number(l.physicalStockQty) || 0),
               secondary: a.secondary + (Number(l.secondarySale) || 0),
             }),
-            { opening: 0, primary: 0, physical: 0, secondary: 0 }
+            { primary: 0, physical: 0, secondary: 0 }
           );
           return (
             <Paper
@@ -301,16 +294,13 @@ export default function PhysicalStockMatrix({
               </Typography>
 
               <Box sx={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                <Table size="small" sx={{ minWidth: 860 }}>
+                <Table size="small" sx={{ minWidth: 720 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ fontWeight: 800, width: 48 }}>#</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>MFG date</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>Batch no.</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>BBD date</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }} align="right">
-                        Opening
-                      </TableCell>
                       <TableCell sx={{ fontWeight: 800 }} align="right">
                         Primary sale
                       </TableCell>
@@ -330,7 +320,6 @@ export default function PhysicalStockMatrix({
                         <TableCell>{dateCell(rowIndex, lotIndex, "mfgDate", "Manufacturing date", lot)}</TableCell>
                         <TableCell>{batchCell(rowIndex, lotIndex, lot)}</TableCell>
                         <TableCell>{dateCell(rowIndex, lotIndex, "bbdDate", "Best before date", lot)}</TableCell>
-                        <TableCell align="right">{qtyCell(rowIndex, lotIndex, "openingStockQty", "Opening stock", lot)}</TableCell>
                         <TableCell align="right">{qtyCell(rowIndex, lotIndex, "primarySale", "Primary sale", lot)}</TableCell>
                         <TableCell align="right">{qtyCell(rowIndex, lotIndex, "physicalStockQty", "Physical stock", lot)}</TableCell>
                         <TableCell align="right">
@@ -366,7 +355,7 @@ export default function PhysicalStockMatrix({
                 }}
               >
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                  SKU subtotal (all lots): O {sub.opening} · P {sub.primary} · Phy {sub.physical} · S {sub.secondary}
+                  SKU subtotal (all lots): P {sub.primary} · Phy {sub.physical} · S {sub.secondary}
                 </Typography>
                 {!readOnly ? (
                   <Button
@@ -390,7 +379,7 @@ export default function PhysicalStockMatrix({
         sx={{
           flexShrink: 0,
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", sm: "repeat(5, minmax(88px, 1fr))" },
+          gridTemplateColumns: { xs: "1fr", sm: "repeat(4, minmax(88px, 1fr))" },
           gap: 0.45,
           alignItems: "center",
           p: 0.5,
@@ -402,7 +391,6 @@ export default function PhysicalStockMatrix({
         }}
       >
         <Typography sx={{ fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>TOTAL PC (all SKUs, all lots)</Typography>
-        <Typography sx={{ textAlign: "right", fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>{totals.opening}</Typography>
         <Typography sx={{ textAlign: "right", fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>{totals.primary}</Typography>
         <Typography sx={{ textAlign: "right", fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>{totals.physical}</Typography>
         <Typography sx={{ textAlign: "right", fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>{totals.secondary}</Typography>

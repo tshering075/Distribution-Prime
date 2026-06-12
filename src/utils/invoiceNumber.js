@@ -121,5 +121,19 @@ export async function allocateUniqueInvoiceNumber(options = {}) {
       console.warn('Could not load remote invoice numbers for uniqueness:', e);
     }
   }
+  for (const raw of options.additionalUsed || []) {
+    const key = normalizeInvoiceNumber(raw);
+    if (key) used.add(key);
+  }
+  return getNextInvoiceNumberExcluding(used);
+}
+
+/** Synchronous allocation when used numbers are already known (e.g. POS sales). */
+export function allocateUniqueInvoiceNumberSync(additionalUsed = []) {
+  const used = loadUsedInvoiceNumbersFromLocalStorage();
+  for (const raw of additionalUsed || []) {
+    const key = normalizeInvoiceNumber(raw);
+    if (key) used.add(key);
+  }
   return getNextInvoiceNumberExcluding(used);
 }

@@ -172,7 +172,7 @@ function LoginPage({
     
     // Input validation
     const trimmedUserId = (userId || "").trim();
-    const trimmedPassword = (password || "").trim();
+    const loginPassword = String(password ?? "");
     
     // Clear previous errors
     setFieldErrors({ userId: "", password: "" });
@@ -189,7 +189,7 @@ function LoginPage({
       hasErrors = true;
     }
     
-    if (!trimmedPassword || trimmedPassword.length < 1) {
+    if (!loginPassword || loginPassword.length < 1) {
       setFieldErrors(prev => ({ ...prev, password: "Password is required" }));
       hasErrors = true;
     }
@@ -205,7 +205,7 @@ function LoginPage({
     const persistRememberMe = () => {
       writeRememberedLogin(rememberSlug, {
         userId: trimmedUserId,
-        password: trimmedPassword,
+        password: loginPassword,
         rememberMe,
       });
     };
@@ -228,7 +228,7 @@ function LoginPage({
         let distributorAuthError = null;
         try {
           // Distributor: code + password vs distributors.credentials in Supabase. Admin: email + Auth next.
-          const distributor = await signInDistributor(trimmedUserId, trimmedPassword);
+          const distributor = await signInDistributor(trimmedUserId, loginPassword);
           if (distributor) {
             setDistributorInfo({ name: distributor.name, code: distributor.code });
             
@@ -257,7 +257,7 @@ function LoginPage({
           distributorAuthError = distributorError;
 
           const localDistributor = !isProductionAuthMode()
-            ? validateDistributorLogin(trimmedUserId, trimmedPassword)
+            ? validateDistributorLogin(trimmedUserId, loginPassword)
             : null;
           if (localDistributor) {
             setDistributorInfo({ name: localDistributor.name, code: localDistributor.code });
@@ -283,7 +283,7 @@ function LoginPage({
           const looksLikeAdminEmail = trimmedUserId.includes("@");
           // Only try admin auth when the user entered an email address.
           if (looksLikeAdminEmail) try {
-            const admin = await signInAdmin(trimmedUserId, trimmedPassword);
+            const admin = await signInAdmin(trimmedUserId, loginPassword);
             if (admin) {
               // Store admin email for email sending
               if (admin.email) {
@@ -330,16 +330,20 @@ function LoginPage({
           const distributorMsg = distributorAuthError?.message || "";
           const adminMsg = supabaseAuthError?.message || "";
           const distributorNotFound = /no distributor found/i.test(distributorMsg);
+          const wrongDistributorPassword = /wrong password/i.test(distributorMsg);
+          const workspaceHint = String(organizationSlug || lockedWorkspaceSlug || "").trim();
 
-          if (!distributorNotFound) {
+          if (wrongDistributorPassword) {
             normalizedSupabaseError =
-              distributorMsg || "Invalid distributor code or password";
-          } else if (trimmedUserId.includes("@") && adminMsg) {
-            normalizedSupabaseError = adminMsg.includes("Invalid login credentials")
-              ? "That email and password did not match an admin account."
-              : adminMsg.includes("Email not confirmed")
-              ? "Email not confirmed. Please confirm from inbox first, or disable email confirmation in Supabase Auth settings."
-              : adminMsg;
+              distributorMsg || "Wrong password for this distributor. Ask your admin to reset it.";
+          } else if (distributorNotFound) {
+            normalizedSupabaseError = workspaceHint
+              ? `${distributorMsg} (Workspace ID: ${workspaceHint})`
+              : distributorMsg || "Invalid distributor code or password";
+            if (trimmedUserId.includes("@") && adminMsg && /invalid login credentials/i.test(adminMsg)) {
+              normalizedSupabaseError +=
+                " If you are an admin, use your admin email and password. Distributors should use their distributor code or username.";
+            }
           } else {
             normalizedSupabaseError =
               distributorMsg || "Invalid distributor code or password";
@@ -355,7 +359,7 @@ function LoginPage({
       }
 
       if (!isProductionAuthMode()) {
-        const distributor = validateDistributorLogin(trimmedUserId, trimmedPassword);
+        const distributor = validateDistributorLogin(trimmedUserId, loginPassword);
         if (distributor) {
           setDistributorInfo({ name: distributor.name, code: distributor.code });
           persistRememberMe();
@@ -366,7 +370,7 @@ function LoginPage({
           return;
         }
 
-        if (validateAdminLogin(trimmedUserId, trimmedPassword)) {
+        if (validateAdminLogin(trimmedUserId, loginPassword)) {
           persistRememberMe();
           onLogin("admin");
           setSuccess(true);
@@ -381,7 +385,7 @@ function LoginPage({
       }
 
       // Offline-only shipping login (requires workspace id like admin).
-      if (!isProductionAuthMode() && !isSupabaseConfigured && validateShippingLogin(trimmedUserId, trimmedPassword)) {
+      if (!isProductionAuthMode() && !isSupabaseConfigured && validateShippingLogin(trimmedUserId, loginPassword)) {
         try {
           await resolveOrganizationForLogin(organizationSlug);
         } catch (orgError) {

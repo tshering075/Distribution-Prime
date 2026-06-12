@@ -38,6 +38,13 @@ BEGIN
   END IF;
 
   DELETE FROM sales_data WHERE organization_id = p_org_id;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'distributor_pos_sales'
+  ) THEN
+    DELETE FROM distributor_pos_sales WHERE organization_id = p_org_id;
+  END IF;
   DELETE FROM orders WHERE organization_id = p_org_id;
   DELETE FROM targets WHERE organization_id = p_org_id;
   DELETE FROM schemes WHERE organization_id = p_org_id;
