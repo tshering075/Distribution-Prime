@@ -152,7 +152,8 @@ function SignUpPage({ onLogin }) {
       });
 
       if (result.admin?.email) {
-        localStorage.setItem("admin_email", result.admin.email);
+        const { onAdminLogin } = await import("../services/gmailService");
+        onAdminLogin(result.admin.email);
       }
       localStorage.setItem("userRole", "admin");
       localStorage.setItem(

@@ -4,9 +4,14 @@
 -- Safe to re-run: drops prior signatures when return type changed.
 -- ============================================================
 
+DROP FUNCTION IF EXISTS public.create_workspace_for_signup(TEXT, TEXT, JSONB);
 DROP FUNCTION IF EXISTS public.create_workspace_for_signup(TEXT, TEXT);
 
-CREATE OR REPLACE FUNCTION public.create_workspace_for_signup(p_slug TEXT, p_name TEXT)
+CREATE OR REPLACE FUNCTION public.create_workspace_for_signup(
+  p_slug TEXT,
+  p_name TEXT,
+  p_settings JSONB DEFAULT '{}'::jsonb
+)
 RETURNS SETOF organizations
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -15,9 +20,11 @@ AS $$
 DECLARE
   v_slug TEXT;
   v_name TEXT;
+  v_settings JSONB;
 BEGIN
   v_slug := lower(trim(p_slug));
   v_name := trim(p_name);
+  v_settings := COALESCE(p_settings, '{}'::jsonb);
 
   IF v_slug IS NULL OR length(v_slug) < 3 OR length(v_slug) > 64 THEN
     RAISE EXCEPTION 'Invalid workspace ID: use 3–64 lowercase letters, numbers, and hyphens';
@@ -33,12 +40,12 @@ BEGIN
 
   RETURN QUERY
   INSERT INTO organizations (slug, name, plan, status, settings)
-  VALUES (v_slug, v_name, 'trial', 'active', '{}'::jsonb)
+  VALUES (v_slug, v_name, 'trial', 'active', v_settings)
   RETURNING *;
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.create_workspace_for_signup(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_workspace_for_signup(TEXT, TEXT, JSONB) TO anon, authenticated;
 
 DROP FUNCTION IF EXISTS public.delete_workspace_signup_rollback(UUID);
 

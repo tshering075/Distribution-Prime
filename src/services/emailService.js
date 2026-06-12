@@ -32,8 +32,8 @@ export async function sendOrderEmail({ to, cc, subject, htmlBody, imageData, ord
 
       emailjs.default.init(emailjsPublicKey);
 
-      // Get sender email
-      const senderEmail = getSenderEmail();
+      // Get sender email (logged-in admin)
+      const senderEmail = await getSenderEmail();
 
       // EmailJS template variables
       const templateParams = {

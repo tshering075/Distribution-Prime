@@ -287,7 +287,8 @@ function LoginPage({
             if (admin) {
               // Store admin email for email sending
               if (admin.email) {
-                localStorage.setItem('admin_email', admin.email);
+                const { onAdminLogin } = await import('../services/gmailService');
+                onAdminLogin(admin.email);
                 console.log('✅ Admin email stored:', admin.email);
               }
               if (admin.name) {

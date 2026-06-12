@@ -533,6 +533,7 @@ function ShippingDashboard({ onLogout }) {
               shipping_invoice_data: patch.shipping_invoice_data,
               shipping_invoice_file_name: patch.shipping_invoice_file_name,
               shipping_invoice_mime_type: patch.shipping_invoice_mime_type,
+              invoiceNumber: order.invoiceNumber ?? order.invoice_number,
             },
             identityFallback
           );
@@ -1112,6 +1113,19 @@ function ShippingDashboard({ onLogout }) {
 
       setSavingPreview(true);
       try {
+        const { allocateUniqueInvoiceNumber } = await import('../utils/invoiceNumber');
+        let invoiceNumber = String(
+          merged.invoiceNumber ?? merged.invoice_number ?? ''
+        ).trim();
+        if (!invoiceNumber) {
+          invoiceNumber = await allocateUniqueInvoiceNumber();
+          merged = {
+            ...merged,
+            invoiceNumber,
+            invoice_number: invoiceNumber,
+          };
+        }
+
         const invoiceFile = await generateShippingInvoiceFile({
           order: merged,
           distributor: previewDistributor,

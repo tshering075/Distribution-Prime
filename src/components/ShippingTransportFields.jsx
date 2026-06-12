@@ -409,7 +409,7 @@ export default function ShippingTransportFields({
                   fullWidth
                   required={required}
                   disabled={disabled}
-                  placeholder="BP-1-A1234"
+                  placeholder="BP-1-A1234 or BHT-3-KA12345"
                   value={transport.vehicleNo || ""}
                   onChange={(e) => setField("vehicleNo", e.target.value.toUpperCase())}
                   onBlur={handleVehicleNoBlur}

@@ -17,7 +17,8 @@ export const SHIPPING_VEHICLE_TYPE_OPTIONS = ["Jumbo", "DCM"];
 export const SHIPPING_CUSTOM_VEHICLE_TYPES_KEY = "shipping_custom_vehicle_types";
 
 /** Bhutan plate types: BP private, BT taxi, BG government, BHT heavy/commercial. */
-const BHUTAN_PLATE_PREFIXES = ["BP", "BT", "BG", "BHT"];
+const BHUTAN_PLATE_PREFIXES = ["BHT", "BP", "BT", "BG"];
+const BHUTAN_PLATE_PREFIX_PATTERN = BHUTAN_PLATE_PREFIXES.join("|");
 
 function parseTransportAmount(value) {
   const n = Number(value);
@@ -33,30 +34,30 @@ export function compactBhutanVehicleNo(raw) {
 }
 
 /**
- * Bhutan format: TYPE-REGION-[LETTER]NUMBER e.g. BP-1-A1234
+ * Bhutan format: TYPE-REGION-[LETTERS]NUMBER e.g. BP-1-A1234, BHT-3-KA12345
  * REGION: 1 Western, 2 Central, 3 Southern, 4 Eastern
  */
 export function isValidBhutanVehicleNo(raw) {
   const compact = compactBhutanVehicleNo(raw);
   if (!compact) return false;
 
-  const withLetter = new RegExp(
-    `^(${BHUTAN_PLATE_PREFIXES.join("|")})([1-4])([A-Z])(\\d{4})$`
+  const withLetters = new RegExp(
+    `^(${BHUTAN_PLATE_PREFIX_PATTERN})([1-4])([A-Z]{1,3})(\\d{3,6})$`
   );
   const legacyNoLetter = new RegExp(
-    `^(${BHUTAN_PLATE_PREFIXES.join("|")})([1-4])(\\d{4})$`
+    `^(${BHUTAN_PLATE_PREFIX_PATTERN})([1-4])(\\d{3,6})$`
   );
 
-  return withLetter.test(compact) || legacyNoLetter.test(compact);
+  return withLetters.test(compact) || legacyNoLetter.test(compact);
 }
 
-/** Format compact or messy input to BP-1-A1234 style for display/storage. */
+/** Format compact or messy input to BP-1-A1234 / BHT-3-KA12345 style for display/storage. */
 export function formatBhutanVehicleNo(raw) {
   const compact = compactBhutanVehicleNo(raw);
   if (!compact) return "";
 
   let m = compact.match(
-    new RegExp(`^(${BHUTAN_PLATE_PREFIXES.join("|")})([1-4])([A-Z])(\\d{1,4})$`)
+    new RegExp(`^(${BHUTAN_PLATE_PREFIX_PATTERN})([1-4])([A-Z]{1,3})(\\d{1,6})$`)
   );
   if (m) {
     const num = m[4].padStart(4, "0");
@@ -64,7 +65,7 @@ export function formatBhutanVehicleNo(raw) {
   }
 
   m = compact.match(
-    new RegExp(`^(${BHUTAN_PLATE_PREFIXES.join("|")})([1-4])(\\d{4})$`)
+    new RegExp(`^(${BHUTAN_PLATE_PREFIX_PATTERN})([1-4])(\\d{3,6})$`)
   );
   if (m) {
     return `${m[1]}-${m[2]}-${m[3]}`;
@@ -189,10 +190,10 @@ export function transportValidationMessage(order) {
 export function vehicleNoHelperText(raw) {
   const value = String(raw ?? "").trim();
   if (!value) {
-    return "Bhutan format · e.g. BP-1-A1234 (region 1–4)";
+    return "Bhutan format · e.g. BP-1-A1234 or BHT-3-KA12345 (region 1–4)";
   }
   if (!isValidBhutanVehicleNo(value)) {
-    return "Use Bhutan plate format: BP/BT/BG/BHT · region 1–4 · letter · 4 digits";
+    return "Use Bhutan plate: BP/BT/BG/BHT · region 1–4 · 1–3 letters · 3–6 digits";
   }
   return `Formatted: ${formatBhutanVehicleNo(value)}`;
 }

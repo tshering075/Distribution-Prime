@@ -185,17 +185,31 @@ function OrderEmailDialog({ open, onClose, order, onSend, onManageRecipients }) 
     setGmailConnecting(true);
     setError("");
     try {
-      const { isGmailConfigured, ensureGmailAuthenticated, startGmailKeepAlive } = await import("../services/gmailService");
+      const {
+        isGmailConfigured,
+        ensureGmailAuthenticated,
+        startGmailKeepAlive,
+        getConnectedGmailEmail,
+      } = await import("../services/gmailService");
       if (!(await isGmailConfigured())) {
         setError("Gmail API is not configured. Set credentials in Settings first.");
         return;
       }
       const connected = await ensureGmailAuthenticated({ interactive: true });
       if (connected) {
+        const gmailAccount = await getConnectedGmailEmail();
+        const expected = (senderEmail || localStorage.getItem("admin_email") || "").trim().toLowerCase();
+        if (expected && gmailAccount && gmailAccount.toLowerCase() !== expected) {
+          throw new Error(
+            `Connected as ${gmailAccount}. Sign in with ${expected} — order emails send from the logged-in admin Gmail.`
+          );
+        }
         startGmailKeepAlive();
         setGmailConnected(true);
         showToast(
-          "Gmail connected on this device. Keep this browser signed in to Google for uninterrupted sending.",
+          gmailAccount
+            ? `Gmail connected as ${gmailAccount}. Order emails will send from this address.`
+            : "Gmail connected on this device.",
           "success",
           5200
         );

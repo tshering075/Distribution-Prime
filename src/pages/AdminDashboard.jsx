@@ -413,9 +413,9 @@ function AdminDashboard({ onLogout }) {
               console.log('Set permissions based on role:', rolePermissions);
             }
             
-            // Store admin email for email sending
+            // Store admin email for email sending; clear stale Gmail if another admin used this browser
             if (currentUser.email) {
-              localStorage.setItem('admin_email', currentUser.email);
+              import('../services/gmailService').then(({ onAdminLogin }) => onAdminLogin(currentUser.email));
               console.log('✅ Admin email stored for email sending:', currentUser.email);
             }
           } else {

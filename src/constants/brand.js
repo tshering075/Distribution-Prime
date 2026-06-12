@@ -14,9 +14,14 @@ export const OAUTH_LOGO_SRC = "/oauth-app-logo.svg";
 /** In-app SPA routes (React legal pages). */
 export const PRIVACY_POLICY_PATH = "/privacy-policy";
 export const TERMS_OF_SERVICE_PATH = "/terms-of-service";
-/** Static HTML for Google OAuth / Search Console — use these in Cloud Console URLs. */
-export const PRIVACY_POLICY_HTML = "/privacy-policy.html";
-export const TERMS_OF_SERVICE_HTML = "/terms-of-service.html";
+/**
+ * Static HTML paths for Google OAuth consent screen (must differ from homepage `/`).
+ * Use full URLs in Google Cloud Console, e.g. https://distribution-prime.pages.dev/legal/privacy-policy
+ */
+export const PRIVACY_POLICY_HTML = "/legal/privacy-policy";
+export const TERMS_OF_SERVICE_HTML = "/legal/terms-of-service";
+/** Production app URL for OAuth home page field. */
+export const OAUTH_APP_HOME_URL = "https://distribution-prime.pages.dev/";
 
 /** Theme accent (matches MUI primary) — for legacy const BRAND in dialogs */
 export const BRAND_PRIMARY = "#1565c0";

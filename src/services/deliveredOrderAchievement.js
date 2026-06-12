@@ -141,7 +141,12 @@ function buildSalesDataPayload(order, totals, distributorName) {
     distributorCode,
     distributorName: order.distributorName || order.distributor_name || distributorName || distributorCode,
     orderNumber,
-    invoiceNumber: orderNumber,
+    invoiceNumber:
+      order.invoiceNumber ??
+      order.invoice_number ??
+      order.invoiceNo ??
+      order.invoice_no ??
+      orderNumber,
     invoiceDate: deliveredAt,
     csdPC: totals.csdPC,
     csdUC: totals.csdUC,

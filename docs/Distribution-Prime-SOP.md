@@ -285,7 +285,7 @@ Complete **all** steps before marking **Dispatched**:
 | **Order not in shipping list** | Refresh; confirm same **workspace** and order status. |
 | **Gmail approval not working** | Verify Gmail Settings, OAuth token, and recipient replied with clear approve/reject wording. |
 | **Targets not updating** | Dispatch must complete; check target period dates and product categories. |
-| **Privacy / OAuth verification** | Use `https://distribution-prime.pages.dev/privacy-policy.html` (not homepage URL) in Google Cloud Console. |
+| **Privacy / OAuth verification** | Home: `https://distribution-prime.pages.dev/` · Privacy: `https://distribution-prime.pages.dev/legal/privacy-policy` (must differ from home). |
 
 **Support contact:** codewynbuild@gmail.com
 

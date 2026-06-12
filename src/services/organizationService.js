@@ -207,11 +207,23 @@ export async function signUpOrganization({
   const existing = await getOrganizationBySlug(slug);
   if (existing) throw new Error('This workspace ID is already taken. Choose another.');
 
+  const initialBrandSettings = brandSettingsFromForm({
+    appName: name,
+    companyName: name,
+    shortName: name.slice(0, 12) || name,
+    markSrc: BRAND_MARK_SRC,
+    primary: BRAND_PRIMARY,
+    address,
+    postNo,
+    gstNo,
+  });
+
   let orgRowResolved = null;
 
   const { data: rpcOrg, error: rpcOrgError } = await supabase.rpc('create_workspace_for_signup', {
     p_slug: slug,
     p_name: name,
+    p_settings: initialBrandSettings,
   });
 
   if (!rpcOrgError) {
@@ -234,7 +246,7 @@ export async function signUpOrganization({
         name,
         plan: 'trial',
         status: 'active',
-        settings: {},
+        settings: initialBrandSettings,
       },
     ]);
 
@@ -300,19 +312,7 @@ export async function signUpOrganization({
   }
 
   try {
-    const updated = await updateOrganizationSettings(
-      organizationId,
-      brandSettingsFromForm({
-        appName: name,
-        companyName: name,
-        shortName: name.slice(0, 12) || name,
-        markSrc: BRAND_MARK_SRC,
-        primary: BRAND_PRIMARY,
-        address,
-        postNo,
-        gstNo,
-      })
-    );
+    const updated = await updateOrganizationSettings(organizationId, initialBrandSettings);
     if (updated) orgRowResolved = updated;
   } catch (settingsError) {
     console.warn('Initial workspace letterhead save failed (non-fatal):', settingsError);

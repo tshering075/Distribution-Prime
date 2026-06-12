@@ -1,7 +1,14 @@
 /* Distribution Prime PWA — required for Chrome/Edge “Install app” prompt */
 const CACHE_NAME = "distribution-prime-v3";
 const PRECACHE = ["/index.html", "/manifest.json", "/distribution-prime-icon-512.png", "/distribution-prime-icon.svg", "/login"];
-const LEGAL_HTML = new Set(["/privacy-policy.html", "/terms-of-service.html"]);
+const LEGAL_HTML = new Set([
+  "/privacy-policy.html",
+  "/terms-of-service.html",
+  "/legal/privacy-policy",
+  "/legal/privacy-policy.html",
+  "/legal/terms-of-service",
+  "/legal/terms-of-service.html",
+]);
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

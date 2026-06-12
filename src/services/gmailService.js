@@ -557,8 +557,92 @@ function clearGmailToken() {
 }
 
 function getGmailLoginHint() {
+  const adminEmail = String(localStorage.getItem('admin_email') || '').trim();
+  if (adminEmail) return adminEmail;
   const session = loadGmailSession();
   return session?.email || session?.login_hint || '';
+}
+
+/** Gmail address tied to the current OAuth token (if any). */
+export async function getConnectedGmailEmail() {
+  try {
+    if (window.gapi?.client?.gmail) {
+      const response = await window.gapi.client.gmail.users.getProfile({ userId: 'me' });
+      const email = response?.result?.emailAddress;
+      if (email) return email;
+    }
+  } catch (error) {
+    console.warn('Could not read connected Gmail profile:', error?.result?.error?.message || error.message);
+  }
+  return loadGmailSession()?.email || null;
+}
+
+/**
+ * When a different admin signs in, drop a stale Gmail OAuth session so sends use the new admin.
+ * @param {string} adminEmail
+ */
+export function onAdminLogin(adminEmail) {
+  const email = String(adminEmail || '').trim().toLowerCase();
+  if (!email) return;
+  localStorage.setItem('admin_email', email);
+
+  const sessionEmail = String(loadGmailSession()?.email || '').trim().toLowerCase();
+  if (sessionEmail && sessionEmail !== email) {
+    clearGmailToken();
+    clearGmailSession();
+    if (window.gapi?.client) window.gapi.client.setToken('');
+    stopGmailKeepAlive();
+    console.log('Cleared stale Gmail session for previous admin account');
+  }
+}
+
+/**
+ * Ensure the Gmail account used for sending matches the logged-in admin email.
+ * @param {{ interactive?: boolean }} options
+ * @returns {Promise<boolean>}
+ */
+async function ensureGmailMatchesAdmin(options = {}) {
+  const { interactive = false } = options;
+  const adminEmail = String(localStorage.getItem('admin_email') || '').trim().toLowerCase();
+  if (!adminEmail) return true;
+
+  let connected = null;
+  try {
+    if (window.gapi?.client?.getToken()?.access_token) {
+      connected = await getConnectedGmailEmail();
+    }
+  } catch {
+    connected = null;
+  }
+
+  if (connected && connected.toLowerCase() === adminEmail) {
+    saveGmailSession({ email: connected, login_hint: adminEmail });
+    return true;
+  }
+
+  if (connected && connected.toLowerCase() !== adminEmail) {
+    console.warn(
+      `Gmail account (${connected}) does not match logged-in admin (${adminEmail}); reconnecting…`
+    );
+    clearGmailToken();
+    clearGmailSession();
+    if (window.gapi?.client) window.gapi.client.setToken('');
+  }
+
+  if (!interactive) return false;
+
+  await ensureGmailAuthenticated({ interactive: true });
+  await captureGmailProfileEmail();
+  connected = await getConnectedGmailEmail();
+  if (connected && connected.toLowerCase() !== adminEmail) {
+    throw new Error(
+      `Connect Gmail with ${adminEmail}. Google is currently signed in as ${connected}.`
+    );
+  }
+  if (connected) {
+    saveGmailSession({ email: connected, login_hint: adminEmail });
+  }
+  return true;
 }
 
 async function captureGmailProfileEmail() {
@@ -1006,10 +1090,23 @@ export async function sendEmailViaGmail({ to, cc, subject, htmlBody, imageData }
   try {
     console.log('📧 Starting email send process...');
     await initGmailAPI();
+
+    const adminEmail = String(localStorage.getItem('admin_email') || '').trim();
+    if (adminEmail) {
+      const matchesAdmin = await ensureGmailMatchesAdmin({ interactive: false });
+      if (!matchesAdmin) {
+        const reconnected = await ensureGmailMatchesAdmin({ interactive: true });
+        if (!reconnected) {
+          throw new Error(
+            `Gmail must be connected with ${adminEmail} before sending order emails.`
+          );
+        }
+      }
+    }
     
     // Helper function to attempt sending with current token
     const attemptSend = async () => {
-      // Get authenticated user's email (Gmail API will use this as sender)
+      // Sender must be the logged-in admin; Gmail API sends from the OAuth account.
       let senderEmail = localStorage.getItem('admin_email');
       if (!senderEmail) {
         // Try to get from token

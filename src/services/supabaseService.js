@@ -1866,12 +1866,19 @@ export async function patchOrderShippingInvoice(orderId, invoicePatch, identityF
     throw new Error('Order id or distributorCode + orderNumber is required to save invoice');
   }
 
+  const invoiceNo = String(
+    invoicePatch.invoiceNumber ?? invoicePatch.invoice_number ?? ''
+  ).trim();
   const basePayload = {
     shipping_invoice_data: data,
     shipping_invoice_file_name: invoicePatch.shipping_invoice_file_name ?? 'invoice',
     shipping_invoice_mime_type: invoicePatch.shipping_invoice_mime_type ?? 'application/octet-stream',
     updated_at: new Date().toISOString(),
   };
+  if (invoiceNo) {
+    basePayload.invoice_number = invoiceNo;
+    basePayload.invoiceNumber = invoiceNo;
+  }
 
   const tryMatch = async (matchFn) => updateOrdersRowMatching(matchFn, basePayload);
 
@@ -3283,7 +3290,10 @@ function normalizeSalesDataInsertPayload(salesData) {
   const row = {
     distributorCode: code,
     distributorName: salesData.distributorName ?? salesData.distributor_name ?? null,
-    invoiceNumber: orderNumber || salesData.invoiceNumber || null,
+    invoiceNumber:
+      salesData.invoiceNumber ??
+      salesData.invoice_number ??
+      (orderNumber || null),
     invoiceDate,
     products: Array.isArray(salesData.products) ? salesData.products : [],
     csdPC,

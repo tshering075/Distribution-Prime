@@ -11,3 +11,7 @@
 /terms-of-service.html
   Content-Type: text/html; charset=utf-8
   Cache-Control: public, max-age=3600
+
+/legal/*
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=3600

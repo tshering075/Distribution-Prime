@@ -70,8 +70,8 @@ Each organization should adopt this document (or adapt it to local policy) and d
 | Admin dashboard | `https://distribution-prime.pages.dev/admin` |
 | Shipping dashboard | `https://distribution-prime.pages.dev/shipping` |
 | Distributor dashboard | `https://distribution-prime.pages.dev/distributor` |
-| Privacy Policy | `https://distribution-prime.pages.dev/privacy-policy.html` |
-| Terms of Service | `https://distribution-prime.pages.dev/terms-of-service.html` |
+| Privacy Policy | `https://distribution-prime.pages.dev/legal/privacy-policy` |
+| Terms of Service | `https://distribution-prime.pages.dev/legal/terms-of-service` |
 
 ### 2.2 Sign-in credentials by role
 
