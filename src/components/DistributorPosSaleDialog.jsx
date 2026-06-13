@@ -132,14 +132,6 @@ function paymentLabel(value) {
   return PAYMENT_METHODS.find((m) => m.value === value)?.label || value;
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function InvoiceDetailRow({ label, value, sx }) {
   if (value == null || value === "") return null;
   return (
