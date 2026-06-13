@@ -200,9 +200,9 @@ function CategoryAchievementBalanceRow({ category, achievedPC, achievedUC, balan
 /**
  * Target Balance + Target Period + Today's orders — admin dashboard summary card.
  */
-function InfoCards({ balance, targetPeriod, allOrders = [], getOrderStatus }) {
+function InfoCards({ balance, targetPeriod, targetPeriodIsSet = false, allOrders = [], getOrderStatus }) {
   const theme = useTheme();
-  const remainingDays = targetPeriod?.end ? getDaysRemaining(targetPeriod.end) : 0;
+  const remainingDays = targetPeriodIsSet && targetPeriod?.end ? getDaysRemaining(targetPeriod.end) : null;
   const ucAchieved = balance?.targetUcAchieved === true;
 
   const infoTint = alpha(theme.palette.info.main, theme.palette.mode === "dark" ? 0.14 : 0.08);
@@ -271,7 +271,7 @@ function InfoCards({ balance, targetPeriod, allOrders = [], getOrderStatus }) {
     />
   );
 
-  const daysLeftAction = (
+  const daysLeftAction = targetPeriodIsSet ? (
     <Box sx={{ textAlign: "right", lineHeight: 1.15 }}>
       <Typography
         variant="overline"
@@ -299,6 +299,14 @@ function InfoCards({ balance, targetPeriod, allOrders = [], getOrderStatus }) {
         {remainingDays}
       </Typography>
     </Box>
+  ) : (
+    <Chip
+      size="small"
+      label="Target date not set yet"
+      color="warning"
+      variant="outlined"
+      sx={{ fontWeight: 700, fontSize: "0.62rem", height: 22, maxWidth: { xs: 140, sm: 180 } }}
+    />
   );
 
   return (
@@ -729,6 +737,7 @@ function InfoCards({ balance, targetPeriod, allOrders = [], getOrderStatus }) {
                 fillWidth
                 stretchVertically
                 minPanels={2}
+                mode={targetPeriodIsSet ? "period" : "today"}
                 startYmd={targetPeriod?.start}
                 endYmd={targetPeriod?.end}
               />
@@ -743,23 +752,31 @@ function InfoCards({ balance, targetPeriod, allOrders = [], getOrderStatus }) {
                 flexShrink: 0,
               }}
             >
-              <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 500, fontSize: "0.68rem", lineHeight: 1.35 }}>
-                {formatTargetPeriodDisplay(targetPeriod?.start, targetPeriod?.end)}
-              </Typography>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, ml: { sm: "auto" } }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.4 }}>
-                  <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "success.main", flexShrink: 0 }} />
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem" }}>
-                    Start
+              {targetPeriodIsSet ? (
+                <>
+                  <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 500, fontSize: "0.68rem", lineHeight: 1.35 }}>
+                    {formatTargetPeriodDisplay(targetPeriod?.start, targetPeriod?.end)}
                   </Typography>
-                </Box>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.4 }}>
-                  <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "warning.main", flexShrink: 0 }} />
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem" }}>
-                    End
-                  </Typography>
-                </Box>
-              </Box>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, ml: { sm: "auto" } }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.4 }}>
+                      <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "success.main", flexShrink: 0 }} />
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem" }}>
+                        Start
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.4 }}>
+                      <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "warning.main", flexShrink: 0 }} />
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem" }}>
+                        End
+                      </Typography>
+                    </Box>
+                  </Box>
+                </>
+              ) : (
+                <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, fontSize: "0.68rem", lineHeight: 1.35 }}>
+                  Set target start and end dates in Targets to begin tracking this period.
+                </Typography>
+              )}
             </Box>
           </Box>
         </Box>

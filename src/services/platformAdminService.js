@@ -122,7 +122,7 @@ export async function listTenantStaff(organizationId) {
 
 /**
  * @param {string} organizationId
- * @param {{ status?: string, plan?: string, name?: string }} patch
+ * @param {{ status?: string, name?: string }} patch
  */
 /**
  * Permanently delete a workspace and all tenant-scoped data in Supabase.
@@ -154,7 +154,7 @@ export async function updatePlatformOrganization(organizationId, patch) {
   const { data, error } = await supabase.rpc('platform_update_organization', {
     p_org_id: organizationId,
     p_status: patch.status ?? null,
-    p_plan: patch.plan ?? null,
+    p_plan: null,
     p_name: patch.name ?? null,
   });
 
@@ -180,7 +180,6 @@ export function exportTenantsCsv(orgs) {
   const headers = [
     'name',
     'slug',
-    'plan',
     'status',
     'distributors',
     'admins',
@@ -201,7 +200,6 @@ export function exportTenantsCsv(orgs) {
       [
         o.name,
         o.slug,
-        o.plan,
         o.status,
         o.distributor_count,
         o.admin_count,
@@ -229,17 +227,147 @@ export function downloadCsv(filename, content) {
   URL.revokeObjectURL(url);
 }
 
-export const PLATFORM_PLANS = ['trial', 'pro', 'enterprise'];
 export const PLATFORM_STATUSES = ['active', 'trial', 'suspended'];
 
-export const PLAN_LABELS = {
-  trial: 'Trial',
-  pro: 'Pro',
-  enterprise: 'Enterprise',
-};
+export const PLATFORM_ADMIN_ROLES = ['owner', 'operator', 'support'];
 
 export const STATUS_LABELS = {
   active: 'Active',
   trial: 'Trial',
   suspended: 'Suspended',
 };
+
+export const PLATFORM_ROLE_LABELS = {
+  owner: 'Owner',
+  operator: 'Operator',
+  support: 'Support',
+};
+
+function isAuthEmailAlreadyRegistered(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  return (
+    msg.includes('already registered') ||
+    msg.includes('already exists') ||
+    msg.includes('user already registered')
+  );
+}
+
+export async function listPlatformAdmins() {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  const { data, error } = await supabase.rpc('platform_list_admins');
+  if (error) {
+    if (missingRpc(error)) {
+      throw new Error(
+        'Platform user management is not set up. Run supabase/add_platform_admin_users.sql in Supabase SQL Editor.'
+      );
+    }
+    throw error;
+  }
+  return data || [];
+}
+
+async function registerPlatformAdminRow(userId, email, role) {
+  const { data, error } = await supabase.rpc('platform_register_admin', {
+    p_user_id: userId,
+    p_email: email,
+    p_role: role,
+  });
+
+  if (error) {
+    if (missingRpc(error)) {
+      throw new Error(
+        'Platform user management is not set up. Run supabase/add_platform_admin_users.sql in Supabase SQL Editor.'
+      );
+    }
+    throw error;
+  }
+
+  const row = firstRow(Array.isArray(data) ? data : data ? [data] : []);
+  if (!row) throw new Error('Failed to save platform operator');
+  return row;
+}
+
+/**
+ * Create a platform console operator (Supabase Auth + platform_admins row).
+ * @param {{ email: string, password: string, role?: string }} params
+ */
+export async function createPlatformAdminAccount({ email, password, role = 'operator' }) {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedRole = String(role || 'operator').trim().toLowerCase();
+
+  if (!normalizedEmail || !password) {
+    throw new Error('Email and password are required');
+  }
+  if (!PLATFORM_ADMIN_ROLES.includes(normalizedRole)) {
+    throw new Error('Invalid role');
+  }
+
+  const existing = await listPlatformAdmins();
+  if (existing.some((row) => String(row.email || '').toLowerCase() === normalizedEmail)) {
+    throw new Error('This email is already a platform operator');
+  }
+
+  const { data: authData, error: authError } = await supabase.auth.signUp({
+    email: normalizedEmail,
+    password: String(password),
+    options: {
+      data: {
+        platform_role: normalizedRole,
+      },
+    },
+  });
+
+  if (authError) {
+    if (isAuthEmailAlreadyRegistered(authError)) {
+      const { data, error } = await supabase.rpc('platform_link_auth_user_as_platform_admin', {
+        p_email: normalizedEmail,
+        p_role: normalizedRole,
+      });
+      if (error) {
+        if (missingRpc(error)) {
+          throw new Error(
+            'Platform user management is not set up. Run supabase/add_platform_admin_users.sql in Supabase SQL Editor.'
+          );
+        }
+        throw error;
+      }
+      const row = firstRow(Array.isArray(data) ? data : data ? [data] : []);
+      if (!row) throw new Error('Failed to link existing Auth user as platform operator');
+      return row;
+    }
+    throw authError;
+  }
+
+  if (!authData?.user?.id) {
+    throw new Error('Failed to create Supabase Auth user');
+  }
+
+  return registerPlatformAdminRow(authData.user.id, normalizedEmail, normalizedRole);
+}
+
+/**
+ * Remove platform operator access (Auth user is kept).
+ * @param {string} userId
+ */
+export async function removePlatformAdmin(userId) {
+  if (!supabase) throw new Error('Supabase not initialized');
+  if (!userId) throw new Error('User id is required');
+
+  const { data, error } = await supabase.rpc('platform_remove_admin', {
+    p_user_id: userId,
+  });
+
+  if (error) {
+    if (missingRpc(error)) {
+      throw new Error(
+        'Platform user management is not set up. Run supabase/add_platform_admin_users.sql in Supabase SQL Editor.'
+      );
+    }
+    throw error;
+  }
+
+  return !!data;
+}

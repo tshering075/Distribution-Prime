@@ -50,12 +50,7 @@ import {
   getPurchasedCasesFromRow,
 } from "../utils/orderLineCalculation";
 import { getAllCalculatorSkuNames } from "../utils/calculatorSkuNames";
-import {
-  getMfgDateOptionsForSku,
-  getBatchOptionsForSkuMfg,
-  pickFifoMfgAndBatch,
-  resolveBatchForMfg,
-} from "../utils/shippingFifoLots";
+import { mfgDateToInputValue, pickFifoMfgAndBatch } from "../utils/shippingFifoLots";
 import { getFgOpeningStock, subscribeFgOpeningStock } from "../services/supabaseService";
 import ShippingTransportFields from "./ShippingTransportFields";
 import {
@@ -83,9 +78,9 @@ function getDialogTableDensity(condensed, isMobile) {
       shortHeaders: true,
       roundAmounts: false,
       skuMinW: 108,
-      mfgMinW: 86,
-      batchMinW: 72,
-      qtyW: 58,
+      mfgMinW: 132,
+      batchMinW: 88,
+      qtyW: 88,
       shellPx: 1,
       shellPy: 0.75,
     };
@@ -105,7 +100,7 @@ function getDialogTableDensity(condensed, isMobile) {
     shortHeaders: isMobile,
     roundAmounts: isMobile,
     skuMinW: 140,
-    mfgMinW: 120,
+    mfgMinW: 132,
     batchMinW: 108,
     qtyW: isMobile ? 72 : 96,
     shellPx: 2,
@@ -113,16 +108,7 @@ function getDialogTableDensity(condensed, isMobile) {
   };
 }
 
-function MfgBatchEditCells({ sku, mfgDate, batchNo, fgRows, density, onMfgChange, onBatchChange }) {
-  const mfgOptions = useMemo(
-    () => (sku ? getMfgDateOptionsForSku(fgRows, sku) : []),
-    [fgRows, sku]
-  );
-  const batchOptions = useMemo(
-    () => (sku && mfgDate ? getBatchOptionsForSkuMfg(fgRows, sku, mfgDate) : []),
-    [fgRows, sku, mfgDate]
-  );
-
+function MfgBatchEditCells({ sku, mfgDate, batchNo, density, onMfgChange, onBatchChange }) {
   if (!sku) {
     return (
       <>
@@ -136,50 +122,34 @@ function MfgBatchEditCells({ sku, mfgDate, batchNo, fgRows, density, onMfgChange
     );
   }
 
+  const inputMfgDate = mfgDateToInputValue(mfgDate);
+
   return (
     <>
       <TableCell sx={{ minWidth: density.mfgMinW, px: density.px, py: density.py }}>
-        <FormControl size="small" fullWidth>
-          <Select
-            value={mfgDate || ""}
-            displayEmpty
-            onChange={(e) => onMfgChange(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            sx={{ fontSize: density.input, "& .MuiSelect-select": { py: 0.5 } }}
-            MenuProps={{ PaperProps: { sx: { maxHeight: 280 } } }}
-          >
-            <MenuItem value="">
-              <em>MFG date</em>
-            </MenuItem>
-            {mfgOptions.map((d) => (
-              <MenuItem key={d} value={d} sx={{ fontSize: density.input }}>
-                {d}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <TextField
+          size="small"
+          type="date"
+          fullWidth
+          value={inputMfgDate}
+          onChange={(e) => onMfgChange(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          InputLabelProps={{ shrink: true }}
+          inputProps={{ "aria-label": "Manufacturing date" }}
+          sx={{ fontSize: density.input, "& input": { py: 0.5, fontSize: density.input } }}
+        />
       </TableCell>
       <TableCell sx={{ minWidth: density.batchMinW, px: density.px, py: density.py }}>
-        <FormControl size="small" fullWidth>
-          <Select
-            value={batchNo || ""}
-            displayEmpty
-            disabled={!mfgDate}
-            onChange={(e) => onBatchChange(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            sx={{ fontSize: density.input, "& .MuiSelect-select": { py: 0.5 } }}
-            MenuProps={{ PaperProps: { sx: { maxHeight: 280 } } }}
-          >
-            <MenuItem value="">
-              <em>Batch</em>
-            </MenuItem>
-            {batchOptions.map((b) => (
-              <MenuItem key={b} value={b} sx={{ fontSize: density.input }}>
-                {b}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <TextField
+          size="small"
+          fullWidth
+          value={batchNo || ""}
+          onChange={(e) => onBatchChange(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          inputProps={{ "aria-label": "Batch number" }}
+          placeholder="Batch no."
+          sx={{ fontSize: density.input, "& input": { py: 0.5, fontSize: density.input } }}
+        />
       </TableCell>
     </>
   );
@@ -205,10 +175,23 @@ function QtyCell({ row, density, editable, purchasedCases, onPurchasedCasesChang
       <TextField
         size="small"
         type="number"
-        inputProps={{ min: 0, step: 1 }}
+        fullWidth
+        inputProps={{ min: 0, step: 1, style: { textAlign: "right" } }}
         value={purchasedCases === "" || purchasedCases == null ? "" : purchasedCases}
         onChange={(e) => onPurchasedCasesChange(e.target.value)}
-        sx={{ width: density.qtyW, "& input": { fontSize: density.input, py: 0.5 } }}
+        sx={{
+          minWidth: density.qtyW,
+          "& input": {
+            fontSize: density.input,
+            py: 0.5,
+            fontVariantNumeric: "tabular-nums",
+          },
+          "& input[type=number]": { MozAppearance: "textfield" },
+          "& input[type=number]::-webkit-outer-spin-button, & input[type=number]::-webkit-inner-spin-button": {
+            WebkitAppearance: "none",
+            margin: 0,
+          },
+        }}
         onClick={(e) => e.stopPropagation()}
       />
     );
@@ -216,8 +199,16 @@ function QtyCell({ row, density, editable, purchasedCases, onPurchasedCasesChang
 
   if (freeCases > 0) {
     return (
-      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0.25 }}>
-        <Typography component="span" sx={{ fontWeight: "bold", fontSize: density.body, color: "text.primary" }}>
+      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0.25, whiteSpace: "nowrap" }}>
+        <Typography
+          component="span"
+          sx={{
+            fontWeight: "bold",
+            fontSize: density.body,
+            color: "text.primary",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
           {orderedCases.toLocaleString()}
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.25 }}>
@@ -241,7 +232,15 @@ function QtyCell({ row, density, editable, purchasedCases, onPurchasedCasesChang
   }
 
   return (
-    <Typography sx={{ fontWeight: "bold", fontSize: density.body, color: "text.primary" }}>
+    <Typography
+      sx={{
+        fontWeight: "bold",
+        fontSize: density.body,
+        color: "text.primary",
+        whiteSpace: "nowrap",
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
       {cases.toLocaleString()}
     </Typography>
   );
@@ -365,9 +364,10 @@ export default function OrderCalculatedTableDialog({
         ? initial.map((r) => {
             if (!r.sku || (r.mfgDate && r.batchNo)) return r;
             const fifo = pickFifoMfgAndBatch(fgOpeningRows, r.sku);
+            const normalizedMfg = mfgDateToInputValue(fifo.mfgDate) || fifo.mfgDate;
             return {
               ...r,
-              mfgDate: r.mfgDate || fifo.mfgDate,
+              mfgDate: r.mfgDate ? mfgDateToInputValue(r.mfgDate) || r.mfgDate : normalizedMfg,
               batchNo: r.batchNo || fifo.batchNo,
             };
           })
@@ -410,7 +410,13 @@ export default function OrderCalculatedTableDialog({
           schemes,
           preferSchemeName: er.preferSchemeName,
         }) || {};
-      return { ...calc, _key: er._key, isDraft: false };
+      return {
+        ...calc,
+        _key: er._key,
+        isDraft: false,
+        mfgDate: er.mfgDate ?? "",
+        batchNo: er.batchNo ?? "",
+      };
     });
   }, [editable, editRows, productRates, schemes]);
 
@@ -490,10 +496,11 @@ export default function OrderCalculatedTableDialog({
   const handleSkuChange = useCallback(
     (key, sku) => {
       const fifo = sku ? pickFifoMfgAndBatch(fgOpeningRows, sku) : { mfgDate: "", batchNo: "" };
+      const normalizedMfg = mfgDateToInputValue(fifo.mfgDate) || fifo.mfgDate;
       updateEditRow(key, {
         sku,
         preferSchemeName: null,
-        mfgDate: fifo.mfgDate,
+        mfgDate: normalizedMfg,
         batchNo: fifo.batchNo,
       });
     },
@@ -501,11 +508,10 @@ export default function OrderCalculatedTableDialog({
   );
 
   const handleMfgChange = useCallback(
-    (key, sku, mfgDate, currentBatch) => {
-      const batchNo = resolveBatchForMfg(fgOpeningRows, sku, mfgDate, currentBatch);
-      updateEditRow(key, { mfgDate, batchNo });
+    (key, mfgDate) => {
+      updateEditRow(key, { mfgDate: mfgDate ? String(mfgDate).slice(0, 10) : "" });
     },
-    [fgOpeningRows, updateEditRow]
+    [updateEditRow]
   );
 
   const handleAddRow = () => {
@@ -665,7 +671,9 @@ export default function OrderCalculatedTableDialog({
                           density.shortHeaders ? "Tons" : "Total Tons",
                           density.shortHeaders ? "UC" : "Total UC",
                         ]
-                    ).map((label, i) => (
+                    ).map((label, i) => {
+                      const qtyColIdx = editable ? 4 : 3;
+                      return (
                         <TableCell
                           key={`${label}-${i}`}
                           sx={{
@@ -675,14 +683,15 @@ export default function OrderCalculatedTableDialog({
                             px: density.px,
                             py: density.py,
                             whiteSpace: "nowrap",
-                            width: editable && i === 0 ? 36 : undefined,
+                            width: editable && i === 0 ? 36 : i === qtyColIdx ? density.qtyW : undefined,
+                            minWidth: i === qtyColIdx ? density.qtyW : undefined,
                             lineHeight: 1.25,
                           }}
                         >
                           {label}
                         </TableCell>
-                      )
-                    )}
+                      );
+                    })}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -759,11 +768,8 @@ export default function OrderCalculatedTableDialog({
                             sku={editSource.sku}
                             mfgDate={editSource.mfgDate}
                             batchNo={editSource.batchNo}
-                            fgRows={fgOpeningRows}
                             density={density}
-                            onMfgChange={(val) =>
-                              handleMfgChange(editSource._key, editSource.sku, val, editSource.batchNo)
-                            }
+                            onMfgChange={(val) => handleMfgChange(editSource._key, val)}
                             onBatchChange={(val) => updateEditRow(editSource._key, { batchNo: val })}
                           />
                         ) : (
@@ -782,7 +788,17 @@ export default function OrderCalculatedTableDialog({
                         )}
                         <TableCell
                           align="right"
-                          sx={{ fontWeight: "bold", fontSize: density.body, color: "text.primary", px: density.px, py: density.py }}
+                          sx={{
+                            fontWeight: "bold",
+                            fontSize: density.body,
+                            color: "text.primary",
+                            px: density.px,
+                            py: density.py,
+                            minWidth: density.qtyW,
+                            width: density.qtyW,
+                            whiteSpace: "nowrap",
+                            overflow: "visible",
+                          }}
                         >
                           <QtyCell
                             row={row}

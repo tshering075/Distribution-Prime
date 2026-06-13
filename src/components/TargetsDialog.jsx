@@ -30,7 +30,7 @@ import DownloadIcon from "@mui/icons-material/Download";
 import TrackChangesIcon from "@mui/icons-material/TrackChanges";
 import EventIcon from "@mui/icons-material/Event";
 import DeleteIcon from "@mui/icons-material/Delete";
-import { getTargetPeriod, saveTargetPeriod } from "../utils/targetPeriod";
+import { getTargetPeriod, saveTargetPeriod, markTargetPeriodSet } from "../utils/targetPeriod";
 import { supabase, saveGlobalTargetPeriod } from "../services/supabaseService";
 import {
   DialogTitle,
@@ -78,15 +78,18 @@ function formatAchievedMetric(value) {
  * - onUpdatePeriod(startIso, endIso)
  */
 export default function TargetsDialog({
-  open, onClose, distributors = [], initialStart, initialEnd,
+  open, onClose, distributors = [], initialStart, initialEnd, targetPeriodIsSet = false,
   onApplyTargets, onUpdateAchieved, onUpdatePeriod, onDeleteTargets, canWrite = true
 }) {
   const theme = useTheme();
   const [tabRegion, setTabRegion] = useState("All");
-  // Use initial values or get from storage
   const defaultPeriod = getTargetPeriod();
-  const [start, setStart] = useState(initialStart || defaultPeriod.start || "");
-  const [end, setEnd] = useState(initialEnd || defaultPeriod.end || "");
+  const [start, setStart] = useState(
+    targetPeriodIsSet ? (initialStart || defaultPeriod.start || "") : (initialStart || "")
+  );
+  const [end, setEnd] = useState(
+    targetPeriodIsSet ? (initialEnd || defaultPeriod.end || "") : (initialEnd || "")
+  );
   const [editing, setEditing] = useState(() => {
     const map = {};
     distributors.forEach(d => {
@@ -249,6 +252,7 @@ export default function TargetsDialog({
     
     // Save target period to storage
     if (start && end) {
+      markTargetPeriodSet(true);
       saveTargetPeriod(start, end);
       if (supabase) {
         saveGlobalTargetPeriod(start, end).catch((err) => {
@@ -777,7 +781,7 @@ export default function TargetsDialog({
                 <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                   <EventIcon sx={{ fontSize: 16, color: "warning.main" }} />
                   <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                    Period {start && end ? `· ${start} → ${end}` : ""}
+                    Period {start && end ? `· ${start} → ${end}` : "· Target date not set yet"}
                   </Typography>
                 </Stack>
               </AccordionSummary>

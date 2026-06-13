@@ -89,7 +89,7 @@ import DistributorPerformanceSkuDialog from "../components/DistributorPerformanc
 import PerformanceToolbar from "./AdminDashboard/components/PerformanceToolbar";
 import OrdersSection from "./AdminDashboard/components/OrdersSection";
 import AdminSummaryStrip from "./AdminDashboard/components/AdminSummaryStrip";
-import { getTargetPeriod, saveTargetPeriod } from "../utils/targetPeriod";
+import { getTargetPeriod, saveTargetPeriod, isTargetPeriodSet, markTargetPeriodSet } from "../utils/targetPeriod";
 import { buildDistributorPerformanceSkuDetailRows } from "../utils/performanceSkuAggregation";
 import { backfillDispatchedOrdersToSalesData } from "../services/deliveredOrderAchievement";
 import {
@@ -253,6 +253,7 @@ function AdminDashboard({ onLogout }) {
 
   // Target period: local default first; Supabase global overwrites on load when configured
   const [targetPeriod, setTargetPeriod] = useState(() => getTargetPeriod());
+  const [targetPeriodIsSet, setTargetPeriodIsSet] = useState(() => isTargetPeriodSet());
 
   const augment = (arr) => {
     if (!Array.isArray(arr)) {
@@ -298,9 +299,16 @@ function AdminDashboard({ onLogout }) {
     (async () => {
       try {
         const remote = await getGlobalTargetPeriod();
-        if (cancelled || !remote?.start || !remote?.end) return;
-        saveTargetPeriod(remote.start, remote.end);
-        setTargetPeriod({ start: remote.start, end: remote.end });
+        if (cancelled) return;
+        if (remote?.start && remote?.end) {
+          markTargetPeriodSet(true);
+          saveTargetPeriod(remote.start, remote.end);
+          setTargetPeriod({ start: remote.start, end: remote.end });
+          setTargetPeriodIsSet(true);
+        } else {
+          markTargetPeriodSet(false);
+          setTargetPeriodIsSet(false);
+        }
       } catch (e) {
         console.warn("Could not load global target period from Supabase:", e);
       }
@@ -3435,8 +3443,10 @@ function AdminDashboard({ onLogout }) {
   // Handler for updating target period (keeps dashboard + dialog props in sync)
   const handleUpdatePeriod = (startIso, endIso) => {
     if (startIso && endIso) {
+      markTargetPeriodSet(true);
       saveTargetPeriod(startIso, endIso);
       setTargetPeriod({ start: startIso, end: endIso });
+      setTargetPeriodIsSet(true);
     }
   };
 
@@ -3871,6 +3881,7 @@ function AdminDashboard({ onLogout }) {
             <InfoCards
               balance={calculateBalanceFromDistributors}
               targetPeriod={targetPeriod}
+              targetPeriodIsSet={targetPeriodIsSet}
               allOrders={allOrders}
               getOrderStatus={getOrderStatus}
             />
@@ -4017,8 +4028,9 @@ function AdminDashboard({ onLogout }) {
             setAdminCurrentView("dashboard");
           }}
           distributors={distributors}
-          initialStart={targetPeriod.start}
-          initialEnd={targetPeriod.end}
+          initialStart={targetPeriodIsSet ? targetPeriod.start : ""}
+          initialEnd={targetPeriodIsSet ? targetPeriod.end : ""}
+          targetPeriodIsSet={targetPeriodIsSet}
           onApplyTargets={handleApplyTargets}
           onDeleteTargets={handleDeleteTargets}
           canWrite={true}
@@ -4046,6 +4058,7 @@ function AdminDashboard({ onLogout }) {
           }}
           distributors={distributors}
           salesData={allSalesData}
+          orders={allOrders}
           productRates={productRates}
         />
 

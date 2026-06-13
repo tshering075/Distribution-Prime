@@ -1,29 +1,47 @@
 -- ============================================================
--- Production SQL run order (Option B — multi-tenant go-live)
+-- Distribution Prime / Bevflow — Production SQL run order
 -- Run each file in Supabase SQL Editor in this order.
--- Verify with audit_tenant_schema.sql after step 8.
+-- Verify with audit_tenant_schema.sql after step 20.
 -- ============================================================
--- 1. platform_admin.sql
--- 2. TENANT_RLS_STRICT.sql
--- 3. workspace_signup_rpc.sql
--- 4. distributor_orders_rpc.sql          (sessions + authenticate_distributor)
--- 5. add_shipping_order_columns.sql      (if dispatch columns missing)
--- 6. add_distributor_credentials.sql       (login passwords — required for distributor sign-in)
--- 6b. add_get_organization_by_id_rpc.sql   (anon distributor login — org context by id)
--- 7. add_distributor_gstin_tpn.sql         (optional)
--- 8. platform_admin_v2.sql
--- 9. fix_rls_linter_cleanup.sql
--- 10. fix_rls_consolidate_policies.sql
--- 11. fix_linter_security.sql
--- 12. fix_rls_function_grants.sql        (if Rate Master cloud save fails with RLS)
--- 13. fix_app_config_tenant_pkey.sql     (if duplicate key app_config_pkey on Rate Master)
--- 14. audit_tenant_schema.sql            (diagnostic — fix any MISSING rows)
+--
+-- PREREQUISITE: Base schema must already exist (organizations,
+-- distributors, orders, admins, sales_data, targets, schemes,
+-- app_config). If starting a new Supabase project, apply your
+-- base tenant migration first (not included in this repo).
+--
+-- 1.  platform_admin.sql
+-- 2.  TENANT_RLS_STRICT.sql
+-- 3.  workspace_signup_rpc.sql
+-- 4.  distributor_orders_rpc.sql          (sessions + authenticate_distributor)
+-- 5.  add_shipping_order_columns.sql     (dispatch / invoice columns on orders)
+-- 6.  add_distributor_credentials.sql    (distributor login passwords)
+-- 6b. add_get_organization_by_id_rpc.sql  (anon distributor login org context)
+-- 7.  add_distributor_gstin_tpn.sql      (optional GST/TPN on distributors)
+-- 8.  add_physical_stock_column.sql      (distributors.physical_stock JSONB)
+-- 9.  ADD_DISTRIBUTOR_PHYSICAL_STOCK_SNAPSHOTS.sql  (history + distributor RPC)
+-- 10. add_distributor_pos_settings.sql   (distributors.pos_settings JSONB)
+-- 11. add_distributor_pos_sales.sql      (POS sales table + session RPCs)
+-- 12. add_order_invoice_number.sql       (dispatch invoice number on orders)
+-- 13. platform_admin_v2.sql
+-- 13b. add_platform_admin_users.sql      (list / add / remove platform operators)
+-- 14. fix_rls_linter_cleanup.sql
+-- 15. fix_rls_consolidate_policies.sql
+-- 16. fix_linter_security.sql
+-- 17. fix_rls_function_grants.sql       (if Rate Master cloud save fails RLS)
+-- 18. fix_app_config_tenant_pkey.sql    (if duplicate key app_config_pkey)
+-- 19. fix_distributor_login_match.sql   (if distributor login case mismatch)
+-- 20. audit_tenant_schema.sql           (diagnostic — fix any MISSING rows)
+--
 -- Re-run distributor_orders_rpc.sql after updates (save_workspace_product_rates RPC).
 --
--- Then seed platform admin:
+-- Seed platform admin (replace UUID):
 --   INSERT INTO platform_admins (user_id) VALUES ('your-auth-user-uuid');
 --
--- App env (.env):
+-- App env (.env or wrangler.toml [vars]):
 --   REACT_APP_SUPABASE_URL=
 --   REACT_APP_SUPABASE_ANON_KEY=
 --   REACT_APP_REQUIRE_SUPABASE_AUTH=true   (optional in dev)
+--
+-- Deploy: npm run build && npm run deploy:cf
+--
+-- Org go-live checklist: docs/ORG_GO_LIVE_CHECKLIST.md

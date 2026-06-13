@@ -171,6 +171,19 @@ export function aggregateOrderLineTotals(lines) {
   return totals;
 }
 
+/** Read MFG / batch from an edit row or saved line (camel or snake case). */
+export function normalizeLineMfgBatch(row) {
+  const mfgDate = String(row?.mfgDate ?? row?.mfg_date ?? "").trim();
+  const batchNo = String(row?.batchNo ?? row?.batch_no ?? "").trim();
+  return { mfgDate, batchNo };
+}
+
+/** Attach MFG date and batch number to a calculated order line. */
+export function enrichLineWithMfgBatch(line, sourceRow) {
+  const { mfgDate, batchNo } = normalizeLineMfgBatch(sourceRow);
+  return { ...line, mfgDate, batchNo };
+}
+
 export function buildOrderDataFromEditRows(rows, productRates, schemes = []) {
   const data = [];
   for (const row of rows || []) {
@@ -185,7 +198,7 @@ export function buildOrderDataFromEditRows(rows, productRates, schemes = []) {
       schemes,
       preferSchemeName: row.preferSchemeName || row.schemeApplied || null,
     });
-    if (line) data.push(line);
+    if (line) data.push(enrichLineWithMfgBatch(line, row));
   }
   return data;
 }

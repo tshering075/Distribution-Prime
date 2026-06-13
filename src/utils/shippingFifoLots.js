@@ -1,5 +1,30 @@
 import { fgRowQuantity, fgRowsMatchingSku } from "./fgStockSkuMatch";
 
+/** Normalize MFG date to YYYY-MM-DD for HTML date inputs. */
+export function mfgDateToInputValue(mfgDate) {
+  const s = String(mfgDate || "").trim();
+  if (!s) return "";
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (dmy) {
+    let y = Number(dmy[3]);
+    if (y < 100) y += 2000;
+    const day = String(dmy[1]).padStart(2, "0");
+    const month = String(dmy[2]).padStart(2, "0");
+    return `${y}-${month}-${day}`;
+  }
+  const parsed = Date.parse(s);
+  if (Number.isFinite(parsed)) {
+    const d = new Date(parsed);
+    const y = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${month}-${day}`;
+  }
+  return "";
+}
+
 /** Parse MFG date string to sortable timestamp (FIFO: oldest first). */
 export function mfgDateSortKey(mfgDate) {
   const s = String(mfgDate || "").trim();

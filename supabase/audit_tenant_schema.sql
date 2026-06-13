@@ -29,6 +29,7 @@ FROM (
     ('schemes'),
     ('app_config'),
     ('distributor_physical_stock_snapshots'),
+    ('distributor_pos_sales'),
     ('platform_admins'),
     ('distributor_sessions')
 ) AS t(expected_table)
@@ -68,7 +69,7 @@ SELECT
 FROM information_schema.columns
 WHERE table_schema = 'public'
   AND table_name = 'distributors'
-  AND column_name IN ('credentials', 'phone', 'gstin', 'tpn')
+  AND column_name IN ('credentials', 'phone', 'gstin', 'tpn', 'physical_stock', 'pos_settings')
 ORDER BY column_name;
 
 -- 5) RLS enabled?
@@ -109,7 +110,15 @@ FROM (
     ('save_workspace_product_rates'),
     ('get_invite_by_token'),
     ('platform_list_organizations'),
-    ('platform_delete_organization')
+    ('platform_delete_organization'),
+    ('platform_list_admins'),
+    ('platform_register_admin'),
+    ('platform_link_auth_user_as_platform_admin'),
+    ('platform_remove_admin'),
+    ('update_distributor_physical_stock'),
+    ('upsert_distributor_physical_stock_snapshot'),
+    ('insert_distributor_pos_sale'),
+    ('update_distributor_pos_settings')
 ) AS f(expected_fn)
 LEFT JOIN pg_proc p ON p.proname = f.expected_fn
 LEFT JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'

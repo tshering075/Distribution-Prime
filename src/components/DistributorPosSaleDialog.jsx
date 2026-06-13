@@ -9,7 +9,6 @@ import {
   Paper,
   Stack,
   Chip,
-  Divider,
   Tabs,
   Tab,
   InputAdornment,
@@ -101,6 +100,7 @@ import {
   resolvePosSettings,
 } from "../utils/posSettingsStorage";
 import DistributorPosSettingsDialog from "./DistributorPosSettingsDialog";
+import { POS_PRINT_TYPES, printPosSaleDocument } from "../utils/posSalePrint";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -263,17 +263,25 @@ function resolveDistributorProfile(distributor, distributorName) {
     businessName: String(distributor?.name || distributorName || "").trim(),
     address: String(distributor?.address || "").trim(),
     gstin: String(distributor?.gstin ?? distributor?.gstinNo ?? distributor?.gstin_no ?? "").trim(),
+    tpn: String(distributor?.tpn ?? distributor?.tpnNo ?? distributor?.tpn_no ?? "").trim(),
     phone: String(distributor?.phone || "").trim(),
   };
 }
 
-function InvoiceHeaderBlock({ profile, invoiceNumber, saleNumber, createdAt, sx }) {
+function InvoiceHeaderBlock({ profile, invoiceNumber, saleNumber, createdAt, documentType = "receipt", sx }) {
   const name = profile?.businessName || profile?.distributorName || "Distributor";
   const address = profile?.address || profile?.distributorAddress || "";
   const gstin = profile?.gstin || profile?.distributorGstin || "";
+  const isInvoice = documentType === "invoice";
 
   return (
     <Box sx={{ textAlign: "center", mb: 2, ...sx }}>
+      <Typography
+        variant="overline"
+        sx={{ fontWeight: 900, letterSpacing: 1.6, color: "text.secondary", display: "block", mb: 0.75 }}
+      >
+        {isInvoice ? "Tax Invoice" : "Receipt"}
+      </Typography>
       <Typography variant="subtitle1" sx={{ fontWeight: 900, lineHeight: 1.3 }}>
         {name}
       </Typography>
@@ -287,7 +295,7 @@ function InvoiceHeaderBlock({ profile, invoiceNumber, saleNumber, createdAt, sx 
           GSTIN: {gstin}
         </Typography>
       ) : null}
-      {invoiceNumber ? (
+      {isInvoice && invoiceNumber ? (
         <Typography variant="body2" sx={{ fontWeight: 900, display: "block", mt: 1.25, letterSpacing: 0.3 }}>
           Invoice No.: {invoiceNumber}
         </Typography>
@@ -1025,94 +1033,23 @@ function CartPanel({
 }
 
 function ReceiptDialog({ open, sale, distributorProfile, onClose, onNewSale }) {
+  const [printType, setPrintType] = useState(POS_PRINT_TYPES.receipt);
+
+  useEffect(() => {
+    if (open) setPrintType(POS_PRINT_TYPES.receipt);
+  }, [open, sale?.id]);
+
   if (!sale) return null;
 
   const profile = {
     businessName: sale.distributorName || distributorProfile?.businessName,
     address: sale.distributorAddress || distributorProfile?.address,
     gstin: sale.distributorGstin || distributorProfile?.gstin,
+    tpn: distributorProfile?.tpn,
   };
 
   const handlePrint = () => {
-    const lines = (sale.lines || [])
-      .map(
-        (l) =>
-          `<tr>
-            <td class="product">${escapeHtml(l.name)}</td>
-            <td class="qty">${l.qty}</td>
-            <td class="num">${formatNu(l.rate)}</td>
-            <td class="num">${formatNu(l.amount)}</td>
-          </tr>`
-      )
-      .join("");
-
-    const invNo = escapeHtml(sale.invoiceNumber || sale.saleNumber);
-    const gstRatePct = Math.round((Number(sale.gstRate) || 0.05) * 100);
-    const html = `<!DOCTYPE html><html><head><title>${invNo}</title>
-      <style>
-        * { box-sizing: border-box; }
-        body { font-family: Arial, Helvetica, sans-serif; padding: 24px; max-width: 420px; margin: 0 auto; color: #111; font-size: 12px; }
-        .head { text-align: center; margin-bottom: 16px; }
-        .head h1 { font-size: 18px; margin: 0 0 6px; font-weight: 800; }
-        .head p { margin: 2px 0; color: #555; font-size: 12px; line-height: 1.45; }
-        .head .inv { font-size: 15px; font-weight: 800; color: #111; margin-top: 10px; }
-        table.items { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; table-layout: fixed; }
-        table.items th, table.items td { padding: 6px 4px; border-bottom: 1px solid #ddd; vertical-align: top; }
-        table.items th { font-size: 11px; color: #666; font-weight: 700; }
-        table.items .product { width: 46%; text-align: left; word-break: break-word; }
-        table.items .qty { width: 12%; text-align: center; }
-        table.items .num { width: 21%; text-align: right; white-space: nowrap; }
-        .totals { width: 100%; margin: 12px 0 0; border-collapse: collapse; }
-        .totals td { padding: 4px 0; border: none; }
-        .totals .label { text-align: left; font-weight: 700; color: #444; width: 55%; }
-        .totals .value { text-align: right; font-weight: 700; white-space: nowrap; width: 45%; }
-        .totals tr.net td { border-top: 2px solid #333; padding-top: 8px; font-size: 14px; font-weight: 800; }
-        .meta { margin-top: 14px; padding-top: 12px; border-top: 1px solid #ddd; }
-        .meta .row { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-        .meta .label { min-width: 108px; font-weight: 700; color: #555; flex-shrink: 0; }
-        .meta .value { flex: 1; text-align: right; word-break: break-word; }
-      </style></head><body>
-      <div class="head">
-        <h1>${escapeHtml(profile.businessName || "POS Receipt")}</h1>
-        ${profile.address ? `<p>${escapeHtml(profile.address)}</p>` : ""}
-        ${profile.gstin ? `<p><strong>GSTIN:</strong> ${escapeHtml(profile.gstin)}</p>` : ""}
-        <p class="inv">Invoice No.: ${invNo}</p>
-        <p>Sale ${escapeHtml(sale.saleNumber)} · ${escapeHtml(formatTime(sale.createdAt))}</p>
-      </div>
-      <table class="items">
-        <thead>
-          <tr>
-            <th class="product">Product</th>
-            <th class="qty">Qty</th>
-            <th class="num">Rate</th>
-            <th class="num">Amount</th>
-          </tr>
-        </thead>
-        <tbody>${lines}</tbody>
-      </table>
-      <table class="totals">
-        <tr><td class="label">Subtotal:</td><td class="value">${formatNu(sale.subtotal)}</td></tr>
-        ${sale.discountAmount > 0 ? `<tr><td class="label">Discount:</td><td class="value">− ${formatNu(sale.discountAmount)}</td></tr>` : ""}
-        ${Number(sale.gstAmount) > 0 ? `<tr><td class="label">GST (${gstRatePct}%):</td><td class="value">${formatNu(sale.gstAmount)}</td></tr>` : ""}
-        <tr class="net"><td class="label">Total:</td><td class="value">${formatNu(saleGrandTotal(sale))}</td></tr>
-        ${sale.changeGiven > 0 ? `<tr><td class="label">Change given:</td><td class="value">${formatNu(sale.changeGiven)}</td></tr>` : ""}
-      </table>
-      <div class="meta">
-        <div class="row"><span class="label">Payment</span><span class="value">${escapeHtml(paymentLabel(sale.paymentMethod))}</span></div>
-        ${sale.customerName ? `<div class="row"><span class="label">Customer</span><span class="value">${escapeHtml(sale.customerName)}</span></div>` : ""}
-        ${sale.customerMobile ? `<div class="row"><span class="label">Mobile</span><span class="value">${escapeHtml(sale.customerMobile)}</span></div>` : ""}
-        ${sale.customerGstin ? `<div class="row"><span class="label">Customer GSTIN</span><span class="value">${escapeHtml(sale.customerGstin)}</span></div>` : ""}
-        ${sale.customerTpn ? `<div class="row"><span class="label">Customer TPN</span><span class="value">${escapeHtml(sale.customerTpn)}</span></div>` : ""}
-      </div>
-      </body></html>`;
-
-    const w = window.open("", "_blank", "width=420,height=640");
-    if (w) {
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      w.print();
-    }
+    printPosSaleDocument(sale, profile, printType);
   };
 
   return (
@@ -1123,6 +1060,7 @@ function ReceiptDialog({ open, sale, distributorProfile, onClose, onNewSale }) {
           invoiceNumber={sale.invoiceNumber}
           saleNumber={sale.saleNumber}
           createdAt={sale.createdAt}
+          documentType={printType}
         />
 
         <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, mb: 2 }}>
@@ -1137,9 +1075,30 @@ function ReceiptDialog({ open, sale, distributorProfile, onClose, onNewSale }) {
           </Box>
         </Paper>
 
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.75 }}>
+          Print as
+        </Typography>
+        <ToggleButtonGroup
+          exclusive
+          fullWidth
+          size="small"
+          value={printType}
+          onChange={(_, next) => {
+            if (next) setPrintType(next);
+          }}
+          sx={{ mb: 1.5 }}
+        >
+          <ToggleButton value={POS_PRINT_TYPES.receipt} sx={{ textTransform: "none", fontWeight: 700 }}>
+            Receipt
+          </ToggleButton>
+          <ToggleButton value={POS_PRINT_TYPES.invoice} sx={{ textTransform: "none", fontWeight: 700 }}>
+            Invoice
+          </ToggleButton>
+        </ToggleButtonGroup>
+
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" startIcon={<PrintIcon />} onClick={handlePrint} sx={{ flex: 1, textTransform: "none", fontWeight: 700 }}>
-            Print
+            Print {printType === POS_PRINT_TYPES.invoice ? "invoice" : "receipt"}
           </Button>
           <Button variant="contained" onClick={onNewSale} sx={{ flex: 1, textTransform: "none", fontWeight: 700 }}>
             New sale
@@ -2534,9 +2493,8 @@ export default function DistributorPosSaleDialog({
             <Box
               sx={{
                 flex: 1,
-                minHeight: 0,
+                minHeight: { xs: 0, md: "calc(100dvh - 132px)" },
                 height: { md: "calc(100dvh - 132px)" },
-                minHeight: { md: "calc(100dvh - 132px)" },
                 pt: 0,
                 pb: { xs: 1, md: 1.5 },
                 px: { xs: 1, md: 2 },

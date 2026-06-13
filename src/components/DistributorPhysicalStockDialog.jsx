@@ -11,14 +11,11 @@ import {
   Slide,
   Chip,
   Paper,
-  InputAdornment,
   Alert,
 } from "@mui/material";
-import { alpha, useTheme } from "@mui/material/styles";
 import CloseIcon from "@mui/icons-material/Close";
 import SaveIcon from "@mui/icons-material/Save";
 import WarehouseOutlinedIcon from "@mui/icons-material/WarehouseOutlined";
-import CalendarTodayOutlinedIcon from "@mui/icons-material/CalendarTodayOutlined";
 import PhysicalStockMatrix from "./PhysicalStockMatrix";
 import {
   normalizePhysicalStockPayload,
@@ -30,12 +27,13 @@ import {
   saveLocalPhysicalStockSnapshot,
 } from "../utils/physicalStockTemplate";
 import {
-  updateDistributor,
   upsertDistributorPhysicalStockSnapshot,
   fetchLatestDistributorPhysicalStockSnapshot,
 } from "../services/supabaseService";
+import { savePhysicalStockToSupabase } from "../services/posSupabaseService";
 import { getDistributors, saveDistributors } from "../utils/distributorAuth";
 import { logActivity, ACTIVITY_TYPES } from "../services/activityService";
+import { syncPhysicalStockTraceabilityFromDispatchedOrders } from "../services/deliveredOrderAchievement";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -53,8 +51,8 @@ export default function DistributorPhysicalStockDialog({
   onDialogOpened,
   onPhysicalStockAcknowledged,
   productRates = null,
+  orders = [],
 }) {
-  const theme = useTheme();
   const productLines = useMemo(
     () => resolvePhysicalStockProductLines(productRates),
     [productRates]
@@ -153,14 +151,16 @@ export default function DistributorPhysicalStockDialog({
         });
         if (reqId !== loadRequestIdRef.current) return;
         setReportDate(date);
-        setRows(nextRows);
+        setRows(
+          syncPhysicalStockTraceabilityFromDispatchedOrders(nextRows, orders, distributorCode)
+        );
         setCarriedFromDate(fromDate);
         setDirty(false);
       } finally {
         if (reqId === loadRequestIdRef.current) setLoadingRows(false);
       }
     },
-    [distributorCode, fetchLatestSnapshot, isSupabaseConfigured, productRates]
+    [distributorCode, fetchLatestSnapshot, isSupabaseConfigured, productRates, orders]
   );
 
   useEffect(() => {
@@ -241,7 +241,7 @@ export default function DistributorPhysicalStockDialog({
       let localOnlyWarning = false;
       if (isSupabaseConfigured) {
         try {
-          const updated = await updateDistributor(distributorCode, { physical_stock: payload });
+          const updated = await savePhysicalStockToSupabase(distributorCode, payload);
           const physical_stock = updated?.physical_stock ?? payload;
           persistLocal(physical_stock);
           setDistributor((prev) => (prev ? { ...prev, ...updated, physical_stock } : prev));
@@ -329,61 +329,46 @@ export default function DistributorPhysicalStockDialog({
         },
       }}
     >
-      {/* Top bar — matches distributor accent */}
       <Box
         sx={{
           flexShrink: 0,
           background: (t) =>
             `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
           color: "#fff",
-          px: { xs: 1.5, sm: 2.5 },
-          py: { xs: 1.25, sm: 1.5 },
+          px: { xs: 1.25, sm: 2 },
+          py: 0.75,
           display: "flex",
           alignItems: "center",
-          gap: 1.5,
-          boxShadow: "0 4px 12px rgba(198, 40, 40, 0.35)",
+          gap: 1,
         }}
       >
-        <Box
-          sx={{
-            width: 44,
-            height: 44,
-            borderRadius: 2,
-            bgcolor: "rgba(255,255,255,0.15)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <WarehouseOutlinedIcon sx={{ fontSize: 26 }} />
-        </Box>
+        <WarehouseOutlinedIcon sx={{ fontSize: 22 }} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.25rem" }, lineHeight: 1.2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.15, fontSize: "0.95rem" }}>
             Physical stock
           </Typography>
-          <Typography variant="body2" sx={{ opacity: 0.92, mt: 0.25, fontSize: { xs: "0.75rem", sm: "0.875rem" } }} noWrap>
+          <Typography variant="caption" sx={{ opacity: 0.88, fontSize: "0.65rem" }} noWrap>
             {distributorName || "Distributor"} · {distributorCode || "—"}
           </Typography>
         </Box>
-        <IconButton onClick={onClose} aria-label="Close" sx={{ color: "#fff" }} size="large">
-          <CloseIcon />
+        <IconButton onClick={onClose} aria-label="Close" sx={{ color: "#fff" }} size="small">
+          <CloseIcon fontSize="small" />
         </IconButton>
       </Box>
 
-      {/* Controls strip */}
       <Paper
         elevation={0}
         square
         sx={{
           flexShrink: 0,
-          px: { xs: 1.5, sm: 2.5 },
-          py: 1.5,
+          px: { xs: 1.25, sm: 2 },
+          py: 0.75,
           borderBottom: "1px solid",
           borderColor: "divider",
           display: "flex",
           flexWrap: "wrap",
           alignItems: "center",
-          gap: 2,
+          gap: 0.75,
           bgcolor: "background.paper",
         }}
       >
@@ -394,43 +379,27 @@ export default function DistributorPhysicalStockDialog({
           value={reportDate}
           onChange={handleReportDateChange}
           InputLabelProps={{ shrink: true }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <CalendarTodayOutlinedIcon sx={{ color: "text.secondary", fontSize: 20 }} />
-              </InputAdornment>
-            ),
-          }}
-          sx={{
-            minWidth: 220,
-            "& .MuiOutlinedInput-root": { borderRadius: 2 },
-          }}
+          sx={{ width: { xs: "100%", sm: 148 } }}
         />
-        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, alignItems: "center" }}>
-          <Chip label={`Pri ${distTotals.primary.toLocaleString()}`} size="small" sx={{ fontWeight: 700 }} />
-          <Chip label={`Phy ${distTotals.physical.toLocaleString()}`} size="small" sx={{ fontWeight: 700 }} />
-          <Chip label={`Sec ${distTotals.secondary.toLocaleString()}`} size="small" sx={{ fontWeight: 700 }} />
-          {loadingRows ? <Chip label="Loading…" size="small" variant="outlined" /> : null}
-          {dirty ? <Chip label="Unsaved changes" size="small" color="warning" variant="outlined" /> : null}
-        </Box>
+        <Chip label={`Pri ${distTotals.primary.toLocaleString()}`} size="small" sx={{ height: 22, fontWeight: 700, fontSize: "0.65rem" }} />
+        <Chip label={`Phy ${distTotals.physical.toLocaleString()}`} size="small" sx={{ height: 22, fontWeight: 700, fontSize: "0.65rem" }} />
+        <Chip label={`Sec ${distTotals.secondary.toLocaleString()}`} size="small" sx={{ height: 22, fontWeight: 700, fontSize: "0.65rem" }} />
+        {loadingRows ? <Chip label="Loading…" size="small" variant="outlined" sx={{ height: 22, fontSize: "0.65rem" }} /> : null}
+        {dirty ? <Chip label="Unsaved" size="small" color="warning" variant="outlined" sx={{ height: 22, fontSize: "0.65rem" }} /> : null}
       </Paper>
 
       {productLines.length === 0 ? (
-        <Alert severity="warning" sx={{ mx: { xs: 1, sm: 2 }, mt: 1, flexShrink: 0, borderRadius: 2 }}>
-          No products in Rate Master yet. Ask your admin to add products in <strong>Rate Master</strong> — physical
-          stock rows follow that catalogue (legacy KO / FX / SP lines are not used).
+        <Alert severity="warning" sx={{ mx: { xs: 1, sm: 1.5 }, mt: 0.75, py: 0.25, flexShrink: 0, borderRadius: 1.5, fontSize: "0.75rem" }}>
+          Add products in <strong>Rate Master</strong> first — stock rows follow that catalogue.
         </Alert>
       ) : null}
 
       {carriedFromDate ? (
-        <Alert severity="info" sx={{ mx: { xs: 1, sm: 2 }, mt: 1, flexShrink: 0, borderRadius: 2 }}>
-          MFG date, batch no., and BBD were filled from your <strong>last saved</strong> stock (report date{" "}
-          <strong>{carriedFromDate}</strong>). You can change those fields if needed. Enter <strong>primary sale</strong>{" "}
-          and <strong>physical stock</strong> for each lot.
+        <Alert severity="info" sx={{ mx: { xs: 1, sm: 1.5 }, mt: 0.75, py: 0.25, flexShrink: 0, borderRadius: 1.5, fontSize: "0.75rem" }}>
+          MFG / batch / BBD carried from report <strong>{carriedFromDate}</strong>. Enter primary sale and physical stock per lot.
         </Alert>
       ) : null}
 
-      {/* Body — fills space between toolbar and save bar */}
       <Box
         sx={{
           flex: 1,
@@ -438,14 +407,14 @@ export default function DistributorPhysicalStockDialog({
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
-          px: { xs: 1, sm: 2 },
-          py: { xs: 1, sm: 1.25 },
+          px: { xs: 1, sm: 1.5 },
+          py: 0.75,
         }}
       >
         {!matrixReady || loadingRows ? (
-          <Box sx={{ py: 2, flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <LinearProgress sx={{ borderRadius: 1, height: 6, mb: 2 }} />
-            <Typography variant="body2" color="text.secondary" align="center">
+          <Box sx={{ py: 1.5, flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <LinearProgress sx={{ borderRadius: 1, height: 4, mb: 1 }} />
+            <Typography variant="caption" color="text.secondary" align="center">
               {loadingRows ? "Applying previous day stock…" : "Loading stock grid…"}
             </Typography>
           </Box>
@@ -465,41 +434,32 @@ export default function DistributorPhysicalStockDialog({
         )}
       </Box>
 
-      {/* Sticky actions */}
       <Paper
-        elevation={12}
+        elevation={4}
         square
         sx={{
           flexShrink: 0,
-          px: { xs: 1.5, sm: 2.5 },
-          py: 1.5,
+          px: { xs: 1.25, sm: 2 },
+          py: 0.6,
           borderTop: "1px solid",
           borderColor: "divider",
           display: "flex",
           justifyContent: "flex-end",
           alignItems: "center",
-          gap: 1.5,
+          gap: 0.75,
           bgcolor: "background.paper",
         }}
       >
-        <Button onClick={onClose} color="inherit" size="large" disabled={saving} sx={{ minWidth: 100 }}>
+        <Button onClick={onClose} color="inherit" size="small" disabled={saving} sx={{ fontWeight: 700, fontSize: "0.75rem" }}>
           Cancel
         </Button>
         <Button
           variant="contained"
-          size="large"
-          startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+          size="small"
+          startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon sx={{ fontSize: 18 }} />}
           onClick={handleSave}
           disabled={saving || loadingRows || !distributorCode || productLines.length === 0}
-          sx={{
-            minWidth: 140,
-            borderRadius: 2,
-            py: 1,
-            fontWeight: 700,
-            boxShadow: `0 4px 14px ${alpha(theme.palette.primary.main, 0.45)}`,
-            bgcolor: "primary.main",
-            "&:hover": { bgcolor: "primary.dark" },
-          }}
+          sx={{ fontWeight: 700, fontSize: "0.75rem" }}
         >
           Save stock
         </Button>

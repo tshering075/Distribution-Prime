@@ -66,7 +66,7 @@ import AppSnackbar from "../components/AppSnackbar";
 import { useLogoutConfirmation } from "../components/LogoutConfirmDialog";
 import DayNightThemeToggle from "../components/DayNightThemeToggle";
 import SalesDataRefreshNoticeDialog from "../components/SalesDataRefreshNoticeDialog";
-import { getTargetPeriod, saveTargetPeriod, getDaysRemaining } from "../utils/targetPeriod";
+import { getTargetPeriod, saveTargetPeriod, getDaysRemaining, isTargetPeriodSet, markTargetPeriodSet } from "../utils/targetPeriod";
 import TargetPeriodCalendarPreview from "../components/TargetPeriodCalendarPreview";
 import TargetAchievementBalanceSummary from "../components/TargetAchievementBalanceSummary";
 import {
@@ -213,6 +213,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
   const previousTargetAchievedRef = useRef(null);
   const distributorUcAchievementNotifyRef = useRef({ scope: "", prevAchieved: false });
   const [targetPeriodRev, setTargetPeriodRev] = useState(0);
+  const [targetPeriodIsSet, setTargetPeriodIsSet] = useState(() => isTargetPeriodSet());
   const stockLiftingFingerprintRef = useRef(null);
   const [salesRefreshNoticeOpen, setSalesRefreshNoticeOpen] = useState(false);
   const dialogBackHistoryRef = useRef(false);
@@ -223,9 +224,16 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     (async () => {
       try {
         const remote = await getGlobalTargetPeriod();
-        if (cancelled || !remote?.start || !remote?.end) return;
-        saveTargetPeriod(remote.start, remote.end);
-        setTargetPeriodRev((n) => n + 1);
+        if (cancelled) return;
+        if (remote?.start && remote?.end) {
+          markTargetPeriodSet(true);
+          saveTargetPeriod(remote.start, remote.end);
+          setTargetPeriodRev((n) => n + 1);
+          setTargetPeriodIsSet(true);
+        } else {
+          markTargetPeriodSet(false);
+          setTargetPeriodIsSet(false);
+        }
       } catch (e) {
         console.warn("Could not load global target period from Supabase:", e);
       }
@@ -1356,7 +1364,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     },
   ];
   
-  const remainingDays = getDaysRemaining(targetEnd);
+  const remainingDays = targetPeriodIsSet ? getDaysRemaining(targetEnd) : null;
 
   const today = new Date();
 
@@ -2096,35 +2104,54 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
                     lineHeight: 1.15,
                   }}
                 >
-                  <Typography
-                    variant="overline"
-                    sx={{
-                      display: "block",
-                      fontWeight: 700,
-                      letterSpacing: "0.06em",
-                      fontSize: "0.55rem",
-                      color: "text.secondary",
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    Days Remaining
-                  </Typography>
-                  <Typography
-                    component="span"
-                    sx={{
-                      fontWeight: 800,
-                      fontVariantNumeric: "tabular-nums",
-                      color: "success.main",
-                      lineHeight: 1,
-                      fontSize: { xs: "1.25rem", sm: "1.4rem" },
-                    }}
-                  >
-                    {remainingDays}
-                  </Typography>
+                  {targetPeriodIsSet ? (
+                    <>
+                      <Typography
+                        variant="overline"
+                        sx={{
+                          display: "block",
+                          fontWeight: 700,
+                          letterSpacing: "0.06em",
+                          fontSize: "0.55rem",
+                          color: "text.secondary",
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        Days Remaining
+                      </Typography>
+                      <Typography
+                        component="span"
+                        sx={{
+                          fontWeight: 800,
+                          fontVariantNumeric: "tabular-nums",
+                          color: "success.main",
+                          lineHeight: 1,
+                          fontSize: { xs: "1.25rem", sm: "1.4rem" },
+                        }}
+                      >
+                        {remainingDays}
+                      </Typography>
+                    </>
+                  ) : (
+                    <Chip
+                      size="small"
+                      label="Target date not set yet"
+                      color="warning"
+                      variant="outlined"
+                      sx={{ fontWeight: 700, fontSize: "0.62rem", height: 22 }}
+                    />
+                  )}
                 </Box>
               </Box>
               <Box sx={{ width: "100%", minWidth: 0 }}>
-                <TargetPeriodCalendarPreview startYmd={targetStart} endYmd={targetEnd} compact fillWidth minPanels={2} />
+                <TargetPeriodCalendarPreview
+                  mode={targetPeriodIsSet ? "period" : "today"}
+                  startYmd={targetStart}
+                  endYmd={targetEnd}
+                  compact
+                  fillWidth
+                  minPanels={2}
+                />
               </Box>
             </Box>
           </Box>
@@ -2737,6 +2764,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
           onDialogOpened={handlePhysicalStockDialogOpened}
           onPhysicalStockAcknowledged={handlePhysicalStockAcknowledged}
           productRates={productRates}
+          orders={orders}
         />
 
         <Paper

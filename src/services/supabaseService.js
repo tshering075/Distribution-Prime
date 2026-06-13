@@ -1384,6 +1384,11 @@ export async function upsertDistributorPhysicalStockSnapshot(distributorCode, pa
   if (!code || !payload || typeof payload !== 'object') {
     throw new Error('distributorCode and payload are required');
   }
+
+  const { savePhysicalStockSnapshotToSupabase } = await import('./posSupabaseService');
+  const rpcRow = await savePhysicalStockSnapshotToSupabase(code, payload);
+  if (rpcRow) return rpcRow;
+
   const reportDate =
     typeof payload.reportDate === 'string' && payload.reportDate
       ? payload.reportDate.slice(0, 10)

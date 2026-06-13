@@ -25,11 +25,13 @@ function buildMonthCells(year, month0) {
 
 /**
  * Read-only month grid(s) for the active target period. Start / end days are emphasized; inclusive range is tinted.
- * @param {{ startYmd: string, endYmd: string, compact?: boolean, fillWidth?: boolean, stretchVertically?: boolean, minPanels?: number }} props
+ * When `mode` is "today", shows the current month with today highlighted (used when target period is not set).
+ * @param {{ startYmd?: string, endYmd?: string, mode?: "period" | "today", compact?: boolean, fillWidth?: boolean, stretchVertically?: boolean, minPanels?: number }} props
  */
 export default function TargetPeriodCalendarPreview({
   startYmd,
   endYmd,
+  mode = "period",
   compact = false,
   fillWidth = false,
   stretchVertically = false,
@@ -37,9 +39,23 @@ export default function TargetPeriodCalendarPreview({
 }) {
   const theme = useTheme();
 
-  const { rangeStart, rangeEnd, months } = useMemo(() => {
+  const todayOnly = mode === "today";
+
+  const { rangeStart, rangeEnd, months, todayYmd } = useMemo(() => {
+    if (todayOnly) {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = now.getMonth();
+      return {
+        rangeStart: null,
+        rangeEnd: null,
+        months: [{ year: y, month: m }],
+        todayYmd: { year: y, month: m, day: now.getDate() },
+      };
+    }
+
     const { start, end } = parseTargetPeriodBounds(startYmd, endYmd);
-    if (!start || !end) return { rangeStart: null, rangeEnd: null, months: [] };
+    if (!start || !end) return { rangeStart: null, rangeEnd: null, months: [], todayYmd: null };
 
     const rs = startOfLocalDay(start);
     const re = startOfLocalDay(end);
@@ -59,10 +75,10 @@ export default function TargetPeriodCalendarPreview({
       }
     }
 
-    return { rangeStart: rs, rangeEnd: re, months: list };
-  }, [startYmd, endYmd]);
+    return { rangeStart: rs, rangeEnd: re, months: list, todayYmd: null };
+  }, [startYmd, endYmd, todayOnly]);
 
-  if (!rangeStart || !rangeEnd || months.length === 0) {
+  if (!todayOnly && (!rangeStart || !rangeEnd || months.length === 0)) {
     return (
       <Typography variant="body2" color="text.secondary">
         No period set
@@ -71,19 +87,29 @@ export default function TargetPeriodCalendarPreview({
   }
 
   const inRange = (year, month0, day) => {
+    if (todayOnly) return false;
     const t = new Date(year, month0, day).getTime();
     return t >= rangeStart.getTime() && t <= rangeEnd.getTime();
   };
 
   const isStart = (year, month0, day) =>
+    !todayOnly &&
     year === rangeStart.getFullYear() &&
     month0 === rangeStart.getMonth() &&
     day === rangeStart.getDate();
 
   const isEnd = (year, month0, day) =>
+    !todayOnly &&
     year === rangeEnd.getFullYear() &&
     month0 === rangeEnd.getMonth() &&
     day === rangeEnd.getDate();
+
+  const isToday = (year, month0, day) =>
+    todayOnly &&
+    todayYmd &&
+    year === todayYmd.year &&
+    month0 === todayYmd.month &&
+    day === todayYmd.day;
 
   const weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -211,18 +237,26 @@ export default function TargetPeriodCalendarPreview({
                     justifyContent: "center",
                     borderRadius: "50%",
                     fontSize: dayFont,
-                    fontWeight: isStart(year, month, day) || isEnd(year, month, day) ? 800 : 600,
+                    fontWeight:
+                      isStart(year, month, day) ||
+                      isEnd(year, month, day) ||
+                      isToday(year, month, day)
+                        ? 800
+                        : 600,
                     lineHeight: 1,
                     color: "text.primary",
-                    bgcolor: !inRange(year, month, day)
-                      ? "transparent"
-                      : isStart(year, month, day)
-                        ? alpha(theme.palette.success.main, theme.palette.mode === "dark" ? 0.35 : 0.22)
-                        : isEnd(year, month, day)
-                          ? alpha(theme.palette.warning.main, theme.palette.mode === "dark" ? 0.4 : 0.26)
-                          : alpha(theme.palette.success.main, theme.palette.mode === "dark" ? 0.14 : 0.1),
-                    border:
-                      isStart(year, month, day) || isEnd(year, month, day)
+                    bgcolor: isToday(year, month, day)
+                      ? alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.35 : 0.2)
+                      : !inRange(year, month, day)
+                        ? "transparent"
+                        : isStart(year, month, day)
+                          ? alpha(theme.palette.success.main, theme.palette.mode === "dark" ? 0.35 : 0.22)
+                          : isEnd(year, month, day)
+                            ? alpha(theme.palette.warning.main, theme.palette.mode === "dark" ? 0.4 : 0.26)
+                            : alpha(theme.palette.success.main, theme.palette.mode === "dark" ? 0.14 : 0.1),
+                    border: isToday(year, month, day)
+                      ? `2px solid ${theme.palette.primary.main}`
+                      : isStart(year, month, day) || isEnd(year, month, day)
                         ? `2px solid ${
                             isStart(year, month, day)
                               ? theme.palette.success.main

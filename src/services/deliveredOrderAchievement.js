@@ -6,10 +6,10 @@ import {
   findSalesDataForDispatchedOrder,
   supabase,
 } from "./supabaseService";
-import { aggregateOrderLineTotals } from "../utils/orderLineCalculation";
+import { aggregateOrderLineTotals, enrichLineWithMfgBatch } from "../utils/orderLineCalculation";
 import { getDistributors, saveDistributors } from "../utils/distributorAuth";
 import { ORDER_STATUS, resolveOrderStatus } from "../utils/orderStatus";
-import { applyDispatchLinesToPrimarySales } from "../utils/dispatchPrimarySales";
+import { applyDispatchLinesToPrimarySales, fillMissingLotTraceabilityFromOrderLines } from "../utils/dispatchPrimarySales";
 import { getRawPhysicalStockFromDistributor } from "../utils/physicalStockTemplate";
 
 function num(v) {
@@ -229,7 +229,7 @@ export async function applyDeliveredOrderAchievement(order, identityFallback = n
     }
     updatedAchieved = mergeAchieved(dist.achieved, totals);
 
-    const orderLines = coerceOrderLineData(order.data);
+    const orderLines = coerceOrderLineData(order.data).map((line) => enrichLineWithMfgBatch(line, line));
     const physical_stock = applyDispatchLinesToPrimarySales(
       getRawPhysicalStockFromDistributor(dist),
       orderLines,
@@ -259,7 +259,7 @@ export async function applyDeliveredOrderAchievement(order, identityFallback = n
       distributors.find((d) => String(d.code || "").trim() === distributorCode) ||
       distributors.find((d) => d.name === order.distributorName);
     updatedAchieved = mergeAchieved(dist?.achieved, totals);
-    const orderLines = coerceOrderLineData(order.data);
+    const orderLines = coerceOrderLineData(order.data).map((line) => enrichLineWithMfgBatch(line, line));
     const physical_stock = applyDispatchLinesToPrimarySales(
       getRawPhysicalStockFromDistributor(dist),
       orderLines,
@@ -310,4 +310,25 @@ export async function backfillDispatchedOrdersToSalesData(orders, limit = 40) {
   }
 
   return { processed: candidates.length, applied, skipped, errors };
+}
+
+/**
+ * Pull MFG / batch from dispatched orders into physical stock rows (UI display).
+ * Does not change primary sale totals — fixes rows credited before traceability was saved.
+ */
+export function syncPhysicalStockTraceabilityFromDispatchedOrders(rows, orders, distributorCode) {
+  const code = String(distributorCode || "").trim();
+  if (!code || !Array.isArray(orders) || orders.length === 0) return rows;
+
+  const lines = [];
+  for (const order of orders) {
+    if (resolveOrderStatus(order) !== ORDER_STATUS.DELIVERED) continue;
+    if (resolveOrderDistributorCode(order) !== code) continue;
+    for (const line of coerceOrderLineData(order.data)) {
+      lines.push(enrichLineWithMfgBatch(line, line));
+    }
+  }
+
+  if (!lines.length) return rows;
+  return fillMissingLotTraceabilityFromOrderLines(rows, lines);
 }

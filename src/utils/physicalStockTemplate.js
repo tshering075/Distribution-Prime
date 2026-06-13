@@ -1,4 +1,5 @@
 import { getAllCatalogLineNames } from "./productCatalog";
+import { physicalStockSkusMatch } from "./physicalStockSkuMatch";
 
 /** Legacy abbreviated lines (KO = Coke, etc.) — used only when workspace catalogue is empty. */
 export const PHYSICAL_STOCK_PRODUCT_LINES = [
@@ -87,9 +88,9 @@ export function normalizeFifoLot(raw) {
   };
   return {
     lotId,
-    mfgDate: normalizeDateField(raw.mfgDate),
-    batchNo: normalizeBatchNo(raw.batchNo),
-    bbdDate: normalizeDateField(raw.bbdDate),
+    mfgDate: normalizeDateField(raw.mfgDate ?? raw.mfg_date),
+    batchNo: normalizeBatchNo(raw.batchNo ?? raw.batch_no),
+    bbdDate: normalizeDateField(raw.bbdDate ?? raw.bbd_date),
     openingStockQty: normalizeQty(raw.openingStockQty),
     primarySale: normalizeQty(raw.primarySale),
     physicalStockQty: normalizeQty(raw.physicalStockQty ?? raw.closingStockQty),
@@ -105,9 +106,9 @@ export function getLotsFromProductRow(row) {
   }
   // Legacy: single line of qtys on the row
   const lot = createEmptyFifoLot();
-  lot.mfgDate = normalizeDateField(row.mfgDate);
-  lot.batchNo = normalizeBatchNo(row.batchNo);
-  lot.bbdDate = normalizeDateField(row.bbdDate);
+  lot.mfgDate = normalizeDateField(row.mfgDate ?? row.mfg_date);
+  lot.batchNo = normalizeBatchNo(row.batchNo ?? row.batch_no);
+  lot.bbdDate = normalizeDateField(row.bbdDate ?? row.bbd_date);
   const normalizeQty = (value) => {
     if (value === "" || value == null) return "";
     const n = Number(value);
@@ -225,7 +226,28 @@ function normalizeRowShape(rawRow) {
   };
 }
 
-/** Merge saved rows with Rate Master lines only — never resurrect legacy SKUs outside the catalogue. */
+function mergeLotsByMfgBatch(lots) {
+  const map = new Map();
+  for (const lot of (lots || []).map(normalizeFifoLot)) {
+    const key = `${String(lot.mfgDate || "").trim()}\x00${String(lot.batchNo || "").trim()}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...lot });
+      continue;
+    }
+    for (const field of ["openingStockQty", "primarySale", "physicalStockQty", "secondarySale"]) {
+      const a = prev[field];
+      const b = lot[field];
+      if (b !== "" && b != null && Number.isFinite(Number(b))) {
+        prev[field] = (Number(a) || 0) + Number(b);
+      }
+    }
+    if (!prev.bbdDate && lot.bbdDate) prev.bbdDate = lot.bbdDate;
+  }
+  return [...map.values()];
+}
+
+/** Merge saved rows with Rate Master lines (fuzzy SKU match + FIFO lot merge). */
 export function mergePhysicalStockRows(savedRows, productLines) {
   const lines = linesOrCatalog(productLines);
   if (!hasCatalogueLines(lines)) return [];
@@ -233,20 +255,33 @@ export function mergePhysicalStockRows(savedRows, productLines) {
   const template = createEmptyPhysicalStockRows(lines);
   if (!Array.isArray(savedRows) || savedRows.length === 0) return template;
 
-  const map = new Map();
-  savedRows.forEach((r) => {
-    const n = normalizeRowShape(r);
-    if (!n?.productSku) return;
-    map.set(String(n.productSku).trim().toUpperCase(), n);
-  });
+  const normalizedSaved = (savedRows || [])
+    .map((r) => normalizeRowShape(r))
+    .filter(Boolean);
 
   return template.map((t) => {
-    const saved = map.get(String(t.productSku).trim().toUpperCase());
-    if (!saved) return { ...t, lots: (t.lots || [createEmptyFifoLot()]).map(normalizeFifoLot) };
-    const mergedLots = getLotsFromProductRow(saved);
+    const templateSku = String(t.productSku).trim();
+    const exactMatches = normalizedSaved.filter(
+      (s) => String(s.productSku).trim().toUpperCase() === templateSku.toUpperCase()
+    );
+    const fuzzyMatches = normalizedSaved.filter(
+      (s) =>
+        physicalStockSkusMatch(s.productSku, templateSku) &&
+        !exactMatches.some((e) => e === s)
+    );
+    const matched = [...exactMatches, ...fuzzyMatches];
+    if (matched.length === 0) {
+      return { ...t, lots: [createEmptyFifoLot()] };
+    }
+
+    const allLots = [];
+    for (const saved of matched) {
+      allLots.push(...getLotsFromProductRow(saved));
+    }
+    const mergedLots = mergeLotsByMfgBatch(allLots);
     return {
       productSku: t.productSku,
-      lots: mergedLots.length > 0 ? mergedLots.map(normalizeFifoLot) : [createEmptyFifoLot()],
+      lots: mergedLots.length > 0 ? mergedLots : [createEmptyFifoLot()],
     };
   });
 }

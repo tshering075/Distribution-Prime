@@ -3,6 +3,26 @@
  */
 
 const TARGET_PERIOD_KEY = "coke_target_period";
+const TARGET_PERIOD_SET_KEY = "coke_target_period_is_set";
+
+/** Whether an admin has explicitly saved a target period (vs auto fallback). */
+export function isTargetPeriodSet() {
+  try {
+    return localStorage.getItem(TARGET_PERIOD_SET_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Mark target period as explicitly set or cleared. */
+export function markTargetPeriodSet(isSet) {
+  try {
+    if (isSet) localStorage.setItem(TARGET_PERIOD_SET_KEY, "1");
+    else localStorage.removeItem(TARGET_PERIOD_SET_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];

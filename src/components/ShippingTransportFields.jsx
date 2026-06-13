@@ -32,7 +32,9 @@ import {
   SHIPPING_TRANSPORTER_OPTIONS,
   buildVehicleTypeOptions,
   formatBhutanVehicleNo,
+  displayVehicleNo,
   isValidBhutanVehicleNo,
+  normalizeVehicleNoInput,
   readCustomVehicleTypes,
   vehicleNoHelperText,
   writeCustomVehicleTypes,
@@ -79,7 +81,7 @@ function ReadOnlySummary({ transport, compact }) {
     {
       icon: PinOutlinedIcon,
       label: "Vehicle no.",
-      value: transport.vehicleNo ? formatBhutanVehicleNo(transport.vehicleNo) : "—",
+      value: transport.vehicleNo ? displayVehicleNo(transport.vehicleNo) : "—",
       mono: true,
     },
     {
@@ -183,7 +185,8 @@ export default function ShippingTransportFields({
   };
 
   const handleVehicleNoBlur = useCallback(() => {
-    const formatted = formatBhutanVehicleNo(transport.vehicleNo);
+    const raw = normalizeVehicleNoInput(transport.vehicleNo);
+    const formatted = raw && isValidBhutanVehicleNo(raw) ? formatBhutanVehicleNo(raw) : raw;
     if (formatted !== transport.vehicleNo) {
       onChange?.({ ...transport, vehicleNo: formatted });
     }
@@ -411,7 +414,7 @@ export default function ShippingTransportFields({
                   disabled={disabled}
                   placeholder="BP-1-A1234 or BHT-3-KA12345"
                   value={transport.vehicleNo || ""}
-                  onChange={(e) => setField("vehicleNo", e.target.value.toUpperCase())}
+                  onChange={(e) => setField("vehicleNo", normalizeVehicleNoInput(e.target.value))}
                   onBlur={handleVehicleNoBlur}
                   error={vehicleNoInvalid}
                   helperText={vehicleNoHelperText(transport.vehicleNo)}

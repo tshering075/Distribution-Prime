@@ -33,6 +33,23 @@ export function compactBhutanVehicleNo(raw) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+/** Trim and uppercase while typing; does not reformat partial input. */
+export function normalizeVehicleNoInput(raw) {
+  return String(raw ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "");
+}
+
+/** Format for display/storage only when the plate is already valid. */
+export function displayVehicleNo(raw) {
+  const normalized = normalizeVehicleNoInput(raw);
+  if (!normalized) return "";
+  return isValidBhutanVehicleNo(normalized)
+    ? formatBhutanVehicleNo(normalized)
+    : normalized;
+}
+
 /**
  * Bhutan format: TYPE-REGION-[LETTERS]NUMBER e.g. BP-1-A1234, BHT-3-KA12345
  * REGION: 1 Western, 2 Central, 3 Southern, 4 Eastern
@@ -60,8 +77,7 @@ export function formatBhutanVehicleNo(raw) {
     new RegExp(`^(${BHUTAN_PLATE_PREFIX_PATTERN})([1-4])([A-Z]{1,3})(\\d{1,6})$`)
   );
   if (m) {
-    const num = m[4].padStart(4, "0");
-    return `${m[1]}-${m[2]}-${m[3]}${num}`;
+    return `${m[1]}-${m[2]}-${m[3]}${m[4]}`;
   }
 
   m = compact.match(
@@ -131,9 +147,7 @@ export function getOrderTransport(order) {
     };
   }
   const charges = order.transportationCharges ?? order.transportation_charges;
-  const vehicleNo = formatBhutanVehicleNo(
-    order.vehicleNo ?? order.vehicle_no ?? ""
-  );
+  const vehicleNo = displayVehicleNo(order.vehicleNo ?? order.vehicle_no ?? "");
   return {
     transporterVehicle: String(
       order.transporterVehicle ?? order.transporter_vehicle ?? ""
@@ -148,7 +162,10 @@ export function getOrderTransport(order) {
 export function buildTransportPatch(transport) {
   const transporterVehicle = String(transport?.transporterVehicle ?? "").trim();
   const vehicleType = String(transport?.vehicleType ?? "").trim();
-  const vehicleNo = formatBhutanVehicleNo(transport?.vehicleNo);
+  const rawVehicleNo = normalizeVehicleNoInput(transport?.vehicleNo);
+  const vehicleNo = rawVehicleNo && isValidBhutanVehicleNo(rawVehicleNo)
+    ? formatBhutanVehicleNo(rawVehicleNo)
+    : rawVehicleNo;
   const transportationCharges = parseTransportAmount(transport?.transportationCharges);
   return {
     transporterVehicle,

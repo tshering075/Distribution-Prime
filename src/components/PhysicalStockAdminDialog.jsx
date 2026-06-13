@@ -342,37 +342,24 @@ export default function PhysicalStockAdminDialog({
           background: (t) =>
             `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
           color: "#fff",
-          px: { xs: 1.5, sm: 2.5 },
-          py: { xs: 1.25, sm: 1.5 },
+          px: { xs: 1.25, sm: 2 },
+          py: 0.75,
           display: "flex",
           alignItems: "center",
-          gap: 1.5,
-          boxShadow: "0 4px 12px rgba(183, 28, 28, 0.35)",
+          gap: 1,
         }}
       >
-        <Box
-          sx={{
-            width: 44,
-            height: 44,
-            borderRadius: 2,
-            bgcolor: "rgba(255,255,255,0.15)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <WarehouseOutlinedIcon sx={{ fontSize: 26 }} />
-        </Box>
+        <WarehouseOutlinedIcon sx={{ fontSize: 22 }} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.25rem" }, lineHeight: 1.2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.15, fontSize: "0.95rem" }}>
             Physical stock overview
           </Typography>
-          <Typography variant="body2" sx={{ opacity: 0.92, mt: 0.25, fontSize: { xs: "0.75rem", sm: "0.875rem" } }}>
-            {withDataCount} distributor{withDataCount !== 1 ? "s" : ""}
+          <Typography variant="caption" sx={{ opacity: 0.88, fontSize: "0.65rem" }}>
+            {withDataCount} distributor{withDataCount !== 1 ? "s" : ""} updated today
           </Typography>
         </Box>
-        <IconButton onClick={onClose} aria-label="Close" sx={{ color: "#fff" }} size="large">
-          <CloseIcon />
+        <IconButton onClick={onClose} aria-label="Close" sx={{ color: "#fff" }} size="small">
+          <CloseIcon fontSize="small" />
         </IconButton>
       </Box>
 
@@ -381,59 +368,52 @@ export default function PhysicalStockAdminDialog({
         square
         sx={{
           flexShrink: 0,
-          px: { xs: 1.5, sm: 2.5 },
-          py: 1.5,
+          px: { xs: 1.25, sm: 2 },
+          py: 0.75,
           borderBottom: "1px solid",
           borderColor: "divider",
           bgcolor: "background.paper",
         }}
       >
-        <Stack spacing={1.5}>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={0.75}
+          alignItems={{ xs: "stretch", md: "center" }}
+          flexWrap="wrap"
+          useFlexGap
+        >
           <TextField
             size="small"
-            fullWidth
-            placeholder="Search by name, code, or region"
+            placeholder="Search name, code, region…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <SearchIcon fontSize="small" color="action" />
+                  <SearchIcon sx={{ fontSize: 18 }} color="action" />
                 </InputAdornment>
               ),
             }}
-            sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+            sx={{ flex: "1 1 180px", minWidth: { md: 200 } }}
           />
-          <Stack
-            direction={{ xs: "column", sm: "row" }}
-            spacing={1.5}
-            alignItems={{ xs: "stretch", sm: "flex-end" }}
-            flexWrap="wrap"
-            useFlexGap
-          >
-            <TextField
-              label="Excel export from"
-              type="date"
-              size="small"
-              value={exportDateFrom}
-              onChange={(e) => setExportDateFrom(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
-            />
-            <TextField
-              label="Excel export to"
-              type="date"
-              size="small"
-              value={exportDateTo}
-              onChange={(e) => setExportDateTo(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              sx={{ minWidth: 160, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
-            />
-            <Typography variant="caption" color="text.secondary" sx={{ flex: "1 1 200px", pb: 0.5 }}>
-              Download includes every saved snapshot in this range (one row per distributor per report date). Requires
-              Supabase table <strong>distributor_physical_stock_snapshots</strong>.
-            </Typography>
-          </Stack>
+          <TextField
+            label="Export from"
+            type="date"
+            size="small"
+            value={exportDateFrom}
+            onChange={(e) => setExportDateFrom(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ width: { xs: "100%", sm: 138 } }}
+          />
+          <TextField
+            label="Export to"
+            type="date"
+            size="small"
+            value={exportDateTo}
+            onChange={(e) => setExportDateTo(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ width: { xs: "100%", sm: 138 } }}
+          />
         </Stack>
       </Paper>
 
@@ -442,43 +422,41 @@ export default function PhysicalStockAdminDialog({
           flex: 1,
           minHeight: 0,
           overflow: "auto",
-          px: { xs: 1, sm: 2 },
-          py: 2,
+          px: { xs: 1, sm: 1.5 },
+          py: 1,
         }}
       >
         {productLines.length === 0 ? (
-          <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-            Physical stock rows follow <strong>Rate Master</strong> products. Add products there first — legacy KO / FX /
-            SP lines are no longer shown automatically.
+          <Alert severity="warning" sx={{ mb: 1, py: 0.25, borderRadius: 1.5, fontSize: "0.75rem" }}>
+            Add products in <strong>Rate Master</strong> first — physical stock rows follow that catalogue.
           </Alert>
         ) : null}
 
         {recentUpdates.length > 0 ? (
           <Alert
-            icon={<NotificationsActiveOutlinedIcon fontSize="inherit" />}
+            icon={<NotificationsActiveOutlinedIcon sx={{ fontSize: 18 }} />}
             severity="success"
             variant="outlined"
             sx={{
-              mb: 2,
-              borderRadius: 2,
-              alignItems: "flex-start",
+              mb: 1,
+              py: 0.35,
+              borderRadius: 1.5,
+              alignItems: "center",
               bgcolor: alpha(theme.palette.success.main, theme.palette.mode === "dark" ? 0.12 : 0.06),
-              borderColor: alpha(theme.palette.success.main, 0.45),
-              "& .MuiAlert-message": { width: "100%" },
+              "& .MuiAlert-message": { width: "100%", py: 0.25 },
             }}
           >
-            <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.75 }}>
-              New since you last opened this screen ({recentUpdates.length})
+            <Typography variant="caption" sx={{ fontWeight: 800, display: "block", mb: 0.5 }}>
+              New since last visit ({recentUpdates.length})
             </Typography>
-            <Stack direction="row" flexWrap="wrap" gap={0.75} useFlexGap>
+            <Stack direction="row" flexWrap="wrap" gap={0.5} useFlexGap>
               {recentUpdates.map(({ distributor: d, updatedAt }) => (
                 <Chip
                   key={`${distributorRowKey(d)}-${updatedAt}`}
                   size="small"
                   label={`${d.name || d.code || "—"} · ${formatWhen(updatedAt)}`}
                   color="success"
-                  variant="filled"
-                  sx={{ fontWeight: 600 }}
+                  sx={{ height: 22, fontWeight: 600, fontSize: "0.65rem" }}
                 />
               ))}
             </Stack>
@@ -486,8 +464,10 @@ export default function PhysicalStockAdminDialog({
         ) : null}
 
         {displayed.length === 0 ? (
-          <Paper variant="outlined" sx={{ p: 4, textAlign: "center", borderRadius: 2, bgcolor: "background.paper" }}>
-            <Typography color="text.secondary">No distributors updated physical stock today.</Typography>
+          <Paper variant="outlined" sx={{ p: 2.5, textAlign: "center", borderRadius: 1.5, bgcolor: "background.paper" }}>
+            <Typography variant="body2" color="text.secondary">
+              No distributors updated physical stock today.
+            </Typography>
           </Paper>
         ) : (
           displayed.map((d) => {
@@ -505,26 +485,25 @@ export default function PhysicalStockAdminDialog({
                 onChange={handleAccordion(expandKey)}
                 disableGutters
                 sx={{
-                  mb: 1,
-                  borderRadius: "10px !important",
+                  mb: 0.75,
+                  borderRadius: "8px !important",
                   overflow: "hidden",
                   border: "1px solid",
                   borderColor: "divider",
-                  borderLeft: isRecent ? "4px solid" : "1px solid",
+                  borderLeft: isRecent ? "3px solid" : "1px solid",
                   borderLeftColor: isRecent ? "success.main" : "divider",
                   bgcolor: "background.paper",
                   color: "text.primary",
-                  boxShadow: (t) => `0 1px 3px ${alpha(t.palette.common.black, t.palette.mode === "dark" ? 0.35 : 0.06)}`,
                   "&:before": { display: "none" },
                 }}
               >
                 <AccordionSummary
-                  expandIcon={<ExpandMoreIcon sx={{ fontSize: 22 }} />}
+                  expandIcon={<ExpandMoreIcon sx={{ fontSize: 20 }} />}
                   sx={{
-                    px: { xs: 1, sm: 1.25 },
-                    py: 0.65,
+                    px: { xs: 0.75, sm: 1 },
+                    py: 0.35,
                     minHeight: 0,
-                    "& .MuiAccordionSummary-content": { my: 0.5, alignItems: "flex-start" },
+                    "& .MuiAccordionSummary-content": { my: 0.25, alignItems: "center" },
                     "&:hover": { bgcolor: "action.hover" },
                   }}
                 >
@@ -532,45 +511,24 @@ export default function PhysicalStockAdminDialog({
                     sx={{
                       display: "flex",
                       flexDirection: { xs: "column", sm: "row" },
-                      alignItems: { xs: "stretch", sm: "flex-start" },
+                      alignItems: { xs: "stretch", sm: "center" },
                       justifyContent: "space-between",
-                      gap: { xs: 0.75, sm: 1 },
+                      gap: 0.5,
                       width: "100%",
-                      pr: 0.5,
+                      pr: 0.25,
                     }}
                   >
                     <Box sx={{ minWidth: 0, flex: "1 1 auto" }}>
-                      <Typography
-                        sx={{
-                          fontWeight: 800,
-                          fontSize: "0.875rem",
-                          color: "text.primary",
-                          lineHeight: 1.25,
-                        }}
-                      >
+                      <Typography sx={{ fontWeight: 800, fontSize: "0.8rem", lineHeight: 1.2 }}>
                         {d.name || "—"}
                       </Typography>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ display: "block", mt: 0.15, fontSize: "0.68rem", lineHeight: 1.3 }}
-                      >
-                        Code <strong>{code || "—"}</strong>
-                        {d.region ? (
-                          <>
-                            {" · "}
-                            <strong>{d.region}</strong>
-                          </>
-                        ) : null}
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ display: "block", mt: 0.2, fontSize: "0.62rem", lineHeight: 1.35 }}
-                      >
-                        Rpt <strong style={{ color: theme.palette.text.primary }}>{norm.reportDate || "—"}</strong>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.62rem", lineHeight: 1.25 }}>
+                        {code || "—"}
+                        {d.region ? ` · ${d.region}` : ""}
                         {" · "}
-                        Saved <strong style={{ color: theme.palette.text.primary }}>{formatWhen(norm.updatedAt)}</strong>
+                        Rpt {norm.reportDate || "—"}
+                        {" · "}
+                        {formatWhen(norm.updatedAt)}
                       </Typography>
                     </Box>
                     <Box
@@ -638,15 +596,15 @@ export default function PhysicalStockAdminDialog({
                 <AccordionDetails
                   sx={{
                     pt: 0,
-                    px: { xs: 0.5, sm: 1.5 },
-                    pb: 2,
+                    px: { xs: 0.5, sm: 1 },
+                    pb: 1,
                     bgcolor: "action.hover",
                     borderTop: "1px solid",
                     borderColor: "divider",
                   }}
                 >
                   {!raw ? (
-                    <Typography color="text.secondary" sx={{ py: 3, px: 2, textAlign: "center" }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 2, px: 1, textAlign: "center" }}>
                       No physical stock submitted yet.
                     </Typography>
                   ) : (
@@ -654,7 +612,7 @@ export default function PhysicalStockAdminDialog({
                       rows={norm.rows}
                       readOnly
                       variant="default"
-                      maxHeight="min(78vh, 720px)"
+                      maxHeight="min(72vh, 640px)"
                       boldDataValues
                     />
                   )}
@@ -666,12 +624,12 @@ export default function PhysicalStockAdminDialog({
       </Box>
 
       <Paper
-        elevation={12}
+        elevation={4}
         square
         sx={{
           flexShrink: 0,
-          px: { xs: 1, sm: 1.5 },
-          py: 0.75,
+          px: { xs: 1.25, sm: 2 },
+          py: 0.6,
           borderTop: "1px solid",
           borderColor: "divider",
           display: "flex",
@@ -688,32 +646,16 @@ export default function PhysicalStockAdminDialog({
           size="small"
           disabled={exporting || !exportDateFrom || !exportDateTo || exportDateFrom > exportDateTo}
           startIcon={exporting ? <CircularProgress size={14} color="inherit" /> : null}
-          sx={{
-            minWidth: 0,
-            px: 1.25,
-            py: 0.4,
-            borderRadius: 1.25,
-            fontWeight: 700,
-            fontSize: "0.75rem",
-            textTransform: "none",
-          }}
+          sx={{ fontWeight: 700, fontSize: "0.75rem", textTransform: "none" }}
         >
-          Download Excel
+          Excel
         </Button>
         <Button
           onClick={onClose}
           variant="contained"
           color="error"
           size="small"
-          sx={{
-            minWidth: 0,
-            px: 1.5,
-            py: 0.4,
-            borderRadius: 1.25,
-            fontWeight: 700,
-            fontSize: "0.75rem",
-            textTransform: "none",
-          }}
+          sx={{ fontWeight: 700, fontSize: "0.75rem", textTransform: "none" }}
         >
           Close
         </Button>

@@ -22,6 +22,59 @@ import {
   getLotsFromProductRow,
 } from "../utils/physicalStockTemplate";
 
+/** Column share of table width — equal qty columns keep totals aligned at full width. */
+const MATRIX_COL_PCT = {
+  readOnly: {
+    index: "4%",
+    mfg: "16%",
+    batch: "12%",
+    bbd: "16%",
+    primary: "17.33%",
+    physical: "17.33%",
+    secondary: "17.34%",
+  },
+  editable: {
+    index: "3%",
+    mfg: "14%",
+    batch: "10%",
+    bbd: "14%",
+    primary: "14.67%",
+    physical: "14.67%",
+    secondary: "14.66%",
+    actions: "4%",
+  },
+};
+
+function MatrixColGroup({ readOnly }) {
+  const pct = readOnly ? MATRIX_COL_PCT.readOnly : MATRIX_COL_PCT.editable;
+  return (
+    <colgroup>
+      <col style={{ width: pct.index }} />
+      <col style={{ width: pct.mfg }} />
+      <col style={{ width: pct.batch }} />
+      <col style={{ width: pct.bbd }} />
+      <col style={{ width: pct.primary }} />
+      <col style={{ width: pct.physical }} />
+      <col style={{ width: pct.secondary }} />
+      {!readOnly ? <col style={{ width: pct.actions }} /> : null}
+    </colgroup>
+  );
+}
+
+function compactFieldSx(alignRight = false) {
+  return {
+    width: "100%",
+    minWidth: 0,
+    m: 0,
+    "& .MuiOutlinedInput-root": { width: "100%" },
+    "& input": {
+      py: 0.5,
+      fontSize: "0.75rem",
+      ...(alignRight ? { textAlign: "right" } : {}),
+    },
+  };
+}
+
 function applyPrimaryPhysicalSecondary(field, draft) {
   const toNumOrNull = (v) => {
     if (v === "" || v == null) return null;
@@ -146,7 +199,10 @@ export default function PhysicalStockMatrix({
           sx={{
             fontWeight: boldDataValues ? 800 : 600,
             fontVariantNumeric: "tabular-nums",
-            py: 0.5,
+            py: 0.25,
+            fontSize: "0.75rem",
+            textAlign: "right",
+            display: "block",
             color: computed ? "text.secondary" : undefined,
           }}
         >
@@ -158,12 +214,16 @@ export default function PhysicalStockMatrix({
       <TextField
         size="small"
         type="number"
+        fullWidth
         inputProps={{ min: 0, step: 1, "aria-label": aria }}
         value={v === "" || v == null ? "" : Number(v) || 0}
         onChange={(e) => updateLotField(rowIndex, lotIndex, field, e.target.value)}
         sx={{
-          minWidth: 88,
-          "& input": { textAlign: "right", fontWeight: boldDataValues ? 700 : 600 },
+          ...compactFieldSx(true),
+          "& input": {
+            ...compactFieldSx(true)["& input"],
+            fontWeight: boldDataValues ? 700 : 600,
+          },
         }}
       />
     );
@@ -173,7 +233,7 @@ export default function PhysicalStockMatrix({
     const v = lot?.[field] || "";
     if (readOnly) {
       return (
-        <Typography variant="body2" sx={{ py: 0.75, fontWeight: 600 }}>
+        <Typography variant="caption" sx={{ py: 0.25, fontWeight: 600, fontSize: "0.75rem" }}>
           {v || "—"}
         </Typography>
       );
@@ -182,11 +242,12 @@ export default function PhysicalStockMatrix({
       <TextField
         size="small"
         type="date"
+        fullWidth
         InputLabelProps={{ shrink: true }}
         inputProps={{ "aria-label": aria }}
         value={v}
         onChange={(e) => updateLotField(rowIndex, lotIndex, field, e.target.value)}
-        sx={{ minWidth: 132 }}
+        sx={compactFieldSx()}
       />
     );
   };
@@ -195,7 +256,7 @@ export default function PhysicalStockMatrix({
     const v = lot?.batchNo ?? "";
     if (readOnly) {
       return (
-        <Typography variant="body2" sx={{ py: 0.75, fontWeight: 600 }}>
+        <Typography variant="caption" sx={{ py: 0.25, fontWeight: 600, fontSize: "0.75rem" }}>
           {v || "—"}
         </Typography>
       );
@@ -203,10 +264,11 @@ export default function PhysicalStockMatrix({
     return (
       <TextField
         size="small"
+        fullWidth
         inputProps={{ "aria-label": "Batch number" }}
         value={v}
         onChange={(e) => updateLotField(rowIndex, lotIndex, "batchNo", e.target.value)}
-        sx={{ minWidth: 100 }}
+        sx={compactFieldSx()}
       />
     );
   };
@@ -214,18 +276,84 @@ export default function PhysicalStockMatrix({
   const paperSx = isFs
     ? {
         height: "100%",
-        minHeight: { xs: "calc(100dvh - 300px)", sm: "calc(100dvh - 260px)" },
+        minHeight: { xs: "calc(100dvh - 220px)", sm: "calc(100dvh - 200px)" },
         flex: 1,
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        p: { xs: 1, sm: 1.25 },
+        p: { xs: 0.75, sm: 1 },
       }
     : {
         maxHeight: bodyMaxHeight,
         overflow: "auto",
-        p: { xs: 1, sm: 1.25 },
+        p: { xs: 0.75, sm: 1 },
       };
+
+  const headCellSx = {
+    fontWeight: 800,
+    fontSize: "0.68rem",
+    py: 0.5,
+    px: 0.5,
+    whiteSpace: "nowrap",
+    lineHeight: 1.2,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  };
+  const bodyCellSx = { py: 0.35, px: 0.5, overflow: "hidden" };
+  const tableSx = {
+    width: "100%",
+    tableLayout: "fixed",
+  };
+  const tableWrapSx = { width: "100%" };
+  const qtyTotalSx = {
+    fontWeight: 900,
+    fontSize: "0.72rem",
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+  };
+  const subtotalRowSx = {
+    bgcolor: alpha(theme.palette.grey[500], theme.palette.mode === "dark" ? 0.12 : 0.06),
+    "& td": { borderTop: `1px solid ${theme.palette.divider}` },
+  };
+  const grandTotalRowSx = {
+    bgcolor: alpha(theme.palette.warning.main, theme.palette.mode === "dark" ? 0.2 : 0.14),
+    "& td": {
+      borderTop: `1px solid ${alpha(theme.palette.warning.dark, 0.22)}`,
+      py: 0.5,
+    },
+  };
+
+  const renderQtyTotalCells = (values, { fontSize = "0.72rem", fontWeight = 900 } = {}) => (
+    <>
+      <TableCell align="right" sx={{ ...bodyCellSx, ...qtyTotalSx, fontSize, fontWeight }}>
+        {values.primary}
+      </TableCell>
+      <TableCell align="right" sx={{ ...bodyCellSx, ...qtyTotalSx, fontSize, fontWeight }}>
+        {values.physical}
+      </TableCell>
+      <TableCell align="right" sx={{ ...bodyCellSx, ...qtyTotalSx, fontSize, fontWeight }}>
+        {values.secondary}
+      </TableCell>
+    </>
+  );
+
+  const renderTotalsRow = (label, values, rowSx, labelSx = {}) => (
+    <TableRow sx={rowSx}>
+      <TableCell
+        colSpan={4}
+        sx={{
+          ...bodyCellSx,
+          fontWeight: labelSx.fontWeight ?? 900,
+          fontSize: labelSx.fontSize ?? "0.68rem",
+          color: labelSx.color,
+        }}
+      >
+        {label}
+      </TableCell>
+      {renderQtyTotalCells(values, { fontSize: labelSx.fontSize ?? "0.72rem", fontWeight: labelSx.fontWeight ?? 900 })}
+      {!readOnly ? <TableCell sx={bodyCellSx} /> : null}
+    </TableRow>
+  );
 
   return (
     <Paper variant="outlined" sx={paperSx}>
@@ -233,18 +361,17 @@ export default function PhysicalStockMatrix({
         <Box
           sx={{
             flexShrink: 0,
-            mb: 1,
+            mb: 0.75,
             px: 0.75,
-            py: 0.6,
-            borderRadius: 1.25,
+            py: 0.45,
+            borderRadius: 1,
             bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.2 : 0.08),
             border: "1px solid",
             borderColor: alpha(theme.palette.primary.main, 0.24),
           }}
         >
-          <Typography variant="caption" sx={{ fontWeight: 800, color: "text.primary" }}>
-            FIFO lots: add one row per batch (MFG / batch / BBD). Enter primary sale and physical stock for each lot —
-            secondary sale is calculated automatically. MFG, batch, and BBD can be pre-filled from your last save.
+          <Typography variant="caption" sx={{ fontWeight: 700, color: "text.primary", fontSize: "0.65rem", lineHeight: 1.35 }}>
+            FIFO lots per batch — enter primary sale & physical stock; secondary is auto-calculated.
           </Typography>
         </Box>
       ) : null}
@@ -256,7 +383,7 @@ export default function PhysicalStockMatrix({
           WebkitOverflowScrolling: "touch",
         }}
       >
-      <Stack spacing={1.25}>
+      <Stack spacing={0.75}>
         {(rows || []).map((row, rowIndex) => {
           const accent = getSkuAccent(row.productSku);
           const lots = getLotsFromProductRow(row);
@@ -273,127 +400,112 @@ export default function PhysicalStockMatrix({
               key={row.productSku || rowIndex}
               variant="outlined"
               sx={{
-                p: { xs: 0.75, sm: 1 },
-                borderRadius: 1.5,
+                p: { xs: 0.5, sm: 0.75 },
+                borderRadius: 1.25,
                 borderColor: "divider",
                 bgcolor: "background.paper",
-                borderLeft: "4px solid",
+                borderLeft: "3px solid",
                 borderLeftColor: accent,
               }}
             >
               <Typography
                 sx={{
                   fontWeight: 800,
-                  fontSize: isFs ? "0.86rem" : "0.8rem",
-                  mb: 0.75,
-                  letterSpacing: 0.1,
+                  fontSize: isFs ? "0.78rem" : "0.74rem",
+                  mb: 0.5,
+                  letterSpacing: 0.05,
                   color: accent,
                 }}
               >
                 {row.productSku}
               </Typography>
 
-              <Box sx={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                <Table size="small" sx={{ minWidth: 720 }}>
+              <Box sx={tableWrapSx}>
+                <Table size="small" sx={tableSx}>
+                  <MatrixColGroup readOnly={readOnly} />
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 800, width: 48 }}>#</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>MFG date</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>Batch no.</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>BBD date</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }} align="right">
-                        Primary sale
+                      <TableCell sx={headCellSx}>#</TableCell>
+                      <TableCell sx={headCellSx}>MFG</TableCell>
+                      <TableCell sx={headCellSx}>Batch</TableCell>
+                      <TableCell sx={headCellSx}>BBD</TableCell>
+                      <TableCell sx={headCellSx} align="right">
+                        Primary
                       </TableCell>
-                      <TableCell sx={{ fontWeight: 800 }} align="right">
-                        Physical stock
+                      <TableCell sx={headCellSx} align="right">
+                        Physical
                       </TableCell>
-                      <TableCell sx={{ fontWeight: 800 }} align="right">
-                        Secondary sale
+                      <TableCell sx={headCellSx} align="right">
+                        Secondary
                       </TableCell>
-                      {!readOnly ? <TableCell align="right" sx={{ width: 56 }} /> : null}
+                      {!readOnly ? <TableCell align="right" sx={headCellSx} /> : null}
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {lots.map((lot, lotIndex) => (
                       <TableRow key={lot.lotId || `${rowIndex}-${lotIndex}`}>
-                        <TableCell sx={{ fontWeight: 700, color: "text.secondary" }}>{lotIndex + 1}</TableCell>
-                        <TableCell>{dateCell(rowIndex, lotIndex, "mfgDate", "Manufacturing date", lot)}</TableCell>
-                        <TableCell>{batchCell(rowIndex, lotIndex, lot)}</TableCell>
-                        <TableCell>{dateCell(rowIndex, lotIndex, "bbdDate", "Best before date", lot)}</TableCell>
-                        <TableCell align="right">{qtyCell(rowIndex, lotIndex, "primarySale", "Primary sale", lot)}</TableCell>
-                        <TableCell align="right">{qtyCell(rowIndex, lotIndex, "physicalStockQty", "Physical stock", lot)}</TableCell>
-                        <TableCell align="right">
+                        <TableCell sx={{ ...bodyCellSx, fontWeight: 700, color: "text.secondary", fontSize: "0.72rem" }}>
+                          {lotIndex + 1}
+                        </TableCell>
+                        <TableCell sx={bodyCellSx}>{dateCell(rowIndex, lotIndex, "mfgDate", "Manufacturing date", lot)}</TableCell>
+                        <TableCell sx={bodyCellSx}>{batchCell(rowIndex, lotIndex, lot)}</TableCell>
+                        <TableCell sx={bodyCellSx}>{dateCell(rowIndex, lotIndex, "bbdDate", "Best before date", lot)}</TableCell>
+                        <TableCell align="right" sx={bodyCellSx}>{qtyCell(rowIndex, lotIndex, "primarySale", "Primary sale", lot)}</TableCell>
+                        <TableCell align="right" sx={bodyCellSx}>{qtyCell(rowIndex, lotIndex, "physicalStockQty", "Physical stock", lot)}</TableCell>
+                        <TableCell align="right" sx={bodyCellSx}>
                           {qtyCell(rowIndex, lotIndex, "secondarySale", "Secondary sale", lot, { computed: !readOnly })}
                         </TableCell>
                         {!readOnly ? (
-                          <TableCell align="right">
+                          <TableCell align="right" sx={bodyCellSx}>
                             <IconButton
                               size="small"
                               aria-label="Remove lot"
                               disabled={lots.length <= 1}
                               onClick={() => removeLot(rowIndex, lotIndex)}
                               color="error"
+                              sx={{ p: 0.35 }}
                             >
-                              <RemoveCircleOutlineIcon fontSize="small" />
+                              <RemoveCircleOutlineIcon sx={{ fontSize: 18 }} />
                             </IconButton>
                           </TableCell>
                         ) : null}
                       </TableRow>
                     ))}
+                    {renderTotalsRow("Subtotal", sub, subtotalRowSx, {
+                      fontWeight: 800,
+                      fontSize: "0.62rem",
+                      color: "text.secondary",
+                    })}
                   </TableBody>
                 </Table>
               </Box>
 
-              <Box
-                sx={{
-                  mt: 0.75,
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 1,
-                }}
-              >
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                  SKU subtotal (all lots): P {sub.primary} · Phy {sub.physical} · S {sub.secondary}
-                </Typography>
-                {!readOnly ? (
+              {!readOnly ? (
+                <Box sx={{ mt: 0.5, display: "flex", justifyContent: "flex-end" }}>
                   <Button
                     size="small"
                     variant="outlined"
-                    startIcon={<AddCircleOutlineIcon />}
+                    startIcon={<AddCircleOutlineIcon sx={{ fontSize: 16 }} />}
                     onClick={() => addLot(rowIndex)}
-                    sx={{ textTransform: "none", fontWeight: 700 }}
+                    sx={{ textTransform: "none", fontWeight: 700, py: 0.25, fontSize: "0.7rem", minHeight: 28 }}
                   >
-                    Add FIFO lot
+                    Add lot
                   </Button>
-                ) : null}
-              </Box>
+                </Box>
+              ) : null}
             </Paper>
           );
         })}
       </Stack>
       </Box>
-      <Divider sx={{ my: 1.25, flexShrink: 0 }} />
-      <Box
-        sx={{
-          flexShrink: 0,
-          display: "grid",
-          gridTemplateColumns: { xs: "1fr", sm: "repeat(4, minmax(88px, 1fr))" },
-          gap: 0.45,
-          alignItems: "center",
-          p: 0.5,
-          borderRadius: 1,
-          bgcolor: alpha(theme.palette.warning.main, theme.palette.mode === "dark" ? 0.2 : 0.14),
-          border: "1px solid",
-          borderColor: alpha(theme.palette.warning.dark, 0.22),
-          boxShadow: "none",
-        }}
-      >
-        <Typography sx={{ fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>TOTAL PC (all SKUs, all lots)</Typography>
-        <Typography sx={{ textAlign: "right", fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>{totals.primary}</Typography>
-        <Typography sx={{ textAlign: "right", fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>{totals.physical}</Typography>
-        <Typography sx={{ textAlign: "right", fontWeight: 900, fontSize: "0.74rem", lineHeight: 1.15 }}>{totals.secondary}</Typography>
+      <Divider sx={{ my: 0.75, flexShrink: 0 }} />
+      <Box sx={tableWrapSx}>
+        <Table size="small" sx={tableSx}>
+          <MatrixColGroup readOnly={readOnly} />
+          <TableBody>
+            {renderTotalsRow("TOTAL (all SKUs)", totals, grandTotalRowSx)}
+          </TableBody>
+        </Table>
       </Box>
     </Paper>
   );

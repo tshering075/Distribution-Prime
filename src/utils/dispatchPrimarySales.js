@@ -1,4 +1,5 @@
 import { normalizeForStockMatch } from "./fgStockSkuMatch";
+import { orderSkuMatchesPhysicalLine } from "./physicalStockSkuMatch";
 import {
   createEmptyFifoLot,
   createEmptyPhysicalStockRows,
@@ -13,37 +14,10 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Abbreviated physical-stock line → brand tokens for matching calculator SKUs. */
-const PHYSICAL_LINE_BRANDS = {
-  KO: ["COCA COLA", "COKE"],
-  FX: ["FANTA"],
-  SP: ["SPRITE"],
-  CH: ["CHARGE", "CHARGED", "THUMS UP CHARGE"],
-  KWAT: ["KINLEY WATER", "KINLEY"],
-};
-
-function extractVolumeToken(normalized) {
-  const m = String(normalized || "").match(/(\d+(?:\.\d+)?)(ML|L)\b/);
-  return m ? `${m[1]}${m[2]}` : "";
-}
-
-function physicalLineBrandTokens(productSku) {
-  const raw = String(productSku || "").trim().toUpperCase();
-  const prefix = raw.split(/\s+/)[0] || "";
-  return PHYSICAL_LINE_BRANDS[prefix] || [raw.replace(/\s+\d.*$/, "").trim()];
-}
-
-function orderSkuMatchesPhysicalLine(orderNorm, productSku) {
-  const lineNorm = normalizeForStockMatch(productSku);
-  if (!orderNorm || !lineNorm) return false;
-  if (orderNorm === lineNorm) return true;
-  if (orderNorm.includes(lineNorm) || lineNorm.includes(orderNorm)) return true;
-
-  const orderVol = extractVolumeToken(orderNorm);
-  const lineVol = extractVolumeToken(lineNorm);
-  if (!orderVol || orderVol !== lineVol) return false;
-
-  return physicalLineBrandTokens(productSku).some((brand) => orderNorm.includes(brand));
+function traceabilityFromLine(line) {
+  const mfgDate = String(line?.mfgDate ?? line?.mfg_date ?? "").trim().slice(0, 10);
+  const batchNo = String(line?.batchNo ?? line?.batch_no ?? "").trim();
+  return { mfgDate, batchNo };
 }
 
 function findPhysicalStockRow(rows, orderSku) {
@@ -98,6 +72,53 @@ function ensureRowForSku(rows, orderSku) {
 }
 
 /**
+ * Attach MFG / batch from dispatch lines to lots that already have primary sale but empty traceability.
+ * Does not change primary sale totals (fixes orders dispatched before traceability was saved on lines).
+ */
+export function fillMissingLotTraceabilityFromOrderLines(rows, orderLines) {
+  const nextRows = (rows || []).map((row) => ({
+    productSku: row.productSku,
+    lots: getLotsFromProductRow(row).map((lot) => ({ ...lot })),
+  }));
+
+  for (const line of orderLines || []) {
+    const sku = String(line?.sku || "").trim();
+    const { mfgDate, batchNo } = traceabilityFromLine(line);
+    if (!sku || (!mfgDate && !batchNo)) continue;
+
+    const row = findPhysicalStockRow(nextRows, sku);
+    if (!row) continue;
+
+    const lots = getLotsFromProductRow(row);
+    const hasLot = lots.some(
+      (l) => String(l.mfgDate || "").trim() === mfgDate && String(l.batchNo || "").trim() === batchNo
+    );
+    if (hasLot) continue;
+
+    const cases = Math.round(num(line.cases) || num(line.quantity));
+    let lot = lots.find(
+      (l) =>
+        !String(l.mfgDate || "").trim() &&
+        !String(l.batchNo || "").trim() &&
+        num(l.primarySale) > 0 &&
+        (cases <= 0 || num(l.primarySale) === cases)
+    );
+    if (!lot) {
+      lot = lots.find(
+        (l) => !String(l.mfgDate || "").trim() && !String(l.batchNo || "").trim() && num(l.primarySale) > 0
+      );
+    }
+    if (lot) {
+      if (mfgDate) lot.mfgDate = mfgDate;
+      if (batchNo) lot.batchNo = batchNo;
+      row.lots = lots;
+    }
+  }
+
+  return nextRows;
+}
+
+/**
  * Credit dispatched order line quantities into distributor physical stock primary sale.
  * Matches SKU to physical-stock rows (abbreviated lines or exact calculator SKU).
  */
@@ -136,11 +157,12 @@ export function applyDispatchLinesToPrimarySales(rawPhysicalStock, orderLines, d
 
     const row = ensureRowForSku(rows, sku);
     const lots = getLotsFromProductRow(row);
-    const lot = findOrCreateLot(lots, line.mfgDate ?? line.mfg_date, line.batchNo ?? line.batch_no);
+    const { mfgDate, batchNo } = traceabilityFromLine(line);
+    const lot = findOrCreateLot(lots, mfgDate, batchNo);
     creditLotPrimarySale(lot, cases);
     row.lots = lots;
   }
 
-  payload.rows = rows;
+  payload.rows = fillMissingLotTraceabilityFromOrderLines(rows, orderLines);
   return payload;
 }

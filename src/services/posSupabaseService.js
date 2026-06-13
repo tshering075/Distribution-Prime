@@ -220,6 +220,52 @@ export async function savePhysicalStockToSupabase(distributorCode, physicalStock
   return updateDistributor(distributorCode, { physical_stock: physicalStockPayload });
 }
 
+/**
+ * Upsert historical snapshot via distributor session RPC (anon-safe).
+ * Returns null when no distributor session — caller should use admin upsert path.
+ */
+export async function savePhysicalStockSnapshotToSupabase(distributorCode, payload) {
+  if (!supabase) throw new Error("Supabase not initialized");
+
+  const ctx = distributorRpcContext(distributorCode);
+  if (!ctx) return null;
+
+  const reportDate =
+    typeof payload?.reportDate === "string" && payload.reportDate
+      ? payload.reportDate.slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await supabase.rpc("upsert_distributor_physical_stock_snapshot", {
+    p_slug: ctx.slug,
+    p_distributor_code: ctx.code,
+    p_session_token: ctx.sessionToken,
+    p_report_date: reportDate,
+    p_payload: {
+      reportDate,
+      rows: payload?.rows ?? [],
+      updatedAt: payload?.updatedAt || new Date().toISOString(),
+    },
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      const err = new Error("upsert_distributor_physical_stock_snapshot RPC not found");
+      err.code = error.code;
+      throw err;
+    }
+    if (error.code === "42P01" || /distributor_physical_stock_snapshots/i.test(String(error.message || ""))) {
+      const err = new Error(
+        "Table distributor_physical_stock_snapshots is missing. Run ADD_DISTRIBUTOR_PHYSICAL_STOCK_SNAPSHOTS.sql in Supabase."
+      );
+      err.code = "MISSING_SNAPSHOTS_TABLE";
+      throw err;
+    }
+    throw error;
+  }
+
+  return firstRow(Array.isArray(data) ? data : data ? [data] : []);
+}
+
 export async function savePosSettingsToSupabase(distributorCode, settings) {
   if (!supabase) throw new Error("Supabase not initialized");
 
