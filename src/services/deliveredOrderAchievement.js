@@ -5,7 +5,6 @@ import {
   patchOrderFields,
   findSalesDataForDispatchedOrder,
   getProductRates,
-  getWorkspaceInventory,
   deductWorkspaceInventoryForDispatch,
   supabase,
 } from "./supabaseService";
