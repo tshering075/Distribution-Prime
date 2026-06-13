@@ -53,6 +53,7 @@ import ActivityDialog from "../components/ActivityDialog";
 import GmailSettingsDialog from "../components/GmailSettingsDialog";
 import SchemeDiscountDialog from "../components/SchemeDiscountDialog";
 import RateMasterDialog from "../components/RateMasterDialog";
+import InventoryDialog from "../components/InventoryDialog";
 import GstSettingsDialog from "../components/GstSettingsDialog";
 import PhysicalStockAdminDialog from "../components/PhysicalStockAdminDialog";
 import AdminStockLiftingRecordsDialog from "../components/AdminStockLiftingRecordsDialog";
@@ -73,6 +74,7 @@ import { isCombinedTargetAchievedUC } from "../utils/targetAchievement";
 import { getTargetReminderNotificationIconUrl } from "../utils/targetReminder";
 import NuProductRateIcon from "../components/NuProductRateIcon";
 import WarehouseIcon from "@mui/icons-material/Warehouse";
+import Inventory2OutlinedIcon from "@mui/icons-material/Inventory2Outlined";
 import TableChartIcon from "@mui/icons-material/TableChart";
 import CokeCalculator from "../cokecalculator";
 import { getDistributors, saveDistributors } from "../utils/distributorAuth";
@@ -196,6 +198,7 @@ function AdminDashboard({ onLogout }) {
   const [gmailSettingsOpen, setGmailSettingsOpen] = useState(false);
   const [schemeDiscountOpen, setSchemeDiscountOpen] = useState(false);
   const [rateMasterOpen, setRateMasterOpen] = useState(false);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [physicalStockAdminOpen, setPhysicalStockAdminOpen] = useState(false);
   const [stockLiftingRecordsOpen, setStockLiftingRecordsOpen] = useState(false);
   const [performanceSkuDialog, setPerformanceSkuDialog] = useState(null);
@@ -1855,6 +1858,7 @@ function AdminDashboard({ onLogout }) {
       if (savedView === "targets") setTargetsOpen(true);
       if (savedView === "scheme_discount") setSchemeDiscountOpen(true);
       if (savedView === "rate_master") setRateMasterOpen(true);
+      if (savedView === "inventory") setInventoryOpen(true);
       if (savedView === "physical_stock") setPhysicalStockAdminOpen(true);
       if (savedView === "stock_lifting_records") setStockLiftingRecordsOpen(true);
       if (savedView === "distributors") setDistributorsOpen(true);
@@ -3507,6 +3511,7 @@ function AdminDashboard({ onLogout }) {
     gstSettingsOpen ||
     schemeDiscountOpen ||
     rateMasterOpen ||
+    inventoryOpen ||
     physicalStockAdminOpen ||
     stockLiftingRecordsOpen ||
     previewOpen ||
@@ -3572,6 +3577,10 @@ function AdminDashboard({ onLogout }) {
       setRateMasterOpen(false);
       return;
     }
+    if (inventoryOpen) {
+      setInventoryOpen(false);
+      return;
+    }
     if (physicalStockAdminOpen) {
       setPhysicalStockAdminOpen(false);
       return;
@@ -3598,6 +3607,7 @@ function AdminDashboard({ onLogout }) {
     gstSettingsOpen,
     schemeDiscountOpen,
     rateMasterOpen,
+    inventoryOpen,
     physicalStockAdminOpen,
     stockLiftingRecordsOpen,
     isMobile,
@@ -3701,6 +3711,15 @@ function AdminDashboard({ onLogout }) {
                     action: () => {
                       setRateMasterOpen(true);
                       setAdminCurrentView("rate_master");
+                      setSidebarOpen(isMobile);
+                    },
+                  },
+                  {
+                    text: "Inventory",
+                    icon: <Inventory2OutlinedIcon />,
+                    action: () => {
+                      setInventoryOpen(true);
+                      setAdminCurrentView("inventory");
                       setSidebarOpen(isMobile);
                     },
                   },
@@ -4176,6 +4195,13 @@ function AdminDashboard({ onLogout }) {
           }}
           productRates={productRates}
           onRatesUpdated={(newRates) => setProductRates(newRates)}
+        />
+        <InventoryDialog
+          open={inventoryOpen}
+          onClose={() => {
+            setInventoryOpen(false);
+            setAdminCurrentView("dashboard");
+          }}
         />
 
         <PhysicalStockAdminDialog

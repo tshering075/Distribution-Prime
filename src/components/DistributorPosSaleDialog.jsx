@@ -79,10 +79,12 @@ import {
   sumPosSalesTotal,
 } from "../utils/posSaleStorage";
 import {
+  buildDispatchedInboundMap,
   buildStockAvailabilityMap,
   deductStockForPosSale,
   getPhysicalStockRowsFromDistributor,
   lineItemsForStockRestore,
+  mergeDispatchedInboundIntoAvailability,
   restoreStockFromPosSale,
 } from "../utils/posStock";
 import {
@@ -1933,7 +1935,11 @@ export default function DistributorPosSaleDialog({
     [deliveredOrders, catalogSkuNames]
   );
 
-  const stockMap = useMemo(() => buildStockAvailabilityMap(physicalRows), [physicalRows]);
+  const stockMap = useMemo(() => {
+    const base = buildStockAvailabilityMap(physicalRows, catalogSkuNames);
+    const inbound = buildDispatchedInboundMap(deliveredOrders, catalogSkuNames);
+    return mergeDispatchedInboundIntoAvailability(base, inbound);
+  }, [physicalRows, catalogSkuNames, deliveredOrders]);
 
   const categories = useMemo(() => {
     const set = new Set(skus.map((s) => s.category).filter(Boolean));

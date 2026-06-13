@@ -4,10 +4,14 @@ import {
   saveSalesData,
   patchOrderFields,
   findSalesDataForDispatchedOrder,
+  getProductRates,
+  getWorkspaceInventory,
+  deductWorkspaceInventoryForDispatch,
   supabase,
 } from "./supabaseService";
 import { aggregateOrderLineTotals, enrichLineWithMfgBatch } from "../utils/orderLineCalculation";
 import { getDistributors, saveDistributors } from "../utils/distributorAuth";
+import { readProductRatesFromLocalStorage } from "../utils/productRatesStorage";
 import { ORDER_STATUS, resolveOrderStatus } from "../utils/orderStatus";
 import { applyDispatchLinesToPrimarySales, fillMissingLotTraceabilityFromOrderLines } from "../utils/dispatchPrimarySales";
 import { getRawPhysicalStockFromDistributor } from "../utils/physicalStockTemplate";
@@ -34,6 +38,98 @@ export function coerceOrderLineData(data) {
 
 export function isOrderAchievementApplied(order) {
   return Boolean(order?.achievementApplied || order?.achievement_applied);
+}
+
+export function isPhysicalStockDispatchApplied(order) {
+  return Boolean(order?.physicalStockDispatchApplied || order?.physical_stock_dispatch_applied);
+}
+
+export function isInventoryDispatchApplied(order) {
+  return Boolean(order?.inventoryDispatchApplied || order?.inventory_dispatch_applied);
+}
+
+async function deductWorkspaceInventoryForOrder(order, identityFallback) {
+  const orderLines = coerceOrderLineData(order.data).map((line) => enrichLineWithMfgBatch(line, line));
+  if (!orderLines.length) return { deducted: false };
+
+  const { shortages } = await deductWorkspaceInventoryForDispatch(orderLines);
+
+  if (order.id || identityFallback) {
+    await patchOrderFields(
+      order.id ?? null,
+      {
+        inventory_dispatch_applied: true,
+        inventoryDispatchApplied: true,
+      },
+      identityFallback
+    );
+  }
+
+  if (shortages.length > 0) {
+    console.warn("Inventory dispatch shortages:", shortages);
+  }
+
+  return { deducted: true, shortages };
+}
+
+async function resolveProductRatesForDispatch() {
+  try {
+    if (supabase) {
+      const doc = await getProductRates();
+      if (doc) return doc;
+    }
+  } catch (e) {
+    console.warn("Could not load product rates for dispatch physical stock:", e);
+  }
+  return readProductRatesFromLocalStorage();
+}
+
+async function creditDistributorPhysicalStock(order, deliveredAt, productRates, identityFallback) {
+  const distributorCode = resolveOrderDistributorCode(order);
+  const orderLines = coerceOrderLineData(order.data).map((line) => enrichLineWithMfgBatch(line, line));
+
+  if (supabase) {
+    const dist = await getDistributorByCode(distributorCode);
+    if (!dist) {
+      throw new Error(`Distributor ${distributorCode} not found.`);
+    }
+    const physical_stock = applyDispatchLinesToPrimarySales(
+      getRawPhysicalStockFromDistributor(dist),
+      orderLines,
+      deliveredAt,
+      productRates
+    );
+    await updateDistributor(distributorCode, { physical_stock });
+
+    if (order.id || identityFallback) {
+      await patchOrderFields(
+        order.id ?? null,
+        {
+          physical_stock_dispatch_applied: true,
+          physicalStockDispatchApplied: true,
+        },
+        identityFallback
+      );
+    }
+    return { physical_stock };
+  }
+
+  const distributors = getDistributors();
+  const dist =
+    distributors.find((d) => String(d.code || "").trim() === distributorCode) ||
+    distributors.find((d) => d.name === order.distributorName);
+  const physical_stock = applyDispatchLinesToPrimarySales(
+    getRawPhysicalStockFromDistributor(dist),
+    orderLines,
+    deliveredAt,
+    productRates
+  );
+  updateLocalDistributorRecord(
+    distributorCode,
+    { physical_stock },
+    order.distributorName
+  );
+  return { physical_stock };
 }
 
 export function resolveOrderDistributorCode(order) {
@@ -191,6 +287,36 @@ export async function applyDeliveredOrderAchievement(order, identityFallback = n
     order.statusUpdatedAt ||
     new Date().toISOString();
 
+  const productRates = await resolveProductRatesForDispatch();
+  const identityFallbackForPatch =
+    identityFallback ||
+    (distributorCode && orderNumber
+      ? { distributorCode, orderNumber }
+      : null);
+
+  let physicalStockCredited = isPhysicalStockDispatchApplied(order);
+  if (!physicalStockCredited) {
+    try {
+      await creditDistributorPhysicalStock(
+        order,
+        deliveredAt,
+        productRates,
+        identityFallbackForPatch
+      );
+      physicalStockCredited = true;
+    } catch (e) {
+      console.warn("Physical stock credit on dispatch failed:", e);
+    }
+  }
+
+  if (!isInventoryDispatchApplied(order)) {
+    try {
+      await deductWorkspaceInventoryForOrder(order, identityFallbackForPatch);
+    } catch (e) {
+      console.warn("Workspace inventory deduction on dispatch failed:", e);
+    }
+  }
+
   if (supabase) {
     const existing = await findSalesDataForDispatchedOrder(distributorCode, orderNumber);
     if (existing) {
@@ -211,6 +337,7 @@ export async function applyDeliveredOrderAchievement(order, identityFallback = n
         reason: "sales_data_exists",
         salesDataId: existing.id,
         totals,
+        physicalStockCredited,
       };
     }
   }
@@ -229,16 +356,8 @@ export async function applyDeliveredOrderAchievement(order, identityFallback = n
     }
     updatedAchieved = mergeAchieved(dist.achieved, totals);
 
-    const orderLines = coerceOrderLineData(order.data).map((line) => enrichLineWithMfgBatch(line, line));
-    const physical_stock = applyDispatchLinesToPrimarySales(
-      getRawPhysicalStockFromDistributor(dist),
-      orderLines,
-      deliveredAt
-    );
-
     await updateDistributor(distributorCode, {
       achieved: updatedAchieved,
-      physical_stock,
     });
 
     const saved = await saveSalesData(buildSalesDataPayload(order, totals, dist.name));
@@ -259,15 +378,9 @@ export async function applyDeliveredOrderAchievement(order, identityFallback = n
       distributors.find((d) => String(d.code || "").trim() === distributorCode) ||
       distributors.find((d) => d.name === order.distributorName);
     updatedAchieved = mergeAchieved(dist?.achieved, totals);
-    const orderLines = coerceOrderLineData(order.data).map((line) => enrichLineWithMfgBatch(line, line));
-    const physical_stock = applyDispatchLinesToPrimarySales(
-      getRawPhysicalStockFromDistributor(dist),
-      orderLines,
-      deliveredAt
-    );
     updateLocalDistributorRecord(
       distributorCode,
-      { achieved: updatedAchieved, physical_stock },
+      { achieved: updatedAchieved },
       order.distributorName
     );
   }

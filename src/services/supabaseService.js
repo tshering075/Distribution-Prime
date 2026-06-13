@@ -23,6 +23,7 @@ import {
   getDistributorSessionToken,
   clearDistributorSessionToken,
 } from '../utils/distributorSession';
+import { deductInventoryForDispatch } from '../utils/workspaceInventory';
 import { ensureProductCatalog } from '../utils/productCatalog';
 import { hashPasswordSync } from '../utils/distributorAuth';
 
@@ -4909,6 +4910,335 @@ export function subscribeFgOpeningStock(onData) {
           onData(data);
         } catch (e) {
           console.warn('FG opening stock refresh after realtime event failed:', e);
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    try {
+      supabase.removeChannel(channel);
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
+// ==================== WORKSPACE INVENTORY (workspace_inventory_lots table) ====================
+
+const WORKSPACE_INVENTORY_ID = 'workspace_inventory';
+const WORKSPACE_INVENTORY_TABLE = 'workspace_inventory_lots';
+
+function mapInventoryLotFromDb(row) {
+  if (!row) return null;
+  const mfg = row.mfg_date ?? row.mfgDate;
+  const bbd = row.bbd_date ?? row.bbdDate;
+  return {
+    id: row.id,
+    productName: String(row.product_name ?? row.productName ?? '').trim(),
+    sku: String(row.sku ?? '').trim(),
+    category: String(row.category ?? 'CSD').trim() || 'CSD',
+    mfgDate: mfg ? String(mfg).slice(0, 10) : '',
+    batchNo: String(row.batch_no ?? row.batchNo ?? '').trim(),
+    bbdDate: bbd ? String(bbd).slice(0, 10) : '',
+    quantity: Math.max(0, Math.floor(Number(row.quantity) || 0)),
+  };
+}
+
+function normalizeWorkspaceInventoryPayload(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const rows = Array.isArray(raw.rows) ? raw.rows.map((r) => mapInventoryLotFromDb(r)).filter(Boolean) : [];
+  return {
+    rows,
+    updatedAt: raw.updatedAt ? String(raw.updatedAt) : null,
+    updatedBy: raw.updatedBy != null ? String(raw.updatedBy) : '',
+  };
+}
+
+function parseWorkspaceInventoryAppConfig(row) {
+  if (!row) return null;
+  const candidates = [row.apiKey, row.clientId, row.gmail_client_id, row.gmail_api_key];
+  let best = null;
+  let bestTime = -1;
+  for (const raw of candidates) {
+    if (!raw || typeof raw !== 'string') continue;
+    try {
+      const p = JSON.parse(raw);
+      if (p && Array.isArray(p.rows)) {
+        const t = p.updatedAt ? Date.parse(String(p.updatedAt)) : 0;
+        const score = Number.isFinite(t) ? t : 0;
+        const len = p.rows.length;
+        if (score > bestTime || (score === bestTime && len > (best?.rows?.length ?? -1))) {
+          bestTime = score;
+          best = normalizeWorkspaceInventoryPayload(p);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return best;
+}
+
+async function fetchWorkspaceInventoryViaRpc(orgId) {
+  const { data, error } = await supabase.rpc('get_workspace_inventory', { p_org_id: orgId });
+  if (error) {
+    if (isMissingRpcError(error)) return null;
+    throw error;
+  }
+  if (!data || typeof data !== 'object') return null;
+  return normalizeWorkspaceInventoryPayload(data);
+}
+
+async function fetchWorkspaceInventoryFromTable(orgId) {
+  const { data, error } = await fromTenant(WORKSPACE_INVENTORY_TABLE, orgId)
+    .select('*')
+    .order('sku', { ascending: true })
+    .order('mfg_date', { ascending: true, nullsFirst: false });
+
+  if (error) {
+    if (error.code === 'PGRST205' || error.code === '42P01') return null;
+    throw error;
+  }
+
+  if (!Array.isArray(data) || data.length === 0) return null;
+
+  const rows = data.map((r) => mapInventoryLotFromDb(r)).filter(Boolean);
+  const updatedAt = data.reduce((latest, row) => {
+    const t = row.updated_at ? Date.parse(String(row.updated_at)) : 0;
+    return t > latest ? t : latest;
+  }, 0);
+
+  return {
+    rows,
+    updatedAt: updatedAt > 0 ? new Date(updatedAt).toISOString() : null,
+    updatedBy: '',
+  };
+}
+
+async function fetchWorkspaceInventoryLegacyAppConfig(orgId) {
+  const { data, error } = await fromTenant('app_config', orgId)
+    .select('*')
+    .eq('id', WORKSPACE_INVENTORY_ID)
+    .limit(1);
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching legacy workspace inventory:', error);
+    return null;
+  }
+
+  if (!data || data.length === 0) return null;
+  return parseWorkspaceInventoryAppConfig(data[0]);
+}
+
+/**
+ * @returns {Promise<{ rows: Array, updatedAt: string|null, updatedBy: string } | null>}
+ */
+export async function getWorkspaceInventory() {
+  try {
+    if (!supabase) return null;
+
+    const orgId = getActiveOrganizationId();
+    if (!orgId) return null;
+
+    const rpc = await fetchWorkspaceInventoryViaRpc(orgId);
+    if (rpc) return rpc;
+
+    const table = await fetchWorkspaceInventoryFromTable(orgId);
+    if (table) return table;
+
+    return fetchWorkspaceInventoryLegacyAppConfig(orgId);
+  } catch (error) {
+    console.error('Error fetching workspace inventory:', error);
+    return null;
+  }
+}
+
+async function saveWorkspaceInventoryViaRpc(orgId, payload) {
+  const { data, error } = await supabase.rpc('save_workspace_inventory', {
+    p_org_id: orgId,
+    p_payload: payload,
+  });
+  if (error) {
+    if (isMissingRpcError(error)) return null;
+    throw error;
+  }
+  if (!data || typeof data !== 'object') {
+    return normalizeWorkspaceInventoryPayload(payload);
+  }
+  const normalized = normalizeWorkspaceInventoryPayload(data);
+  if (normalized) {
+    normalized.updatedBy = payload.updatedBy ?? normalized.updatedBy;
+  }
+  return normalized;
+}
+
+async function saveWorkspaceInventoryToTable(orgId, payload) {
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const updatedAt = new Date().toISOString();
+
+  const { error: delErr } = await fromTenant(WORKSPACE_INVENTORY_TABLE, orgId)
+    .delete()
+    .neq('sku', '');
+  if (delErr && delErr.code !== 'PGRST205' && delErr.code !== '42P01') {
+    throw delErr;
+  }
+
+  if (rows.length > 0) {
+    const insertRows = rows.map((row) =>
+      withOrgPayload({
+        product_name: row.productName,
+        sku: row.sku,
+        category: row.category || 'CSD',
+        mfg_date: row.mfgDate || null,
+        batch_no: row.batchNo || '',
+        bbd_date: row.bbdDate || null,
+        quantity: Math.max(0, Math.floor(Number(row.quantity) || 0)),
+        updated_at: updatedAt,
+      }, orgId)
+    );
+
+    const { error: insErr } = await fromTenant(WORKSPACE_INVENTORY_TABLE, orgId).insert(insertRows);
+    if (insErr) throw insErr;
+  }
+
+  return { rows, updatedAt, updatedBy: payload.updatedBy ?? '' };
+}
+
+async function saveWorkspaceInventoryLegacyAppConfig(orgId, payload) {
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const updatedBy = payload?.updatedBy != null ? String(payload.updatedBy) : '';
+  const updatedAt = new Date().toISOString();
+  const body = JSON.stringify({ rows, updatedAt, updatedBy });
+
+  const row = withOrgPayload({
+    id: WORKSPACE_INVENTORY_ID,
+    clientId: body,
+    apiKey: body,
+    updated_at: updatedAt,
+  }, orgId);
+
+  const { error } = await fromTenant('app_config', orgId).upsert(row, {
+    onConflict: tenantUpsertConflict('id'),
+  });
+  if (error) throw error;
+  return { rows, updatedAt, updatedBy };
+}
+
+/**
+ * @param {{ rows: Array, updatedBy?: string }} payload
+ */
+export async function saveWorkspaceInventory(payload) {
+  try {
+    if (!supabase) {
+      throw new Error('Supabase not initialized');
+    }
+
+    const orgId = getActiveOrganizationId();
+    if (!orgId) {
+      throw new Error('No active workspace — sign in again before saving inventory.');
+    }
+
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    const updatedBy = payload?.updatedBy != null ? String(payload.updatedBy) : '';
+    const savePayload = { rows, updatedBy };
+
+    try {
+      const viaRpc = await saveWorkspaceInventoryViaRpc(orgId, savePayload);
+      if (viaRpc) return viaRpc;
+    } catch (rpcError) {
+      if (isSupabasePermissionError(rpcError)) {
+        throw new Error(
+          'Cloud save blocked by workspace permissions. Confirm you are signed in as a workspace admin.'
+        );
+      }
+      if (!isMissingRpcError(rpcError)) {
+        console.warn('save_workspace_inventory RPC failed, trying direct table save:', rpcError);
+      }
+    }
+
+    try {
+      return await saveWorkspaceInventoryToTable(orgId, savePayload);
+    } catch (tableError) {
+      if (tableError.code === 'PGRST205' || tableError.code === '42P01' || isMissingRpcError(tableError)) {
+        return saveWorkspaceInventoryLegacyAppConfig(orgId, savePayload);
+      }
+      if (isSupabasePermissionError(tableError)) {
+        throw new Error(
+          'Cloud save blocked. Run supabase/add_workspace_inventory.sql in Supabase SQL Editor, then try again.'
+        );
+      }
+      throw tableError;
+    }
+  } catch (error) {
+    console.error('Error saving workspace inventory:', error);
+    throw error;
+  }
+}
+
+/**
+ * Deduct inventory lots when an order is dispatched (Supabase RPC).
+ */
+export async function deductWorkspaceInventoryForDispatch(orderLines) {
+  if (!supabase) return { shortages: [] };
+  const orgId = getActiveOrganizationId();
+  if (!orgId || !Array.isArray(orderLines) || orderLines.length === 0) {
+    return { shortages: [] };
+  }
+
+  const lines = orderLines.map((line) => ({
+    sku: line.sku,
+    cases: line.cases ?? line.quantity,
+    quantity: line.quantity ?? line.cases,
+    mfgDate: line.mfgDate ?? line.mfg_date,
+    batchNo: line.batchNo ?? line.batch_no,
+    bbdDate: line.bbdDate ?? line.bbd_date,
+  }));
+
+  const { data, error } = await supabase.rpc('deduct_workspace_inventory_for_dispatch', {
+    p_org_id: orgId,
+    p_lines: lines,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) {
+      const current = await getWorkspaceInventory();
+      const { rows, shortages } = deductInventoryForDispatch(current?.rows || [], orderLines);
+      await saveWorkspaceInventory({ rows, updatedBy: 'dispatch' });
+      return { shortages };
+    }
+    throw error;
+  }
+
+  return {
+    shortages: Array.isArray(data?.shortages) ? data.shortages : [],
+  };
+}
+
+/**
+ * @param {(data: { rows: Array, updatedAt: string|null, updatedBy: string } | null) => void} onData
+ * @returns {() => void} unsubscribe
+ */
+export function subscribeWorkspaceInventory(onData) {
+  if (!supabase || typeof onData !== 'function') {
+    return () => {};
+  }
+
+  const channel = supabase
+    .channel(`workspace_inventory_${Date.now()}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: WORKSPACE_INVENTORY_TABLE,
+      },
+      async () => {
+        try {
+          const data = await getWorkspaceInventory();
+          onData(data);
+        } catch (e) {
+          console.warn('Workspace inventory refresh after realtime event failed:', e);
         }
       }
     )

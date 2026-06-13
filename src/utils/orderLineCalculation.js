@@ -175,13 +175,14 @@ export function aggregateOrderLineTotals(lines) {
 export function normalizeLineMfgBatch(row) {
   const mfgDate = String(row?.mfgDate ?? row?.mfg_date ?? "").trim();
   const batchNo = String(row?.batchNo ?? row?.batch_no ?? "").trim();
-  return { mfgDate, batchNo };
+  const bbdDate = String(row?.bbdDate ?? row?.bbd_date ?? row?.expiry ?? "").trim();
+  return { mfgDate, batchNo, bbdDate };
 }
 
-/** Attach MFG date and batch number to a calculated order line. */
+/** Attach MFG date, batch number, and BBD to a calculated order line. */
 export function enrichLineWithMfgBatch(line, sourceRow) {
-  const { mfgDate, batchNo } = normalizeLineMfgBatch(sourceRow);
-  return { ...line, mfgDate, batchNo };
+  const { mfgDate, batchNo, bbdDate } = normalizeLineMfgBatch(sourceRow);
+  return { ...line, mfgDate, batchNo, bbdDate };
 }
 
 export function buildOrderDataFromEditRows(rows, productRates, schemes = []) {
@@ -216,6 +217,7 @@ export function createEmptyEditRow() {
     purchasedCases: "",
     mfgDate: "",
     batchNo: "",
+    bbdDate: "",
     preferSchemeName: null,
   };
 }
@@ -224,12 +226,16 @@ export function orderRowsToEditState(data) {
   if (!Array.isArray(data)) return [];
   return data
     .filter((row) => row?.sku)
-    .map((row) => ({
-      _key: nextEditRowKey(),
-      sku: row.sku,
-      purchasedCases: getPurchasedCasesFromRow(row),
-      mfgDate: row.mfgDate ?? "",
-      batchNo: row.batchNo ?? "",
-      preferSchemeName: row.schemeApplied ?? null,
-    }));
+    .map((row) => {
+      const { mfgDate, batchNo, bbdDate } = normalizeLineMfgBatch(row);
+      return {
+        _key: nextEditRowKey(),
+        sku: row.sku,
+        purchasedCases: getPurchasedCasesFromRow(row),
+        mfgDate,
+        batchNo,
+        bbdDate,
+        preferSchemeName: row.schemeApplied ?? null,
+      };
+    });
 }

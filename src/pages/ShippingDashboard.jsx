@@ -18,12 +18,17 @@ import {
   getDistributorByCode,
   getCurrentUser,
   getAdminByUid,
+  getWorkspaceInventory,
   supabase,
 } from "../services/supabaseService";
 import { readProductRatesFromLocalStorage } from "../utils/productRatesStorage";
 import { getDistributors } from "../utils/distributorAuth";
 import { readOrdersCache, writeOrdersCache, ordersCacheStorageKey } from "../utils/ordersLocalStorage";
-import { applyDeliveredOrderAchievement, getOrderAchievementTotals } from "../services/deliveredOrderAchievement";
+import {
+  applyDeliveredOrderAchievement,
+  coerceOrderLineData,
+  getOrderAchievementTotals,
+} from "../services/deliveredOrderAchievement";
 import {
   ORDER_STATUS,
   normalizeOrderStatus,
@@ -57,6 +62,10 @@ import {
 } from "../constants/shippingTransport";
 import { generateShippingInvoiceFile } from "../utils/shippingOrderInvoicePrint";
 import { useBrand } from "../hooks/useBrand";
+import { useOrganizationOptional } from "../context/OrganizationProvider";
+import { resolveInvoiceLetterhead } from "../utils/organizationBrand";
+import { enrichLineWithMfgBatch } from "../utils/orderLineCalculation";
+import { validateOrderLinesAgainstInventory } from "../utils/workspaceInventory";
 import { getActiveOrganizationId, getWorkspaceLoginPath } from "../services/tenantScope";
 import { loadOrganizationContext } from "../services/organizationService";
 
@@ -123,6 +132,11 @@ function ShippingDashboard({ onLogout }) {
   const navigate = useNavigate();
   const { requestLogout, logoutConfirmDialog } = useLogoutConfirmation(onLogout);
   const brand = useBrand();
+  const orgCtx = useOrganizationOptional();
+  const invoiceLetterhead = useMemo(
+    () => resolveInvoiceLetterhead(brand, orgCtx?.organization),
+    [brand, orgCtx?.organization]
+  );
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [orders, setOrders] = useState([]);
@@ -725,6 +739,28 @@ function ShippingDashboard({ onLogout }) {
       return;
     }
 
+    const orderLines = coerceOrderLineData(order.data).map((line) =>
+      enrichLineWithMfgBatch(line, line)
+    );
+    if (orderLines.some((line) => (Number(line.cases) || Number(line.quantity) || 0) > 0)) {
+      try {
+        const inventory = await getWorkspaceInventory();
+        const invCheck = validateOrderLinesAgainstInventory(inventory?.rows || [], orderLines);
+        if (!invCheck.ok) {
+          showToast(invCheck.message, "warning", "Inventory");
+          return;
+        }
+      } catch (e) {
+        console.warn("Inventory check before dispatch failed:", e);
+        showToast(
+          e.message || "Could not verify inventory stock before dispatch",
+          "warning",
+          "Inventory"
+        );
+        return;
+      }
+    }
+
     setDeliveringId(orderId);
     const deliveredAt = new Date().toISOString();
     const transportPatch = buildTransportPatch(getOrderTransport(order));
@@ -1131,12 +1167,12 @@ function ShippingDashboard({ onLogout }) {
           distributor: previewDistributor,
           distributorName:
             merged.distributorName || merged.distributorCode || "Distributor",
-          companyName: brand.companyName,
-          organizationAddress: brand.address,
-          organizationPostNo: brand.postNo,
-          organizationGstNo: brand.gstNo,
+          companyName: invoiceLetterhead.companyName,
+          organizationAddress: invoiceLetterhead.address,
+          organizationPostNo: invoiceLetterhead.postNo,
+          organizationGstNo: invoiceLetterhead.gstNo,
           transport,
-          lines: payload.data,
+          lines: (payload.data || []).map((line) => enrichLineWithMfgBatch(line, line)),
           headerDate,
           orderNo,
           gstRate,
@@ -1179,10 +1215,7 @@ function ShippingDashboard({ onLogout }) {
       previewDistributor,
       showToast,
       persistOrderTransport,
-      brand.address,
-      brand.companyName,
-      brand.gstNo,
-      brand.postNo,
+      invoiceLetterhead,
       saveInvoicesOnOrder,
     ]
   );

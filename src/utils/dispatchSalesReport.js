@@ -7,6 +7,7 @@ import { getOrderTransport, displayVehicleNo } from "../constants/shippingTransp
 import { ORDER_STATUS, resolveOrderStatus } from "./orderStatus";
 import { parseFirestoreDate } from "./dateUtils";
 import { getOrderShippingInvoices, orderHasShippingInvoices } from "./shippingInvoiceStorage";
+import { resolveInvoiceLetterhead } from "./organizationBrand";
 import { enrichLineWithMfgBatch } from "./orderLineCalculation";
 
 function num(v) {
@@ -201,7 +202,13 @@ export function filterDispatchSalesRows(rows, { startDate = "", endDate = "", se
 }
 
 /** Build print payload for a dispatched order invoice. */
-export function buildShippingInvoicePrintPayload({ order, distributor, brand, gstRate = 0.05 }) {
+export function buildShippingInvoicePrintPayload({
+  order,
+  distributor,
+  brand,
+  organization,
+  gstRate = 0.05,
+}) {
   if (!order) return null;
   const lines = coerceOrderLineData(order.data).map((line) => enrichLineWithMfgBatch(line, line));
   const transport = getOrderTransport(order);
@@ -214,15 +221,17 @@ export function buildShippingInvoicePrintPayload({ order, distributor, brand, gs
     order.timestamp ??
     new Date();
 
+  const letterhead = resolveInvoiceLetterhead(brand, organization);
+
   return {
     order,
     distributor: distributor || null,
     distributorName:
       order.distributorName ?? order.distributor_name ?? distributor?.name ?? order.distributorCode,
-    companyName: brand?.companyName,
-    organizationAddress: brand?.address,
-    organizationPostNo: brand?.postNo,
-    organizationGstNo: brand?.gstNo,
+    companyName: letterhead.companyName,
+    organizationAddress: letterhead.address,
+    organizationPostNo: letterhead.postNo,
+    organizationGstNo: letterhead.gstNo,
     transport,
     lines,
     headerDate,

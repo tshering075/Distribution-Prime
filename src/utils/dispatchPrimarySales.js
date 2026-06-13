@@ -7,7 +7,18 @@ import {
   localIsoDate,
   normalizePhysicalStockPayload,
   PHYSICAL_STOCK_PRODUCT_LINES,
+  resolvePhysicalStockProductLines,
 } from "./physicalStockTemplate";
+
+function preserveRawPhysicalStockRows(raw) {
+  if (!Array.isArray(raw?.rows) || raw.rows.length === 0) return [];
+  return raw.rows
+    .map((r) => ({
+      productSku: String(r?.productSku || "").trim(),
+      lots: getLotsFromProductRow(r).map((lot) => ({ ...lot })),
+    }))
+    .filter((r) => r.productSku);
+}
 
 function num(v) {
   const n = Number(v);
@@ -17,7 +28,8 @@ function num(v) {
 function traceabilityFromLine(line) {
   const mfgDate = String(line?.mfgDate ?? line?.mfg_date ?? "").trim().slice(0, 10);
   const batchNo = String(line?.batchNo ?? line?.batch_no ?? "").trim();
-  return { mfgDate, batchNo };
+  const bbdDate = String(line?.bbdDate ?? line?.bbd_date ?? line?.expiry ?? "").trim().slice(0, 10);
+  return { mfgDate, batchNo, bbdDate };
 }
 
 function findPhysicalStockRow(rows, orderSku) {
@@ -48,14 +60,21 @@ function creditLotPrimarySale(lot, cases) {
   recalcSecondarySale(lot);
 }
 
-function findOrCreateLot(lots, mfgDate, batchNo) {
+function findOrCreateLot(lots, mfgDate, batchNo, bbdDate) {
   const mfg = String(mfgDate || "").trim();
   const batch = String(batchNo || "").trim();
-  let lot = lots.find((l) => String(l.mfgDate || "").trim() === mfg && String(l.batchNo || "").trim() === batch);
+  const bbd = String(bbdDate || "").trim();
+  let lot = lots.find(
+    (l) =>
+      String(l.mfgDate || "").trim() === mfg &&
+      String(l.batchNo || "").trim() === batch &&
+      String(l.bbdDate || "").trim() === bbd
+  );
   if (!lot) {
     lot = createEmptyFifoLot();
     lot.mfgDate = mfg;
     lot.batchNo = batch;
+    lot.bbdDate = bbd;
     lots.push(lot);
   }
   return lot;
@@ -122,9 +141,19 @@ export function fillMissingLotTraceabilityFromOrderLines(rows, orderLines) {
  * Credit dispatched order line quantities into distributor physical stock primary sale.
  * Matches SKU to physical-stock rows (abbreviated lines or exact calculator SKU).
  */
-export function applyDispatchLinesToPrimarySales(rawPhysicalStock, orderLines, deliveredAt) {
+export function applyDispatchLinesToPrimarySales(
+  rawPhysicalStock,
+  orderLines,
+  deliveredAt,
+  productRatesOrLines = null
+) {
   const reportDate = localIsoDate(deliveredAt ? new Date(deliveredAt) : new Date());
-  const payload = normalizePhysicalStockPayload(rawPhysicalStock || {});
+  const productLines = resolvePhysicalStockProductLines(productRatesOrLines);
+  const payload = normalizePhysicalStockPayload(rawPhysicalStock || {}, productLines);
+  if (payload.rows.length === 0) {
+    const preserved = preserveRawPhysicalStockRows(rawPhysicalStock);
+    if (preserved.length > 0) payload.rows = preserved;
+  }
   payload.reportDate = reportDate;
   payload.updatedAt = new Date().toISOString();
 
@@ -147,7 +176,7 @@ export function applyDispatchLinesToPrimarySales(rawPhysicalStock, orderLines, d
   }
 
   if (rows.length === 0) {
-    rows.push(...createEmptyPhysicalStockRows());
+    rows.push(...createEmptyPhysicalStockRows(productLines));
   }
 
   for (const line of orderLines || []) {
@@ -157,8 +186,8 @@ export function applyDispatchLinesToPrimarySales(rawPhysicalStock, orderLines, d
 
     const row = ensureRowForSku(rows, sku);
     const lots = getLotsFromProductRow(row);
-    const { mfgDate, batchNo } = traceabilityFromLine(line);
-    const lot = findOrCreateLot(lots, mfgDate, batchNo);
+    const { mfgDate, batchNo, bbdDate } = traceabilityFromLine(line);
+    const lot = findOrCreateLot(lots, mfgDate, batchNo, bbdDate);
     creditLotPrimarySale(lot, cases);
     row.lots = lots;
   }

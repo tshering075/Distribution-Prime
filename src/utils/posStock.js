@@ -4,6 +4,7 @@
  */
 
 import { normalizeForStockMatch } from "./fgStockSkuMatch";
+import { physicalStockSkusMatch } from "./physicalStockSkuMatch";
 import {
   createEmptyFifoLot,
   getLotsFromProductRow,
@@ -108,13 +109,45 @@ export function rowSecondaryQty(row) {
   return getLotsFromProductRow(row).reduce((s, lot) => s + num(lot.secondarySale), 0);
 }
 
+/** Sellable qty for a catalog SKU, matching abbreviated physical-stock lines. */
+export function lookupStockQtyForCatalogSku(physicalStockRows, catalogSku) {
+  const sku = String(catalogSku || "").trim();
+  if (!sku) return 0;
+
+  const directKey = sku.toUpperCase();
+  const exact = (physicalStockRows || []).find(
+    (r) => String(r?.productSku || "").trim().toUpperCase() === directKey
+  );
+  if (exact) return rowSellableQty(exact);
+
+  for (const row of physicalStockRows || []) {
+    if (physicalStockSkusMatch(row?.productSku, sku)) {
+      return rowSellableQty(row);
+    }
+  }
+  return 0;
+}
+
 /** Map SKU (uppercase) → sellable cases for POS. */
-export function buildStockAvailabilityMap(physicalStockRows) {
+export function buildStockAvailabilityMap(physicalStockRows, catalogSkuNames) {
   const map = new Map();
+  const catalog = Array.isArray(catalogSkuNames) ? catalogSkuNames : [];
+
+  if (catalog.length > 0) {
+    for (const name of catalog) {
+      const sku = String(name || "").trim();
+      if (!sku) continue;
+      const key = sku.toUpperCase();
+      if (map.has(key)) continue;
+      map.set(key, lookupStockQtyForCatalogSku(physicalStockRows, sku));
+    }
+  }
+
   for (const row of physicalStockRows || []) {
     const sku = String(row?.productSku || "").trim();
     if (!sku) continue;
-    map.set(sku.toUpperCase(), rowSellableQty(row));
+    const key = sku.toUpperCase();
+    if (!map.has(key)) map.set(key, rowSellableQty(row));
   }
   return map;
 }
@@ -136,8 +169,15 @@ export function getPhysicalStockRowsFromDistributor(distributor, productRates) {
   return normalizePhysicalStockPayload(raw, lines).rows;
 }
 
-function findRowForSkuKey(rows, skuKey) {
-  return (rows || []).find((r) => String(r.productSku || "").trim().toUpperCase() === skuKey) || null;
+function findRowForSkuKey(rows, skuKey, catalogSku) {
+  const key = String(skuKey || "").trim().toUpperCase();
+  const exact = (rows || []).find(
+    (r) => String(r.productSku || "").trim().toUpperCase() === key
+  );
+  if (exact) return exact;
+
+  const label = catalogSku || skuKey;
+  return (rows || []).find((r) => physicalStockSkusMatch(r.productSku, label)) || null;
 }
 
 function matchCatalogSkuKey(orderSku, catalogSkuNames) {
@@ -202,7 +242,7 @@ export function deductStockForPosSale(rows, lineItems) {
     const requested = Math.max(0, Math.floor(num(item.qty)));
     if (!skuKey || requested <= 0) continue;
 
-    let row = findRowForSkuKey(updated, skuKey);
+    let row = findRowForSkuKey(updated, skuKey, item.sku);
     const createdRow = !row;
     if (!row) {
       row = {
@@ -256,7 +296,7 @@ export function restoreStockFromPosSale(rows, lineItems) {
     const requested = restoreQty;
     if (!skuKey || requested <= 0) continue;
 
-    const row = findRowForSkuKey(updated, skuKey);
+    const row = findRowForSkuKey(updated, skuKey, item.sku);
     if (!row) continue;
 
     let remaining = requested;

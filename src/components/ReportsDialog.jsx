@@ -26,6 +26,7 @@ import { buildShippingInvoicePrintPayload } from "../utils/dispatchSalesReport";
 import { downloadAllShippingInvoices, downloadShippingInvoice } from "../utils/shippingInvoiceActions";
 import { generateShippingInvoiceFile, openShippingOrderInvoicePrint } from "../utils/shippingOrderInvoicePrint";
 import { useBrand } from "../hooks/useBrand";
+import { useOrganizationOptional } from "../context/OrganizationProvider";
 import AppSnackbar from "./AppSnackbar";
 import {
   REPORT_TABS,
@@ -60,6 +61,7 @@ export default function ReportsDialog({
   const tableRef = useRef(null);
   const theme = useTheme();
   const brand = useBrand();
+  const orgCtx = useOrganizationOptional();
   const tableStyles = useReportTableStyles();
 
   const showSnackbar = (message, severity = "info") => {
@@ -206,7 +208,7 @@ export default function ReportsDialog({
         win.addEventListener("load", () => setTimeout(() => { win.focus(); win.print(); }, 500), { once: true });
       } else {
         openShippingOrderInvoicePrint(
-          buildShippingInvoicePrintPayload({ order: row.order, distributor: row.distributor, brand })
+          buildShippingInvoicePrintPayload({ order: row.order, distributor: row.distributor, brand, organization: orgCtx?.organization })
         );
       }
       showSnackbar("Invoice opened for printing", "success");
@@ -225,7 +227,7 @@ export default function ReportsDialog({
         showSnackbar("Invoice saved", "success");
       } else if (row.order) {
         const file = await generateShippingInvoiceFile(
-          buildShippingInvoicePrintPayload({ order: row.order, distributor: row.distributor, brand })
+          buildShippingInvoicePrintPayload({ order: row.order, distributor: row.distributor, brand, organization: orgCtx?.organization })
         );
         downloadShippingInvoice(file);
         showSnackbar("Invoice saved as PDF", "success");
@@ -253,7 +255,7 @@ export default function ReportsDialog({
           saved += row.invoices.length;
         } else if (row.order) {
           const file = await generateShippingInvoiceFile(
-            buildShippingInvoicePrintPayload({ order: row.order, distributor: row.distributor, brand })
+            buildShippingInvoicePrintPayload({ order: row.order, distributor: row.distributor, brand, organization: orgCtx?.organization })
           );
           downloadShippingInvoice(file);
           saved += 1;

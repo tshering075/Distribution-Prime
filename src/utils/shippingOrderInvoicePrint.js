@@ -1,4 +1,4 @@
-import { num } from "./orderLineCalculation";
+import { enrichLineWithMfgBatch, num } from "./orderLineCalculation";
 import { COMPANY_NAME } from "../constants/brand";
 
 function escapeHtml(value) {
@@ -148,12 +148,17 @@ function buildTotalsSideTableHtml(totals) {
   </table>`;
 }
 
+function normalizeInvoiceLines(lines) {
+  return (lines || []).map((row) => enrichLineWithMfgBatch(row, row));
+}
+
 function buildLineRowsHtml(lines) {
-  if (!lines?.length) {
-    return `<tr><td colspan="8" style="text-align:center;padding:12px;">No line items</td></tr>`;
+  const normalized = normalizeInvoiceLines(lines);
+  if (!normalized.length) {
+    return `<tr><td colspan="9" style="text-align:center;padding:12px;">No line items</td></tr>`;
   }
 
-  return lines
+  return normalized
     .map((row, i) => {
       const cases = num(row.cases);
       const freeCases = num(row.freeCases);
@@ -164,6 +169,7 @@ function buildLineRowsHtml(lines) {
         <td class="sku">${escapeHtml(row.sku)}</td>
         <td>${escapeHtml(row.mfgDate || "—")}</td>
         <td>${escapeHtml(row.batchNo || "—")}</td>
+        <td>${escapeHtml(row.bbdDate || "—")}</td>
         <td class="num">${escapeHtml(qtyLabel)}</td>
         <td class="num">${formatInr(row.rate)}</td>
         <td class="num">${formatInr(row.totalAmount)}</td>
@@ -215,7 +221,8 @@ function buildInvoiceHtml(payload) {
     order?.transportationCharges ??
     order?.transportation_charges ??
     0;
-  const totals = computeInvoiceTotals(lines, transportCharges, gstRate);
+  const normalizedLines = normalizeInvoiceLines(lines);
+  const totals = computeInvoiceTotals(normalizedLines, transportCharges, gstRate);
   const totalsMainTableHtml = buildTotalsMainTableHtml(totals);
   const totalsSideTableHtml = buildTotalsSideTableHtml(totals);
   const totalsLayoutHtml = `<div class="totalsGrid">
@@ -310,6 +317,7 @@ function buildInvoiceHtml(payload) {
         <th>SKU</th>
         <th>MFG Date</th>
         <th>Batch No.</th>
+        <th>BBD</th>
         <th style="text-align:right">Qty/Cases</th>
         <th style="text-align:right">Rate</th>
         <th style="text-align:right">Amount</th>
@@ -317,7 +325,7 @@ function buildInvoiceHtml(payload) {
       </tr>
     </thead>
     <tbody>
-      ${buildLineRowsHtml(lines)}
+      ${buildLineRowsHtml(normalizedLines)}
     </tbody>
   </table>
 

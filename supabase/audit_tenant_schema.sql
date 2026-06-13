@@ -29,6 +29,7 @@ FROM (
     ('schemes'),
     ('app_config'),
     ('distributor_physical_stock_snapshots'),
+    ('workspace_inventory_lots'),
     ('distributor_pos_sales'),
     ('platform_admins'),
     ('distributor_sessions')
@@ -108,6 +109,9 @@ FROM (
     ('get_distributor_orders'),
     ('get_workspace_product_rates'),
     ('save_workspace_product_rates'),
+    ('get_workspace_inventory'),
+    ('save_workspace_inventory'),
+    ('deduct_workspace_inventory_for_dispatch'),
     ('get_invite_by_token'),
     ('platform_list_organizations'),
     ('platform_delete_organization'),

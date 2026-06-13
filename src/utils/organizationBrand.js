@@ -90,6 +90,19 @@ export function resolveOrganizationBrand(settings, organizationName) {
 }
 
 /** @param {ReturnType<typeof resolveOrganizationBrand>} brand */
+/** Invoice letterhead fields from brand hook + organization record (signup settings). */
+export function resolveInvoiceLetterhead(brand, organization) {
+  const orgName = String(organization?.name || "").trim();
+  const fromOrg = resolveOrganizationBrand(organization?.settings, orgName);
+  const b = brand && typeof brand === "object" ? brand : {};
+  return {
+    companyName: String(b.companyName || fromOrg.companyName || orgName).trim(),
+    address: String(b.address || fromOrg.address || "").trim(),
+    postNo: String(b.postNo || fromOrg.postNo || "").trim(),
+    gstNo: String(b.gstNo || fromOrg.gstNo || "").trim(),
+  };
+}
+
 export function brandSettingsFromForm(brand) {
   const primary = brand.primary || BRAND_PRIMARY;
   return {
