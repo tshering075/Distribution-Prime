@@ -16,6 +16,7 @@
 -- 5.  add_shipping_order_columns.sql     (dispatch / invoice columns on orders)
 -- 6.  add_distributor_credentials.sql    (distributor login passwords)
 -- 6b. add_get_organization_by_id_rpc.sql  (anon distributor login org context)
+-- 6c. add_dispatch_primary_sale_and_inventory_read_rpc.sql  (primary sale on dispatch + inventory read for distributors)
 -- 7.  add_distributor_gstin_tpn.sql      (optional GST/TPN on distributors)
 -- 8.  add_physical_stock_column.sql      (distributors.physical_stock JSONB)
 -- 9.  ADD_DISTRIBUTOR_PHYSICAL_STOCK_SNAPSHOTS.sql  (history + distributor RPC)

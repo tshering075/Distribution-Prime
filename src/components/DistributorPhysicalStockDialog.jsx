@@ -34,6 +34,7 @@ import { savePhysicalStockToSupabase } from "../services/posSupabaseService";
 import { getDistributors, saveDistributors } from "../utils/distributorAuth";
 import { logActivity, ACTIVITY_TYPES } from "../services/activityService";
 import { syncPhysicalStockTraceabilityFromDispatchedOrders } from "../services/deliveredOrderAchievement";
+import { mergePrimarySalesFromDispatchedOrders } from "../utils/dispatchPrimarySales";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -151,9 +152,19 @@ export default function DistributorPhysicalStockDialog({
         });
         if (reqId !== loadRequestIdRef.current) return;
         setReportDate(date);
-        setRows(
-          syncPhysicalStockTraceabilityFromDispatchedOrders(nextRows, orders, distributorCode)
+        let mergedRows = syncPhysicalStockTraceabilityFromDispatchedOrders(
+          nextRows,
+          orders,
+          distributorCode
         );
+        mergedRows = mergePrimarySalesFromDispatchedOrders(
+          mergedRows,
+          orders,
+          distributorCode,
+          productRates,
+          { onlyUncredited: true }
+        );
+        setRows(mergedRows);
         setCarriedFromDate(fromDate);
         setDirty(false);
       } finally {
@@ -182,6 +193,11 @@ export default function DistributorPhysicalStockDialog({
     prevProductLinesKeyRef.current = productLinesKey;
     loadRowsForReportDate(reportDate);
   }, [open, dirty, productLinesKey, reportDate, loadRowsForReportDate]);
+
+  useEffect(() => {
+    if (!open || dirty || !sessionLoadedRef.current) return;
+    loadRowsForReportDate(reportDate);
+  }, [open, dirty, distributor?.physical_stock, reportDate, loadRowsForReportDate]);
 
   const handleRowsChange = useCallback((next) => {
     setDirty(true);

@@ -1,5 +1,7 @@
 import { normalizeForStockMatch } from "./fgStockSkuMatch";
 import { orderSkuMatchesPhysicalLine } from "./physicalStockSkuMatch";
+import { enrichLineWithMfgBatch } from "./orderLineCalculation";
+import { ORDER_STATUS, resolveOrderStatus } from "./orderStatus";
 import {
   createEmptyFifoLot,
   createEmptyPhysicalStockRows,
@@ -194,4 +196,69 @@ export function applyDispatchLinesToPrimarySales(
 
   payload.rows = fillMissingLotTraceabilityFromOrderLines(rows, orderLines);
   return payload;
+}
+
+function resolveOrderDistributorCode(order) {
+  return String(
+    order?.distributorCode ?? order?.distributor_code ?? order?.distributor ?? ""
+  ).trim();
+}
+
+function isPhysicalStockDispatchApplied(order) {
+  return Boolean(order?.physicalStockDispatchApplied || order?.physical_stock_dispatch_applied);
+}
+
+function coerceOrderLineData(data) {
+  if (Array.isArray(data)) return data;
+  if (data == null || data === "") return [];
+  if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Merge primary sale quantities from dispatched orders into physical stock rows for display.
+ * When onlyUncredited is true, skips orders already flagged as physical-stock credited (avoids double count).
+ */
+export function mergePrimarySalesFromDispatchedOrders(
+  rows,
+  orders,
+  distributorCode,
+  productRates = null,
+  { onlyUncredited = true } = {}
+) {
+  const code = String(distributorCode || "").trim();
+  if (!code) return rows || [];
+
+  const dispatchedOrders = (orders || []).filter((order) => {
+    if (resolveOrderStatus(order) !== ORDER_STATUS.DELIVERED) return false;
+    if (resolveOrderDistributorCode(order) !== code) return false;
+    if (onlyUncredited && isPhysicalStockDispatchApplied(order)) return false;
+    return true;
+  });
+
+  const lines = [];
+  for (const order of dispatchedOrders) {
+    for (const line of coerceOrderLineData(order.data)) {
+      lines.push(enrichLineWithMfgBatch(line, line));
+    }
+  }
+  if (!lines.length) return rows || [];
+
+  const raw = {
+    rows: (rows || []).map((row) => ({
+      productSku: row.productSku,
+      lots: getLotsFromProductRow(row).map((lot) => ({ ...lot })),
+    })),
+    reportDate: localIsoDate(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  return applyDispatchLinesToPrimarySales(raw, lines, new Date().toISOString(), productRates).rows;
 }

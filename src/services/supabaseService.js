@@ -5054,6 +5054,71 @@ export async function getWorkspaceInventory() {
   }
 }
 
+/**
+ * Load workspace inventory for the order calculator (admin, shipping, or distributor).
+ * Distributors use slug-based read-only RPC; falls back to local cache.
+ */
+export async function getWorkspaceInventoryForCalculator() {
+  try {
+    const orgId = getActiveOrganizationId();
+    const memberInventory = await getWorkspaceInventory();
+    if (memberInventory?.rows?.length) {
+      return memberInventory;
+    }
+
+    const slug = getActiveOrganizationSlug();
+    if (supabase && slug) {
+      const { data, error } = await supabase.rpc('get_workspace_inventory_by_slug', {
+        p_slug: slug,
+      });
+      if (!error && data && typeof data === 'object') {
+        const normalized = normalizeWorkspaceInventoryPayload(data);
+        if (normalized?.rows?.length) return normalized;
+      }
+    }
+
+    const { readWorkspaceInventoryFromLocalStorage } = await import('../utils/workspaceInventoryStorage');
+    return readWorkspaceInventoryFromLocalStorage(orgId);
+  } catch (error) {
+    console.warn('Error fetching inventory for calculator:', error);
+    try {
+      const { readWorkspaceInventoryFromLocalStorage } = await import('../utils/workspaceInventoryStorage');
+      return readWorkspaceInventoryFromLocalStorage(getActiveOrganizationId());
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Save primary-sale physical stock when shipping dispatches an order.
+ * @param {string} distributorCode
+ * @param {object} physicalStockPayload
+ */
+export async function creditDistributorPrimarySaleOnDispatch(distributorCode, physicalStockPayload) {
+  if (!supabase) {
+    throw new Error('Supabase not initialized');
+  }
+  const orgId = getActiveOrganizationId();
+  const code = String(distributorCode || '').trim();
+  if (!orgId || !code) {
+    throw new Error('Workspace and distributor code are required');
+  }
+
+  const { data, error } = await supabase.rpc('credit_distributor_primary_sale_on_dispatch', {
+    p_org_id: orgId,
+    p_distributor_code: code,
+    p_physical_stock: physicalStockPayload,
+  });
+
+  if (error) {
+    if (isMissingRpcError(error)) return null;
+    throw error;
+  }
+
+  return data && typeof data === 'object' ? data : physicalStockPayload;
+}
+
 async function saveWorkspaceInventoryViaRpc(orgId, payload) {
   const { data, error } = await supabase.rpc('save_workspace_inventory', {
     p_org_id: orgId,

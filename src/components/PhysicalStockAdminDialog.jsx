@@ -31,6 +31,9 @@ import {
   resolvePhysicalStockProductLines,
 } from "../utils/physicalStockTemplate";
 import { getAdminPhysicalStockLastSeenAt, getPhysicalStockUpdatesSince } from "../utils/adminPhysicalStockSignals";
+import { mergePrimarySalesFromDispatchedOrders } from "../utils/dispatchPrimarySales";
+import { ORDER_STATUS, resolveOrderStatus } from "../utils/orderStatus";
+import { resolveOrderDistributorCode } from "../services/deliveredOrderAchievement";
 import { alpha, useTheme } from "@mui/material/styles";
 import { supabase, fetchDistributorPhysicalStockSnapshots } from "../services/supabaseService";
 
@@ -59,6 +62,7 @@ export default function PhysicalStockAdminDialog({
   distributors,
   onOpened,
   productRates = null,
+  orders = [],
 }) {
   const theme = useTheme();
   const productLines = useMemo(
@@ -112,11 +116,29 @@ export default function PhysicalStockAdminDialog({
         d.getDate() === now.getDate()
       );
     };
+
+    const dispatchedTodayCodes = new Set();
+    for (const order of orders || []) {
+      if (resolveOrderStatus(order) !== ORDER_STATUS.DELIVERED) continue;
+      const deliveredAt =
+        order.delivered_at ||
+        order.deliveredAt ||
+        order.dispatched_at ||
+        order.dispatchedAt ||
+        order.status_updated_at ||
+        order.statusUpdatedAt;
+      if (!isSameLocalDay(deliveredAt)) continue;
+      const code = resolveOrderDistributorCode(order);
+      if (code) dispatchedTodayCodes.add(code);
+    }
+
     return sorted.filter((d) => {
       const raw = getRawPhysicalStockFromDistributor(d);
-      return isSameLocalDay(raw?.updatedAt || raw?.reportDate);
+      if (isSameLocalDay(raw?.updatedAt || raw?.reportDate)) return true;
+      const code = String(d.code || d.id || "").trim();
+      return code && dispatchedTodayCodes.has(code);
     });
-  }, [sorted]);
+  }, [sorted, orders]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -466,15 +488,22 @@ export default function PhysicalStockAdminDialog({
         {displayed.length === 0 ? (
           <Paper variant="outlined" sx={{ p: 2.5, textAlign: "center", borderRadius: 1.5, bgcolor: "background.paper" }}>
             <Typography variant="body2" color="text.secondary">
-              No distributors updated physical stock today.
+              No distributors with physical stock or primary sale updates today.
             </Typography>
           </Paper>
         ) : (
           displayed.map((d) => {
             const raw = getRawPhysicalStockFromDistributor(d);
             const norm = normalizePhysicalStockPayload(raw || {}, productRates);
-            const distTotals = aggregatePhysicalStockTotals(norm.rows);
-            const code = d.code || d.id || "";
+            const code = String(d.code || d.id || "").trim();
+            const displayRows = mergePrimarySalesFromDispatchedOrders(
+              norm.rows,
+              orders,
+              code,
+              productRates,
+              { onlyUncredited: true }
+            );
+            const distTotals = aggregatePhysicalStockTotals(displayRows);
             const rowKey = distributorRowKey(d);
             const expandKey = code || rowKey || d.name;
             const isRecent = recentUpdaterKeys.has(rowKey);
@@ -609,7 +638,7 @@ export default function PhysicalStockAdminDialog({
                     </Typography>
                   ) : (
                     <PhysicalStockMatrix
-                      rows={norm.rows}
+                      rows={displayRows}
                       readOnly
                       variant="default"
                       maxHeight="min(72vh, 640px)"

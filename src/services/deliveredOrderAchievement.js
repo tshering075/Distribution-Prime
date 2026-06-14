@@ -6,6 +6,7 @@ import {
   findSalesDataForDispatchedOrder,
   getProductRates,
   deductWorkspaceInventoryForDispatch,
+  creditDistributorPrimarySaleOnDispatch,
   supabase,
 } from "./supabaseService";
 import { aggregateOrderLineTotals, enrichLineWithMfgBatch } from "../utils/orderLineCalculation";
@@ -98,7 +99,16 @@ async function creditDistributorPhysicalStock(order, deliveredAt, productRates, 
       deliveredAt,
       productRates
     );
-    await updateDistributor(distributorCode, { physical_stock });
+
+    let savedPhysicalStock = physical_stock;
+    try {
+      const rpcSaved = await creditDistributorPrimarySaleOnDispatch(distributorCode, physical_stock);
+      if (rpcSaved) savedPhysicalStock = rpcSaved;
+    } catch (rpcErr) {
+      console.warn("Primary sale RPC save failed, trying direct distributor update:", rpcErr);
+      const updated = await updateDistributor(distributorCode, { physical_stock });
+      savedPhysicalStock = updated?.physical_stock ?? physical_stock;
+    }
 
     if (order.id || identityFallback) {
       await patchOrderFields(
@@ -110,7 +120,7 @@ async function creditDistributorPhysicalStock(order, deliveredAt, productRates, 
         identityFallback
       );
     }
-    return { physical_stock };
+    return { physical_stock: savedPhysicalStock };
   }
 
   const distributors = getDistributors();
@@ -295,17 +305,13 @@ export async function applyDeliveredOrderAchievement(order, identityFallback = n
 
   let physicalStockCredited = isPhysicalStockDispatchApplied(order);
   if (!physicalStockCredited) {
-    try {
-      await creditDistributorPhysicalStock(
-        order,
-        deliveredAt,
-        productRates,
-        identityFallbackForPatch
-      );
-      physicalStockCredited = true;
-    } catch (e) {
-      console.warn("Physical stock credit on dispatch failed:", e);
-    }
+    await creditDistributorPhysicalStock(
+      order,
+      deliveredAt,
+      productRates,
+      identityFallbackForPatch
+    );
+    physicalStockCredited = true;
   }
 
   if (!isInventoryDispatchApplied(order)) {

@@ -51,6 +51,8 @@ import {
 } from "./utils/orderNumber";
 import AppSnackbar from "./components/AppSnackbar";
 import { buildCalculatorSkus } from "./utils/orderLineCalculation";
+import { getWorkspaceInventoryForCalculator } from "./services/supabaseService";
+import { getInventorySkuTotalQuantity } from "./utils/workspaceInventory";
 
 const productFieldSx = {
   "& .MuiInputLabel-root": { fontWeight: 600 },
@@ -110,7 +112,7 @@ function CalculatorSectionHeader({ title, subtitle, paletteColor = "primary", ic
   );
 }
 
-function ProductCaseField({ label, value, onChange, isMobile, inputStyle, priceLine, hasValue }) {
+function ProductCaseField({ label, value, onChange, isMobile, inputStyle, priceLine, stockAvail, hasValue }) {
   return (
     <Box>
       <TextField
@@ -143,6 +145,19 @@ function ProductCaseField({ label, value, onChange, isMobile, inputStyle, priceL
       {priceLine ? (
         <Typography variant="caption" sx={{ mt: 0.5, display: "block", color: "text.secondary", fontWeight: 600 }}>
           {priceLine}
+        </Typography>
+      ) : null}
+      {stockAvail != null ? (
+        <Typography
+          variant="caption"
+          sx={{
+            mt: 0.25,
+            display: "block",
+            fontWeight: 700,
+            color: stockAvail > 0 ? "success.main" : "text.disabled",
+          }}
+        >
+          {stockAvail > 0 ? `${stockAvail} cases available` : "No stock in inventory"}
         </Typography>
       ) : null}
     </Box>
@@ -268,6 +283,35 @@ function CokeCalculator({
   const [caption, setCaption] = useState("");
   const [currentOrderNumber, setCurrentOrderNumber] = useState(null);
   const prefillPendingRef = useRef(false);
+  const [inventoryRows, setInventoryRows] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadInventory = async () => {
+      try {
+        const data = await getWorkspaceInventoryForCalculator();
+        if (!cancelled && data?.rows) {
+          setInventoryRows(data.rows);
+        }
+      } catch (err) {
+        console.warn("Could not load workspace inventory for calculator:", err);
+      }
+    };
+    loadInventory();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const stockAvailBySku = useMemo(() => {
+    const map = new Map();
+    for (const item of skus) {
+      const name = item?.name;
+      if (!name) continue;
+      map.set(name, getInventorySkuTotalQuantity(inventoryRows, name));
+    }
+    return map;
+  }, [skus, inventoryRows]);
 
   useEffect(() => {
     if (initialInputs && typeof initialInputs === "object" && Object.keys(initialInputs).length > 0) {
@@ -730,6 +774,7 @@ function CokeCalculator({
                   hasValue={Number(inputs[item.name]) > 0}
                   inputStyle={getInputStyle(item).input}
                   priceLine={priceLineForSku(item.name)}
+                  stockAvail={stockAvailBySku.get(item.name)}
                   isMobile={isMobile}
                   onChange={(e) => handleChange(item.name, e.target.value)}
                 />
@@ -764,6 +809,7 @@ function CokeCalculator({
                   hasValue={Number(inputs[item.name]) > 0}
                   inputStyle={getInputStyle(item).input}
                   priceLine={priceLineForSku(item.name)}
+                  stockAvail={stockAvailBySku.get(item.name)}
                   isMobile={isMobile}
                   onChange={(e) => handleChange(item.name, e.target.value)}
                 />
@@ -798,6 +844,7 @@ function CokeCalculator({
                   hasValue={Number(inputs[item.name]) > 0}
                   inputStyle={getInputStyle(item).input}
                   priceLine={priceLineForSku(item.name)}
+                  stockAvail={stockAvailBySku.get(item.name)}
                   isMobile={isMobile}
                   onChange={(e) => handleChange(item.name, e.target.value)}
                 />

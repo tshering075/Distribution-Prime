@@ -4213,6 +4213,7 @@ function AdminDashboard({ onLogout }) {
           distributors={distributors}
           onOpened={handlePhysicalStockAdminDialogOpened}
           productRates={productRates}
+          orders={orders}
         />
 
         <AdminStockLiftingRecordsDialog
