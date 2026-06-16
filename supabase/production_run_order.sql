@@ -24,6 +24,7 @@
 -- 11. add_distributor_pos_sales.sql      (POS sales table + session RPCs)
 -- 12. add_order_invoice_number.sql       (dispatch invoice number on orders)
 -- 13. platform_admin_v2.sql
+-- 13a. allow_delete_default_organization.sql  (optional — removes default-workspace delete lock)
 -- 13b. add_platform_admin_users.sql      (list / add / remove platform operators)
 -- 14. fix_rls_linter_cleanup.sql
 -- 15. fix_rls_consolidate_policies.sql

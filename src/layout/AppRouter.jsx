@@ -23,6 +23,7 @@ const AdminDashboard = lazy(() => import("../pages/AdminDashboard"));
 const ShippingDashboard = lazy(() => import("../pages/ShippingDashboard"));
 const PlatformLoginPage = lazy(() => import("../pages/PlatformLoginPage"));
 const PlatformDashboard = lazy(() => import("../pages/PlatformDashboard"));
+const ConnectGmailPage = lazy(() => import("../pages/ConnectGmailPage"));
 const PrivacyPolicyPage = lazy(() => import("../pages/PrivacyPolicyPage"));
 const TermsOfServicePage = lazy(() => import("../pages/TermsOfServicePage"));
 
@@ -469,6 +470,11 @@ function AppRouterInner() {
       <Route path="/signup" element={<SignUpPage onLogin={handleLogin} />} />
 
       <Route path="/w/:workspaceSlug/login" element={<WorkspaceLoginPage onLogin={handleLogin} />} />
+
+      <Route
+        path="/w/:workspaceSlug/connect-gmail"
+        element={<ConnectGmailPage onLogin={handleLogin} />}
+      />
 
       <Route
         path="/invite/:token"

@@ -44,8 +44,8 @@ export function getLastWorkspaceSlug() {
 
 /** Tenant-branded login path for the active or last-used workspace. */
 export function getWorkspaceLoginPath(slug) {
-  const resolved = slug || getLastWorkspaceSlug() || DEFAULT_ORGANIZATION_SLUG;
-  return `/w/${encodeURIComponent(resolved)}/login`;
+  const resolved = slug || getLastWorkspaceSlug();
+  return resolved ? `/w/${encodeURIComponent(resolved)}/login` : "/login";
 }
 
 /**

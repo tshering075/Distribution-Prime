@@ -25,6 +25,21 @@ export function mfgDateToInputValue(mfgDate) {
   return "";
 }
 
+/** Display lot dates as DD-MM-YYYY (date-month-year). */
+export function formatLotDateDisplay(value) {
+  const iso = mfgDateToInputValue(value);
+  if (!iso) return String(value ?? "").trim();
+  const [y, m, d] = iso.split("-");
+  return `${d}-${m}-${y}`;
+}
+
+/** Parse DD-MM-YYYY (or DD/MM/YYYY) into YYYY-MM-DD for storage. */
+export function parseLotDateDisplay(value) {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  return mfgDateToInputValue(s);
+}
+
 /** Parse MFG date string to sortable timestamp (FIFO: oldest first). */
 export function mfgDateSortKey(mfgDate) {
   const s = String(mfgDate || "").trim();

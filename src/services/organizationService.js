@@ -4,7 +4,6 @@
 
 import { supabase } from '../supabase';
 import {
-  DEFAULT_ORGANIZATION_SLUG,
   setActiveOrganization,
 } from './tenantScope';
 import { firstRow, isSingleRowCoerceError } from '../utils/supabaseRows';
@@ -80,7 +79,12 @@ export async function getOrganizationBySlug(slug) {
  * @param {string} [slugInput]
  */
 export async function resolveOrganizationForLogin(slugInput) {
-  const slug = normalizeOrganizationSlug(slugInput) || DEFAULT_ORGANIZATION_SLUG;
+  const slug = normalizeOrganizationSlug(slugInput);
+  if (!slug) {
+    throw new Error(
+      'Workspace ID is required. Enter your company workspace ID or open your workspace sign-in link (/w/your-workspace/login).'
+    );
+  }
   const org = await getOrganizationBySlug(slug);
   if (org) {
     if (org.status === 'suspended') {
@@ -90,17 +94,7 @@ export async function resolveOrganizationForLogin(slugInput) {
     return org;
   }
 
-  if (slug === DEFAULT_ORGANIZATION_SLUG) {
-    const fallback = {
-      id: '00000000-0000-4000-8000-000000000001',
-      slug: DEFAULT_ORGANIZATION_SLUG,
-      name: 'Default Organization',
-    };
-    setActiveOrganization(fallback);
-    return fallback;
-  }
-
-  throw new Error(`Organization "${slug}" was not found. Check the workspace ID or sign up.`);
+  throw new Error(`Organization "${slug}" was not found. Check the workspace ID or sign up to create a workspace.`);
 }
 
 /**
@@ -276,6 +270,15 @@ export async function signUpOrganization({
     });
     if (rollbackErr) {
       await supabase.from('organizations').delete().eq('id', organizationId);
+    }
+    const authMsg = String(authError.message || '');
+    if (/already registered|already exists|user already registered/i.test(authMsg)) {
+      throw new Error(
+        'This email is already registered. Sign in instead, or use a different owner email.'
+      );
+    }
+    if (/email.*invalid|invalid.*email/i.test(authMsg)) {
+      throw new Error('Invalid email address. Check the owner email and try again.');
     }
     throw authError;
   }

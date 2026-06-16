@@ -72,6 +72,7 @@ export default function DistributorPhysicalStockDialog({
   const loadRequestIdRef = useRef(0);
   const distributorRef = useRef(distributor);
   const sessionLoadedRef = useRef(false);
+  const lastPhysicalStockUpdatedAtRef = useRef(null);
   distributorRef.current = distributor;
 
   const distTotals = aggregatePhysicalStockTotals(rows);
@@ -177,6 +178,7 @@ export default function DistributorPhysicalStockDialog({
   useEffect(() => {
     if (!open) {
       sessionLoadedRef.current = false;
+      lastPhysicalStockUpdatedAtRef.current = null;
       return;
     }
     if (dirty || sessionLoadedRef.current) return;
@@ -196,8 +198,15 @@ export default function DistributorPhysicalStockDialog({
 
   useEffect(() => {
     if (!open || dirty || !sessionLoadedRef.current) return;
+    const updatedAt = distributor?.physical_stock?.updatedAt ?? "";
+    if (lastPhysicalStockUpdatedAtRef.current === null) {
+      lastPhysicalStockUpdatedAtRef.current = updatedAt;
+      return;
+    }
+    if (lastPhysicalStockUpdatedAtRef.current === updatedAt) return;
+    lastPhysicalStockUpdatedAtRef.current = updatedAt;
     loadRowsForReportDate(reportDate);
-  }, [open, dirty, distributor?.physical_stock, reportDate, loadRowsForReportDate]);
+  }, [open, dirty, distributor?.physical_stock?.updatedAt, reportDate, loadRowsForReportDate]);
 
   const handleRowsChange = useCallback((next) => {
     setDirty(true);
@@ -397,6 +406,7 @@ export default function DistributorPhysicalStockDialog({
           InputLabelProps={{ shrink: true }}
           sx={{ width: { xs: "100%", sm: 148 } }}
         />
+        <Chip label={`Op ${distTotals.opening.toLocaleString()}`} size="small" sx={{ height: 22, fontWeight: 700, fontSize: "0.65rem" }} />
         <Chip label={`Pri ${distTotals.primary.toLocaleString()}`} size="small" sx={{ height: 22, fontWeight: 700, fontSize: "0.65rem" }} />
         <Chip label={`Phy ${distTotals.physical.toLocaleString()}`} size="small" sx={{ height: 22, fontWeight: 700, fontSize: "0.65rem" }} />
         <Chip label={`Sec ${distTotals.secondary.toLocaleString()}`} size="small" sx={{ height: 22, fontWeight: 700, fontSize: "0.65rem" }} />
@@ -412,7 +422,7 @@ export default function DistributorPhysicalStockDialog({
 
       {carriedFromDate ? (
         <Alert severity="info" sx={{ mx: { xs: 1, sm: 1.5 }, mt: 0.75, py: 0.25, flexShrink: 0, borderRadius: 1.5, fontSize: "0.75rem" }}>
-          MFG / batch / BBD carried from report <strong>{carriedFromDate}</strong>. Enter primary sale and physical stock per lot.
+          Opening stock is from report <strong>{carriedFromDate}</strong> physical stock. MFG / batch / BBD carried forward. Enter primary sale and physical stock per lot.
         </Alert>
       ) : null}
 

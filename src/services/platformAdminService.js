@@ -4,10 +4,8 @@
  */
 
 import { supabase } from '../supabase';
-import { clearActiveOrganization, DEFAULT_ORGANIZATION_ID } from './tenantScope';
+import { clearActiveOrganization } from './tenantScope';
 import { firstRow } from '../utils/supabaseRows';
-
-export { DEFAULT_ORGANIZATION_ID as PROTECTED_DEFAULT_ORG_ID };
 
 function missingRpc(error) {
   const code = error?.code || '';
@@ -370,4 +368,58 @@ export async function removePlatformAdmin(userId) {
   }
 
   return !!data;
+}
+
+/**
+ * Load platform-wide Gmail API credentials (platform operators only).
+ * @returns {Promise<{ clientId: string|null, apiKey: string|null, configured: boolean }>}
+ */
+export async function getPlatformGmailCredentials() {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  const { data, error } = await supabase.rpc('platform_get_gmail_credentials');
+  if (error) {
+    if (missingRpc(error)) {
+      throw new Error(
+        'Platform Gmail settings are not set up. Run supabase/platform_gmail_credentials.sql in Supabase SQL Editor.'
+      );
+    }
+    throw error;
+  }
+
+  const row = data && typeof data === 'object' ? data : {};
+  const clientId = row.clientId ? String(row.clientId).trim() : null;
+  const apiKey = row.apiKey ? String(row.apiKey).trim() : null;
+  return {
+    clientId: clientId || null,
+    apiKey: apiKey || null,
+    configured: Boolean(clientId && apiKey),
+    updatedAt: row.updatedAt || null,
+    updatedBy: row.updatedBy || null,
+  };
+}
+
+/**
+ * Save Gmail API credentials to every workspace (platform operators only).
+ * @returns {Promise<number>} Number of workspaces updated
+ */
+export async function savePlatformGmailCredentials(clientId, apiKey, updatedBy = null) {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  const { data, error } = await supabase.rpc('platform_save_gmail_credentials', {
+    p_client_id: String(clientId || '').trim(),
+    p_api_key: String(apiKey || '').trim(),
+    p_updated_by: updatedBy ? String(updatedBy).trim() : null,
+  });
+
+  if (error) {
+    if (missingRpc(error)) {
+      throw new Error(
+        'Platform Gmail settings are not set up. Run supabase/platform_gmail_credentials.sql in Supabase SQL Editor.'
+      );
+    }
+    throw error;
+  }
+
+  return Number(data) || 0;
 }

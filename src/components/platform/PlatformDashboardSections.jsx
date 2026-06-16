@@ -1,4 +1,5 @@
 import React from "react";
+import { Link as RouterLink } from "react-router-dom";
 import {
   Box,
   Button,
@@ -27,6 +28,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import InboxOutlinedIcon from "@mui/icons-material/InboxOutlined";
+import AddBusinessOutlinedIcon from "@mui/icons-material/AddBusinessOutlined";
 import { saasSurfaceCardSx } from "../../theme/saasChrome";
 import { STATUS_LABELS } from "../../services/platformAdminService";
 import {
@@ -123,6 +125,72 @@ export function PlatformFiltersPanel({
         />
         <Typography variant="caption" color="text.secondary">
           Click a row for team, lifecycle actions, and access links.
+        </Typography>
+      </Stack>
+    </Paper>
+  );
+}
+
+export function PlatformEmptyWorkspacesState() {
+  const theme = useTheme();
+
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        ...saasSurfaceCardSx(theme),
+        borderRadius: 2,
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: { xs: 320, sm: 420 },
+        px: { xs: 2, sm: 4 },
+        py: { xs: 4, sm: 6 },
+      }}
+    >
+      <Stack alignItems="center" spacing={2.5} sx={{ maxWidth: 420, textAlign: "center" }}>
+        <Box
+          sx={{
+            width: 72,
+            height: 72,
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: alpha(theme.palette.primary.main, 0.1),
+            color: "primary.main",
+          }}
+        >
+          <AddBusinessOutlinedIcon sx={{ fontSize: 36 }} />
+        </Box>
+        <Box>
+          <Typography variant="h6" sx={{ fontWeight: 800, mb: 0.75 }}>
+            No company workspaces yet
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.65 }}>
+            There are no registered organizations. Create the first company workspace to start onboarding
+            distributors, orders, and inventory.
+          </Typography>
+        </Box>
+        <Button
+          component={RouterLink}
+          to="/signup"
+          variant="contained"
+          size="large"
+          startIcon={<AddBusinessOutlinedIcon />}
+          sx={{
+            fontWeight: 800,
+            px: 3,
+            py: 1.25,
+            borderRadius: 2,
+            textTransform: "none",
+          }}
+        >
+          Create your organization / company workspace
+        </Button>
+        <Typography variant="caption" color="text.secondary">
+          New workspaces are created through the public sign-up page.
         </Typography>
       </Stack>
     </Paper>

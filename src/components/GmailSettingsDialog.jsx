@@ -24,9 +24,20 @@ import GoogleIcon from "@mui/icons-material/Google";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
-import { saveGmailCredentialsToSupabase, getGmailClientId, getGmailApiKey, isGmailConfigured, clearGmailCredentialsCache } from "../services/gmailService";
+import {
+  saveGmailCredentialsToSupabase,
+  getGmailClientId,
+  getGmailApiKey,
+  isGmailConfigured,
+  clearGmailCredentialsCache,
+} from "../services/gmailService";
+import {
+  getPlatformGmailCredentials,
+  savePlatformGmailCredentials,
+} from "../services/platformAdminService";
+import { getCurrentUser } from "../services/supabaseService";
 
-function GmailSettingsDialog({ open, onClose }) {
+function GmailSettingsDialog({ open, onClose, platformMode = false }) {
   const [clientId, setClientId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
@@ -47,17 +58,22 @@ function GmailSettingsDialog({ open, onClose }) {
     setLoading(true);
     setError("");
     try {
-      const currentClientId = await getGmailClientId();
-      const currentApiKey = await getGmailApiKey();
-      
-      setClientId(currentClientId || "");
-      setApiKey(currentApiKey || "");
-      
-      const configured = await isGmailConfigured();
-      setIsConfigured(configured);
+      if (platformMode) {
+        const creds = await getPlatformGmailCredentials();
+        setClientId(creds.clientId || "");
+        setApiKey(creds.apiKey || "");
+        setIsConfigured(creds.configured);
+      } else {
+        const currentClientId = await getGmailClientId();
+        const currentApiKey = await getGmailApiKey();
+        setClientId(currentClientId || "");
+        setApiKey(currentApiKey || "");
+        const configured = await isGmailConfigured();
+        setIsConfigured(configured);
+      }
     } catch (err) {
       console.error("Error loading Gmail credentials:", err);
-      setError("Failed to load current credentials");
+      setError(err?.message || "Failed to load current credentials");
     } finally {
       setLoading(false);
     }
@@ -74,12 +90,27 @@ function GmailSettingsDialog({ open, onClose }) {
     setSuccess("");
 
     try {
-      await saveGmailCredentialsToSupabase(clientId.trim(), apiKey.trim());
-      
-      // Clear cache to force reload on next access
-      clearGmailCredentialsCache();
-      
-      setSuccess("Gmail credentials saved successfully! They will be available to all users.");
+      if (platformMode) {
+        let updatedBy = "Platform operator";
+        try {
+          const user = await getCurrentUser();
+          if (user?.email) updatedBy = user.email;
+        } catch {
+          /* ignore */
+        }
+        const count = await savePlatformGmailCredentials(clientId.trim(), apiKey.trim(), updatedBy);
+        clearGmailCredentialsCache();
+        setSuccess(
+          count > 0
+            ? `Gmail credentials saved for ${count} workspace(s). Organization admins can connect Gmail from order emails.`
+            : "Gmail credentials saved. No workspaces exist yet — credentials will apply when workspaces are created."
+        );
+      } else {
+        await saveGmailCredentialsToSupabase(clientId.trim(), apiKey.trim());
+        clearGmailCredentialsCache();
+        setSuccess("Gmail credentials saved successfully! They will be available to all users.");
+      }
+
       setIsConfigured(true);
       
       // Clear success message after 3 seconds
@@ -121,7 +152,9 @@ function GmailSettingsDialog({ open, onClose }) {
                 Gmail API Settings
               </Typography>
               <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.8)" }}>
-                Configure Gmail API credentials (shared for all users)
+                {platformMode
+                  ? "Platform-wide Gmail API credentials for all workspaces"
+                  : "Configure Gmail API credentials (shared for all users)"}
               </Typography>
             </Box>
           </Box>
@@ -162,8 +195,9 @@ function GmailSettingsDialog({ open, onClose }) {
                 )}
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                These credentials are stored in Supabase and shared across all users. Once saved, 
-                all users can use Gmail API features without individual configuration.
+                {platformMode
+                  ? "Credentials are stored per workspace and applied to every organization when you save. Workspace admins use these credentials to send order emails — they do not configure Gmail API keys themselves."
+                  : "These credentials are stored in Supabase and shared across all users. Once saved, all users can use Gmail API features without individual configuration."}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 <strong>Note:</strong> Credentials are stored securely in Supabase and will 

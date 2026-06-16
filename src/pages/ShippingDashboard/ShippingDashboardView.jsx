@@ -56,6 +56,7 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import InboxOutlinedIcon from "@mui/icons-material/InboxOutlined";
+import Inventory2OutlinedIcon from "@mui/icons-material/Inventory2Outlined";
 import DayNightThemeToggle from "../../components/DayNightThemeToggle";
 import WorkspaceChip from "../../components/WorkspaceChip";
 import SaasAppBarTitle from "../../components/saas/SaasAppBarTitle";
@@ -304,6 +305,7 @@ export default function ShippingDashboardView({
   onPickDeliverFiles,
   onConfirmDeliver,
   logoutConfirmDialog,
+  onOpenStockAvailability,
 }) {
   const theme = useTheme();
   const todayLabel = new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -476,6 +478,11 @@ export default function ShippingDashboardView({
             </Tooltip>
           ) : null}
           <DayNightThemeToggle />
+          <Tooltip title="Product stock availability">
+            <IconButton color="inherit" onClick={() => onOpenStockAvailability?.()} aria-label="stock availability">
+              <Inventory2OutlinedIcon />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Refresh orders">
             <IconButton color="inherit" onClick={loadOrders} disabled={loading} aria-label="refresh">
               <RefreshIcon />
@@ -536,6 +543,15 @@ export default function ShippingDashboardView({
                   Clear filters
                 </Button>
               ) : null}
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Inventory2OutlinedIcon />}
+                onClick={() => onOpenStockAvailability?.()}
+                sx={{ textTransform: "none", fontWeight: 700, whiteSpace: "nowrap" }}
+              >
+                Stock availability
+              </Button>
             </Stack>
 
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>

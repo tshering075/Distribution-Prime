@@ -414,31 +414,25 @@ export function WorkspaceAccessSection({ loginUrl, orgId, onCopy }) {
   );
 }
 
-export function WorkspaceDangerSection({ isProtectedDefault, isBusy, onDelete }) {
+export function WorkspaceDangerSection({ isBusy, onDelete }) {
   return (
     <SectionCard title="Danger zone" caption="Permanent deletion — cannot be undone.">
-      {isProtectedDefault ? (
+      <Stack spacing={1.5}>
         <Typography variant="body2" color="text.secondary">
-          The default legacy workspace cannot be deleted.
+          Permanently removes this workspace and all related data: organization, distributors, orders,
+          sales, targets, schemes, admins, invites, and members. Supabase Auth users are not removed.
         </Typography>
-      ) : (
-        <Stack spacing={1.5}>
-          <Typography variant="body2" color="text.secondary">
-            Permanently removes this workspace and all related data: organization, distributors, orders,
-            sales, targets, schemes, admins, invites, and members. Supabase Auth users are not removed.
-          </Typography>
-          <Button
-            variant="outlined"
-            color="error"
-            startIcon={<DeleteOutlineIcon />}
-            disabled={isBusy}
-            onClick={onDelete}
-            sx={{ alignSelf: "flex-start", fontWeight: 800 }}
-          >
-            Delete workspace permanently
-          </Button>
-        </Stack>
-      )}
+        <Button
+          variant="outlined"
+          color="error"
+          startIcon={<DeleteOutlineIcon />}
+          disabled={isBusy}
+          onClick={onDelete}
+          sx={{ alignSelf: "flex-start", fontWeight: 800 }}
+        >
+          Delete workspace permanently
+        </Button>
+      </Stack>
     </SectionCard>
   );
 }

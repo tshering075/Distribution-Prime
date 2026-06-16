@@ -4,6 +4,7 @@ import AppSnackbar from "../components/AppSnackbar";
 import ShippingInvoiceEditDialog from "../components/ShippingInvoiceEditDialog";
 import { useLogoutConfirmation } from "../components/LogoutConfirmDialog";
 import OrderCalculatedTableDialog from "../components/OrderCalculatedTableDialog";
+import ShippingStockAvailabilityDialog from "../components/ShippingStockAvailabilityDialog";
 import ShippingDashboardView from "./ShippingDashboard/ShippingDashboardView";
 import {
   getShippingOrders,
@@ -19,6 +20,7 @@ import {
   getCurrentUser,
   getAdminByUid,
   getWorkspaceInventory,
+  subscribeWorkspaceInventory,
   supabase,
 } from "../services/supabaseService";
 import { readProductRatesFromLocalStorage } from "../utils/productRatesStorage";
@@ -154,6 +156,9 @@ function ShippingDashboard({ onLogout }) {
   const [previewSchemes, setPreviewSchemes] = useState([]);
   const [previewDistributor, setPreviewDistributor] = useState(null);
   const [productRates, setProductRates] = useState(null);
+  const [inventoryRows, setInventoryRows] = useState([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [stockOpen, setStockOpen] = useState(false);
   const [savingPreview, setSavingPreview] = useState(false);
   const [previewDispatchPhase, setPreviewDispatchPhase] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -235,6 +240,42 @@ function ShippingDashboard({ onLogout }) {
 
   useEffect(() => {
     setProductRates(readProductRatesFromLocalStorage());
+  }, []);
+
+  const loadInventory = useCallback(async () => {
+    setInventoryLoading(true);
+    try {
+      const data = await getWorkspaceInventory();
+      setInventoryRows(Array.isArray(data?.rows) ? data.rows : []);
+    } catch (e) {
+      console.warn("Could not load workspace inventory:", e);
+      setInventoryRows([]);
+    } finally {
+      setInventoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setInventoryLoading(true);
+      try {
+        const data = await getWorkspaceInventory();
+        if (!cancelled) setInventoryRows(Array.isArray(data?.rows) ? data.rows : []);
+      } catch (e) {
+        console.warn("Could not load workspace inventory:", e);
+        if (!cancelled) setInventoryRows([]);
+      } finally {
+        if (!cancelled) setInventoryLoading(false);
+      }
+    })();
+    const unsub = subscribeWorkspaceInventory((data) => {
+      if (!cancelled) setInventoryRows(Array.isArray(data?.rows) ? data.rows : []);
+    });
+    return () => {
+      cancelled = true;
+      if (typeof unsub === "function") unsub();
+    };
   }, []);
 
   useEffect(() => {
@@ -1424,6 +1465,19 @@ function ShippingDashboard({ onLogout }) {
         setDeliverConfirmOrder={setDeliverConfirmOrder}
         onConfirmDeliver={handleConfirmDeliver}
         logoutConfirmDialog={logoutConfirmDialog}
+        onOpenStockAvailability={() => {
+          setStockOpen(true);
+          void loadInventory();
+        }}
+      />
+
+      <ShippingStockAvailabilityDialog
+        open={stockOpen}
+        onClose={() => setStockOpen(false)}
+        productRates={productRates}
+        inventoryRows={inventoryRows}
+        loading={inventoryLoading}
+        onRefresh={loadInventory}
       />
 
       <OrderCalculatedTableDialog

@@ -135,6 +135,23 @@ async function getDistributorOrdersRpc(distributorCode) {
   return Array.isArray(data) ? data : [];
 }
 
+async function getDistributorStockLiftingRpc(distributorCode, startDate = null, endDate = null) {
+  const ctx = distributorRpcContext(distributorCode);
+  if (!ctx) return [];
+  const { data, error } = await supabase.rpc('get_distributor_stock_lifting_records', {
+    p_slug: ctx.slug,
+    p_distributor_code: ctx.code,
+    p_session_token: ctx.sessionToken,
+    p_start_date: startDate ? startDate.toISOString() : null,
+    p_end_date: endDate ? endDate.toISOString() : null,
+  });
+  if (error) {
+    if (isMissingRpcError(error)) return [];
+    throw error;
+  }
+  return Array.isArray(data) ? data : [];
+}
+
 async function updateDistributorOrderRpc(orderId, patch, status, distributorCode) {
   const ctx = distributorRpcContext(distributorCode || patch?.distributorCode);
   if (!ctx || !orderId) {
@@ -3528,57 +3545,60 @@ export async function getStockLiftingRecords(distributorCode, startDate = null, 
       throw new Error('Supabase not initialized');
     }
 
+    const { mapStockLiftingRecord } = await import('../utils/stockLiftingRecords');
+
     const code = distributorCode != null ? String(distributorCode).trim() : '';
-    let query = fromTenant('sales_data')
-      .select('*')
-      .eq('distributorCode', code);
+    if (!code) return [];
 
-    if (startDate) {
-      query = query.gte('invoiceDate', startDate.toISOString());
-    }
-    if (endDate) {
-      query = query.lte('invoiceDate', endDate.toISOString());
+    const useDistributorRpc = !(await hasSupabaseAuthSession());
+    if (useDistributorRpc) {
+      const rows = await getDistributorStockLiftingRpc(code, startDate, endDate);
+      return rows.map(mapStockLiftingRecord).filter(Boolean);
     }
 
-    const { data, error } = await query.order('invoiceDate', { ascending: false });
-
-    if (error) throw error;
-
-    if (!data || data.length === 0) {
-      return [];
-    }
-
-    const read = (row, keys, fallback = null) => {
-      for (const key of keys) {
-        if (row && Object.prototype.hasOwnProperty.call(row, key) && row[key] !== undefined && row[key] !== null) {
-          return row[key];
-        }
+    const seen = new Set();
+    const rows = [];
+    const runSelect = (variant) => {
+      let query = fromTenant('sales_data').select('*').eq('distributorCode', variant);
+      if (startDate) {
+        query = query.gte('invoiceDate', startDate.toISOString());
       }
-      return fallback;
+      if (endDate) {
+        query = query.lte('invoiceDate', endDate.toISOString());
+      }
+      return query.order('invoiceDate', { ascending: false });
     };
 
-    // One UI row per saved sales row (supports multiple liftings same day)
-    return data.map((record) => {
-      const inv = read(record, ['invoiceDate', 'invoice_date'], null);
-      const dateIso = inv ? new Date(inv).toISOString() : null;
-      return {
-        id: record.id,
-        date: dateIso ? dateIso.split('T')[0] : null,
-        invoiceDate: inv,
-        timestamp: inv,
-        created_at: read(record, ['created_at', 'createdAt'], inv),
-        csdPC: Number(read(record, ['csdPC', 'csd_pc'], 0) || 0),
-        csdUC: Number(read(record, ['csdUC', 'csd_uc'], 0) || 0),
-        waterPC: Number(read(record, ['waterPC', 'water_pc'], 0) || 0),
-        waterUC: Number(read(record, ['waterUC', 'water_uc'], 0) || 0),
-        products: Array.isArray(record.products) ? record.products : [],
-      };
-    }).sort((a, b) => {
-      const ta = a.invoiceDate ? new Date(a.invoiceDate).getTime() : 0;
-      const tb = b.invoiceDate ? new Date(b.invoiceDate).getTime() : 0;
-      return tb - ta;
-    });
+    for (const variant of distributorCodeMatchVariants(code)) {
+      const { data, error } = await runSelect(variant);
+      if (error) throw error;
+      for (const row of data || []) {
+        const id = row?.id != null ? String(row.id) : null;
+        if (id && seen.has(id)) continue;
+        if (id) seen.add(id);
+        rows.push(row);
+      }
+    }
+
+    return rows
+      .map(mapStockLiftingRecord)
+      .filter(Boolean)
+      .sort((a, b) => {
+        const ta = a.invoiceDate ? new Date(a.invoiceDate).getTime() : 0;
+        const tb = b.invoiceDate ? new Date(b.invoiceDate).getTime() : 0;
+        return tb - ta;
+      });
   } catch (error) {
+    if (isSupabasePermissionError(error)) {
+      try {
+        const { mapStockLiftingRecord } = await import('../utils/stockLiftingRecords');
+        const rows = await getDistributorStockLiftingRpc(distributorCode, startDate, endDate);
+        return rows.map(mapStockLiftingRecord).filter(Boolean);
+      } catch (rpcError) {
+        console.error('Error getting stock lifting records (RPC fallback):', rpcError);
+        return [];
+      }
+    }
     console.error('Error getting stock lifting records:', error);
     return [];
   }

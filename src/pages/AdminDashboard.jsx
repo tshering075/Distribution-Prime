@@ -27,6 +27,7 @@ import {
   navDrawerSectionLabelSx,
 } from "../theme/saasChrome";
 import SaasAppBarTitle from "../components/saas/SaasAppBarTitle";
+import GmailStatusIndicator from "../components/GmailStatusIndicator";
 import MenuIcon from "@mui/icons-material/Menu";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import LogoutIcon from "@mui/icons-material/Logout";                    
@@ -50,7 +51,6 @@ import OrderPreviewDialog from "../components/OrderPreviewDialog";
 import OrderEmailDialog from "../components/OrderEmailDialog";
 import UserPermissionManagementDialog from "../components/UserPermissionManagementDialog";
 import ActivityDialog from "../components/ActivityDialog";
-import GmailSettingsDialog from "../components/GmailSettingsDialog";
 import SchemeDiscountDialog from "../components/SchemeDiscountDialog";
 import RateMasterDialog from "../components/RateMasterDialog";
 import InventoryDialog from "../components/InventoryDialog";
@@ -195,7 +195,6 @@ function AdminDashboard({ onLogout }) {
   const [emailRecipientsOpen, setEmailRecipientsOpen] = useState(false);
   const [userManagementOpen, setUserManagementOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [gmailSettingsOpen, setGmailSettingsOpen] = useState(false);
   const [schemeDiscountOpen, setSchemeDiscountOpen] = useState(false);
   const [rateMasterOpen, setRateMasterOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -207,6 +206,7 @@ function AdminDashboard({ onLogout }) {
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingInitialStep, setOnboardingInitialStep] = useState(0);
   const onboardingTriggered = useRef(false);
   const [globalGstPolicy, setGlobalGstPolicy] = useState(() => readGlobalGstPolicyFromLocalStorage());
   const [savingGlobalGst, setSavingGlobalGst] = useState(false);
@@ -321,14 +321,18 @@ function AdminDashboard({ onLogout }) {
     };
   }, [isSupabaseConfigured]);
 
-  // Only show welcome wizard right after workspace signup (?onboarding=1), not on every visit.
+  // Welcome wizard after workspace signup (?onboarding=1) and optional Gmail step (?connectGmail=1).
   useEffect(() => {
     if (onboardingTriggered.current) return;
-    if (searchParams.get("onboarding") !== "1" || !organization?.id) return;
+    const isOnboarding = searchParams.get("onboarding") === "1";
+    const connectGmail = searchParams.get("connectGmail") === "1";
+    if ((!isOnboarding && !connectGmail) || !organization?.id) return;
     onboardingTriggered.current = true;
+    if (connectGmail) setOnboardingInitialStep(2);
     setOnboardingOpen(true);
     const next = new URLSearchParams(searchParams);
     next.delete("onboarding");
+    next.delete("connectGmail");
     setSearchParams(next, { replace: true });
   }, [organization?.id, searchParams, setSearchParams]);
 
@@ -1864,7 +1868,6 @@ function AdminDashboard({ onLogout }) {
       if (savedView === "distributors") setDistributorsOpen(true);
       if (savedView === "reports") setReportsOpen(true);
       if (savedView === "activity") setActivityOpen(true);
-      if (savedView === "gmail_settings") setGmailSettingsOpen(true);
       if (savedView === "gst_settings") setGstSettingsOpen(true);
       if (savedView === "user_permissions") setUserManagementOpen(true);
     } catch (error) {
@@ -3507,7 +3510,6 @@ function AdminDashboard({ onLogout }) {
     emailRecipientsOpen ||
     userManagementOpen ||
     activityOpen ||
-    gmailSettingsOpen ||
     gstSettingsOpen ||
     schemeDiscountOpen ||
     rateMasterOpen ||
@@ -3561,10 +3563,6 @@ function AdminDashboard({ onLogout }) {
       setActivityOpen(false);
       return;
     }
-    if (gmailSettingsOpen) {
-      setGmailSettingsOpen(false);
-      return;
-    }
     if (gstSettingsOpen) {
       setGstSettingsOpen(false);
       return;
@@ -3603,7 +3601,6 @@ function AdminDashboard({ onLogout }) {
     emailRecipientsOpen,
     userManagementOpen,
     activityOpen,
-    gmailSettingsOpen,
     gstSettingsOpen,
     schemeDiscountOpen,
     rateMasterOpen,
@@ -3643,6 +3640,7 @@ function AdminDashboard({ onLogout }) {
           />
           <WorkspaceSwitcher sx={{ display: { xs: "none", sm: "flex" } }} />
           <WorkspaceChip sx={{ display: { xs: "none", md: "flex" } }} />
+          <GmailStatusIndicator sx={{ mx: { xs: 0, sm: 0.5 } }} />
           <DayNightThemeToggle />
           <Tooltip title="Notifications">
             <IconButton
@@ -3745,7 +3743,6 @@ function AdminDashboard({ onLogout }) {
                   { text: "Distributors", icon: <PeopleIcon />, action: () => { setDistributorsOpen(true); setAdminCurrentView("distributors"); setSidebarOpen(isMobile); } },
                   { text: "Reports", icon: <BarChartIcon />, action: () => { setReportsOpen(true); setAdminCurrentView("reports"); setSidebarOpen(isMobile); } },
                   { text: "Activity", icon: <HistoryIcon />, action: () => { setActivityOpen(true); setAdminCurrentView("activity"); setSidebarOpen(isMobile); } },
-                  { text: "Gmail Settings", icon: <SettingsIcon />, action: () => { setGmailSettingsOpen(true); setAdminCurrentView("gmail_settings"); setSidebarOpen(isMobile); } },
                   { text: "GST Settings", icon: <LocalOfferIcon />, action: () => { setGstSettingsOpen(true); setAdminCurrentView("gst_settings"); setSidebarOpen(isMobile); } },
                 ],
               },
@@ -4116,14 +4113,6 @@ function AdminDashboard({ onLogout }) {
           }}
         />
 
-        <GmailSettingsDialog
-          open={gmailSettingsOpen}
-          onClose={() => {
-            setGmailSettingsOpen(false);
-            setAdminCurrentView("dashboard");
-          }}
-        />
-
         <WorkspaceSettingsDialog
           open={workspaceSettingsOpen}
           onClose={() => setWorkspaceSettingsOpen(false)}
@@ -4139,6 +4128,8 @@ function AdminDashboard({ onLogout }) {
 
         <OnboardingWizardDialog
           open={onboardingOpen}
+          initialStep={onboardingInitialStep}
+          ownerEmail={localStorage.getItem("admin_email") || ""}
           onClose={() => setOnboardingOpen(false)}
           onOpenWorkspaceSettings={() => {
             setOnboardingOpen(false);
@@ -4202,6 +4193,7 @@ function AdminDashboard({ onLogout }) {
             setInventoryOpen(false);
             setAdminCurrentView("dashboard");
           }}
+          productRates={productRates}
         />
 
         <PhysicalStockAdminDialog
@@ -4213,7 +4205,7 @@ function AdminDashboard({ onLogout }) {
           distributors={distributors}
           onOpened={handlePhysicalStockAdminDialogOpened}
           productRates={productRates}
-          orders={orders}
+          orders={allOrders}
         />
 
         <AdminStockLiftingRecordsDialog

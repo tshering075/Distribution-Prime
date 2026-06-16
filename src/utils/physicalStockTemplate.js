@@ -447,8 +447,97 @@ export function rowsHaveAnyStockData(rows) {
 }
 
 /**
- * Pick the most recently updated saved stock for carry-forward (not the same report date as target).
+ * Closing physical qty on a lot (saved physical, or derived from opening + primary − secondary).
  */
+export function lotClosingPhysicalQty(lot) {
+  const hasQty = (v) => v !== "" && v != null && Number.isFinite(Number(v));
+  if (hasQty(lot?.physicalStockQty)) {
+    return Math.max(0, Math.round(Number(lot.physicalStockQty)));
+  }
+  const opening = hasQty(lot?.openingStockQty) ? Number(lot.openingStockQty) : 0;
+  const primary = hasQty(lot?.primarySale) ? Number(lot.primarySale) : 0;
+  const secondary = hasQty(lot?.secondarySale) ? Number(lot.secondarySale) : 0;
+  if (opening > 0 || primary > 0 || secondary > 0) {
+    return Math.max(0, Math.round(opening + primary - secondary));
+  }
+  return "";
+}
+
+function findMatchingPriorLot(priorLots, lot, index) {
+  const mfg = String(lot?.mfgDate || "").trim();
+  const batch = String(lot?.batchNo || "").trim();
+  const bbd = String(lot?.bbdDate || "").trim();
+  if (mfg || batch || bbd) {
+    const match = (priorLots || []).find(
+      (p) =>
+        String(p.mfgDate || "").trim() === mfg &&
+        String(p.batchNo || "").trim() === batch &&
+        String(p.bbdDate || "").trim() === bbd
+    );
+    if (match) return match;
+  }
+  return priorLots?.[index] || priorLots?.[priorLots.length - 1] || null;
+}
+
+function recalcLotSecondaryFromQtys(lot) {
+  const hasQty = (v) => v !== "" && v != null && Number.isFinite(Number(v));
+  const opening = hasQty(lot.openingStockQty) ? Number(lot.openingStockQty) : 0;
+  const primary = hasQty(lot.primarySale) ? Number(lot.primarySale) : null;
+  const physical = hasQty(lot.physicalStockQty) ? Number(lot.physicalStockQty) : null;
+  if (primary != null && physical != null) {
+    lot.secondarySale = Math.max(0, Math.round(opening + primary - physical));
+  }
+  return lot;
+}
+
+/**
+ * Set each lot's opening stock from the prior report's physical stock (matched by SKU + MFG/batch/BBD).
+ */
+export function applyOpeningStockFromPriorPhysical(priorRows, currentRows, productLines) {
+  if (!priorRows || !rowsHaveCarryForwardSource(priorRows)) {
+    return mergePhysicalStockRows(currentRows, productLines);
+  }
+
+  const priorMerged = mergePhysicalStockRows(priorRows, productLines);
+  const priorMap = new Map();
+  priorMerged.forEach((r) => {
+    priorMap.set(String(r.productSku).trim().toUpperCase(), getLotsFromProductRow(r));
+  });
+
+  const current = mergePhysicalStockRows(currentRows, productLines);
+  return current.map((row) => {
+    const priorLots = priorMap.get(String(row.productSku).trim().toUpperCase()) || [];
+    const lots = getLotsFromProductRow(row).map((lot, i) => {
+      const priorLot = findMatchingPriorLot(priorLots, lot, i);
+      const opening = priorLot ? lotClosingPhysicalQty(priorLot) : "";
+      const next = { ...lot };
+      if (opening !== "") {
+        next.openingStockQty = opening;
+        recalcLotSecondaryFromQtys(next);
+      }
+      return next;
+    });
+    return { productSku: row.productSku, lots };
+  });
+}
+
+/**
+ * Prefer yesterday's saved stock for opening / carry-forward; else latest prior report.
+ */
+export function findPhysicalStockForPriorReportDate(candidates, targetReportDate, productRates) {
+  const target = String(targetReportDate || "").slice(0, 10);
+  const yesterday = previousReportDate(target);
+  for (const item of candidates || []) {
+    if (!item) continue;
+    const norm = normalizePhysicalStockPayload(item, productRates);
+    if (String(norm.reportDate || "").slice(0, 10) === yesterday && rowsHaveCarryForwardSource(norm.rows)) {
+      return norm;
+    }
+  }
+  return findLatestPhysicalStockForCarryForward(candidates, target, productRates);
+}
+
+/** Pick the most recently updated saved stock for carry-forward (not the same report date as target). */
 export function findLatestPhysicalStockForCarryForward(candidates, targetReportDate, productRates) {
   const target = String(targetReportDate || "").slice(0, 10);
   let best = null;
@@ -498,17 +587,19 @@ export function rowsHaveCarryForwardSource(rows) {
 
 /**
  * Copy last-saved FIFO lines into a new report day: same MFG / batch / BBD;
- * prior lot traceability carried forward; primary / physical / secondary cleared for the new day.
+ * opening = prior day's physical stock; primary / physical / secondary cleared.
  */
 export function buildRowsCarriedFromPreviousDay(previousRows, productLines) {
   const base = mergePhysicalStockRows(previousRows, productLines);
   return base.map((row) => ({
     productSku: row.productSku,
     lots: getLotsFromProductRow(row).map((lot) => {
+      const opening = lotClosingPhysicalQty(lot);
       const next = createEmptyFifoLot();
       next.mfgDate = lot.mfgDate || "";
       next.batchNo = lot.batchNo || "";
       next.bbdDate = lot.bbdDate || "";
+      if (opening !== "") next.openingStockQty = opening;
       return next;
     }),
   }));
@@ -573,9 +664,17 @@ export async function resolvePhysicalStockRowsForReportDate({
   const target = String(targetReportDate || "").slice(0, 10) || localIsoDate();
   const localForTarget = getLocalPhysicalStockSnapshot(distributorCode, target, productRates);
   const distSaved = normalizePhysicalStockPayload(savedRaw || {}, productRates);
-  const saved = localForTarget
-    ? normalizePhysicalStockPayload(localForTarget, productRates)
-    : distSaved;
+  const distForTarget =
+    String(distSaved.reportDate || "").slice(0, 10) === target ? distSaved : null;
+  let saved;
+  if (localForTarget && distForTarget) {
+    saved =
+      physicalStockPayloadTimestamp(localForTarget) >= physicalStockPayloadTimestamp(distForTarget)
+        ? localForTarget
+        : distForTarget;
+  } else {
+    saved = localForTarget || distForTarget || distSaved;
+  }
 
   const candidates = [...listLocalPhysicalStockSnapshots(distributorCode, productRates)];
   const pushCandidate = (payload) => {
@@ -599,37 +698,37 @@ export async function resolvePhysicalStockRowsForReportDate({
     }
   }
 
-  const prior = findLatestPhysicalStockForCarryForward(candidates, target, productRates);
+  const prior = findPhysicalStockForPriorReportDate(candidates, target, productRates);
   const carriedFrom = prior ? String(prior.reportDate || "").slice(0, 10) || null : null;
   const isSameReportDay = String(saved.reportDate || "").slice(0, 10) === target;
+
+  const finalizeRows = (rows, carriedFromDate) => {
+    const merged = mergePhysicalStockRows(rows, productLines);
+    if (!prior) return { rows: merged, carriedFromDate };
+    return {
+      rows: applyOpeningStockFromPriorPhysical(prior.rows, merged, productLines),
+      carriedFromDate,
+    };
+  };
 
   if (isSameReportDay) {
     if (prior && rowsNeedTraceabilityFill(saved.rows)) {
       if (!rowsHaveUserQuantityEntry(saved.rows) && !rowsHaveAnyStockData(saved.rows)) {
-        return {
-          rows: buildRowsCarriedFromPreviousDay(prior.rows, productLines),
-          carriedFromDate: carriedFrom,
-        };
+        return finalizeRows(buildRowsCarriedFromPreviousDay(prior.rows, productLines), carriedFrom);
       }
-      return {
-        rows: mergeTraceabilityFromPriorRows(saved.rows, prior.rows, productLines),
-        carriedFromDate: carriedFrom,
-      };
+      return finalizeRows(mergeTraceabilityFromPriorRows(saved.rows, prior.rows, productLines), carriedFrom);
     }
     if (rowsHaveAnyStockData(saved.rows)) {
-      return { rows: mergePhysicalStockRows(saved.rows, productLines), carriedFromDate: null };
+      return finalizeRows(saved.rows, null);
     }
   }
 
   if (prior) {
-    return {
-      rows: buildRowsCarriedFromPreviousDay(prior.rows, productLines),
-      carriedFromDate: carriedFrom,
-    };
+    return finalizeRows(buildRowsCarriedFromPreviousDay(prior.rows, productLines), carriedFrom);
   }
 
   if (isSameReportDay) {
-    return { rows: mergePhysicalStockRows(saved.rows, productLines), carriedFromDate: null };
+    return finalizeRows(saved.rows, null);
   }
 
   return { rows: createEmptyPhysicalStockRows(productLines), carriedFromDate: null };

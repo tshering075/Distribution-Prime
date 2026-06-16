@@ -457,6 +457,13 @@ function loadGmailAPIClient() {
  */
 const GMAIL_TOKEN_KEY = 'gmail_oauth_token';
 const GMAIL_SESSION_KEY = 'gmail_oauth_session';
+export const GMAIL_SESSION_CHANGED_EVENT = 'gmail-session-changed';
+
+function notifyGmailSessionChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(GMAIL_SESSION_CHANGED_EVENT));
+  }
+}
 
 function saveGmailToken(accessToken, expiresIn = 3600) {
   try {
@@ -468,6 +475,7 @@ function saveGmailToken(accessToken, expiresIn = 3600) {
     };
     localStorage.setItem(GMAIL_TOKEN_KEY, JSON.stringify(tokenData));
     console.log('✅ Gmail token saved to localStorage (expires in', expiresIn, 'seconds)');
+    notifyGmailSessionChanged();
   } catch (error) {
     console.error('Error saving Gmail token:', error);
   }
@@ -485,6 +493,7 @@ function saveGmailSession(meta = {}) {
         ...meta,
       })
     );
+    notifyGmailSessionChanged();
   } catch (error) {
     console.error('Error saving Gmail session:', error);
   }
@@ -505,6 +514,7 @@ export function hasGmailSession() {
 
 function clearGmailSession() {
   localStorage.removeItem(GMAIL_SESSION_KEY);
+  notifyGmailSessionChanged();
 }
 
 function applyTokenToGapiClient(accessToken, expiresAt = null) {
@@ -554,6 +564,7 @@ function loadGmailToken() {
 function clearGmailToken() {
   localStorage.removeItem(GMAIL_TOKEN_KEY);
   console.log('🗑️ Gmail token cleared from localStorage');
+  notifyGmailSessionChanged();
 }
 
 function getGmailLoginHint() {
@@ -575,6 +586,36 @@ export async function getConnectedGmailEmail() {
     console.warn('Could not read connected Gmail profile:', error?.result?.error?.message || error.message);
   }
   return loadGmailSession()?.email || null;
+}
+
+/**
+ * Interactive Gmail OAuth for the logged-in workspace admin (signup / authorize link).
+ * @param {string} [ownerEmail]
+ * @returns {Promise<string|null>} Connected Gmail address
+ */
+export async function connectGmailAsAdmin(ownerEmail) {
+  const email = String(ownerEmail || localStorage.getItem('admin_email') || '').trim();
+  if (email) onAdminLogin(email);
+
+  if (!(await isGmailConfigured())) {
+    throw new Error(
+      'Gmail API is not configured for this workspace. Ask your platform operator to set credentials in the Platform console.'
+    );
+  }
+
+  await initGmailAPI();
+  const ok = await ensureGmailAuthenticated({ interactive: true });
+  if (!ok) {
+    throw new Error('Gmail authorization was cancelled. Try again when you are ready.');
+  }
+
+  await ensureGmailMatchesAdmin({ interactive: true });
+  startGmailKeepAlive();
+  const connected = await getConnectedGmailEmail();
+  if (connected) {
+    saveGmailSession({ email: connected, login_hint: email || connected });
+  }
+  return connected;
 }
 
 /**
@@ -737,7 +778,11 @@ async function requestGmailAccessToken(options = {}) {
     setTimeout(() => {
       if (!tokenReceived) {
         tokenReceived = true;
-        reject(new Error('Gmail sign-in timed out. Please try again.'));
+        reject(
+          new Error(
+            'Gmail sign-in timed out. Allow popups for this site in your browser, then try again.'
+          )
+        );
       }
     }, 60000);
   });
@@ -854,7 +899,7 @@ export async function ensureGmailAuthenticated(options = {}) {
       if (!expiresAt || expiresAt > Date.now()) return true;
     }
 
-    if (hasGmailSession() || interactive) {
+    if (hasGmailSession()) {
       try {
         const token = await getGmailToken(false);
         const refreshed = loadGmailToken();

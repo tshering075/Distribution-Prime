@@ -29,6 +29,9 @@ import {
   aggregatePhysicalStockTotals,
   flattenPhysicalStockRowsForExport,
   resolvePhysicalStockProductLines,
+  applyOpeningStockFromPriorPhysical,
+  previousReportDate,
+  localIsoDate,
 } from "../utils/physicalStockTemplate";
 import { getAdminPhysicalStockLastSeenAt, getPhysicalStockUpdatesSince } from "../utils/adminPhysicalStockSignals";
 import { mergePrimarySalesFromDispatchedOrders } from "../utils/dispatchPrimarySales";
@@ -75,6 +78,7 @@ export default function PhysicalStockAdminDialog({
   const [exportDateFrom, setExportDateFrom] = useState("");
   const [exportDateTo, setExportDateTo] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [priorRowsByCode, setPriorRowsByCode] = useState({});
   const openSessionRef = useRef(false);
 
   const sorted = useMemo(() => {
@@ -156,6 +160,42 @@ export default function PhysicalStockAdminDialog({
       (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
     );
   }, [filtered]);
+
+  useEffect(() => {
+    if (!open || !supabase || displayed.length === 0) {
+      setPriorRowsByCode({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const codes = displayed
+        .map((d) => String(d.code || d.id || "").trim())
+        .filter(Boolean);
+      const yesterday = previousReportDate(localIsoDate());
+      try {
+        const rows = await fetchDistributorPhysicalStockSnapshots({
+          dateFrom: yesterday,
+          dateTo: yesterday,
+          distributorCodes: codes,
+        });
+        const map = {};
+        for (const row of rows || []) {
+          const c = String(row.distributor_code || "").trim();
+          if (c && row.payload?.rows) {
+            map[c] = row.payload.rows;
+            map[c.toUpperCase()] = row.payload.rows;
+          }
+        }
+        if (!cancelled) setPriorRowsByCode(map);
+      } catch (error) {
+        console.warn("Could not load prior-day physical stock for admin opening:", error);
+        if (!cancelled) setPriorRowsByCode({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, displayed]);
 
   const withDataCount = todayUpdated.length;
 
@@ -496,13 +536,18 @@ export default function PhysicalStockAdminDialog({
             const raw = getRawPhysicalStockFromDistributor(d);
             const norm = normalizePhysicalStockPayload(raw || {}, productRates);
             const code = String(d.code || d.id || "").trim();
-            const displayRows = mergePrimarySalesFromDispatchedOrders(
+            const displayRowsBase = mergePrimarySalesFromDispatchedOrders(
               norm.rows,
               orders,
               code,
               productRates,
               { onlyUncredited: true }
             );
+            const priorRows =
+              priorRowsByCode[code] || priorRowsByCode[String(code).toUpperCase()] || null;
+            const displayRows = priorRows
+              ? applyOpeningStockFromPriorPhysical(priorRows, displayRowsBase, productRates)
+              : displayRowsBase;
             const distTotals = aggregatePhysicalStockTotals(displayRows);
             const rowKey = distributorRowKey(d);
             const expandKey = code || rowKey || d.name;
@@ -572,6 +617,16 @@ export default function PhysicalStockAdminDialog({
                     >
                       {raw ? (
                         <>
+                          <Chip
+                            label={`Op ${distTotals.opening.toLocaleString()}`}
+                            size="small"
+                            sx={{
+                              height: 22,
+                              fontWeight: 700,
+                              fontSize: "0.62rem",
+                              "& .MuiChip-label": { px: 0.75 },
+                            }}
+                          />
                           <Chip
                             label={`P ${distTotals.primary.toLocaleString()}`}
                             size="small"

@@ -38,7 +38,7 @@ import {
   validateShippingLogin,
 } from "../utils/distributorAuth";
 import { signInDistributor, signInAdmin, supabase } from "../services/supabaseService";
-import { DEFAULT_ORGANIZATION_SLUG, getLastWorkspaceSlug } from "../services/tenantScope";
+import { getLastWorkspaceSlug } from "../services/tenantScope";
 import { resolveOrganizationForLogin } from "../services/organizationService";
 import { logActivity, ACTIVITY_TYPES } from "../services/activityService";
 import { isProductionAuthMode } from "../utils/productionMode";
@@ -82,7 +82,7 @@ function LoginPage({
     lockedWorkspaceSlug ||
       searchParams.get("workspace") ||
       getLastWorkspaceSlug() ||
-      DEFAULT_ORGANIZATION_SLUG
+      ""
   );
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
@@ -118,7 +118,7 @@ function LoginPage({
       lockedWorkspaceSlug ||
       searchParams.get("workspace") ||
       getLastWorkspaceSlug() ||
-      DEFAULT_ORGANIZATION_SLUG;
+      "";
     const remembered = readRememberedLogin(slug);
     if (!remembered) return;
     setRememberMe(true);
@@ -131,6 +131,11 @@ function LoginPage({
   }, [lockedWorkspaceSlug, searchParams]);
 
   const navigateAfterStaffLogin = (actualRole) => {
+    const returnTo = searchParams.get("returnTo");
+    if (returnTo && returnTo.startsWith("/")) {
+      navigate(returnTo, { replace: true });
+      return;
+    }
     if (inviteToken) {
       navigate(`/invite/${encodeURIComponent(inviteToken)}`, { replace: true });
       return;
@@ -201,7 +206,7 @@ function LoginPage({
       return;
     }
 
-    const rememberSlug = String(organizationSlug || lockedWorkspaceSlug || DEFAULT_ORGANIZATION_SLUG).trim();
+    const rememberSlug = String(organizationSlug || lockedWorkspaceSlug || "").trim();
     const persistRememberMe = () => {
       writeRememberedLogin(rememberSlug, {
         userId: trimmedUserId,
@@ -600,7 +605,7 @@ function LoginPage({
                     helperText={
                       lockedWorkspaceSlug
                         ? `Signing in to workspace "${lockedWorkspaceSlug}"`
-                        : `Your company's sign-in ID (e.g. ${DEFAULT_ORGANIZATION_SLUG})`
+                        : "Your company's sign-in ID (e.g. acme-beverages)"
                     }
                     sx={{ mb: 2.25 }}
                     InputProps={{
@@ -703,7 +708,7 @@ function LoginPage({
                         setRememberMe(checked);
                         if (!checked) {
                           writeRememberedLogin(
-                            String(organizationSlug || lockedWorkspaceSlug || DEFAULT_ORGANIZATION_SLUG).trim(),
+                            String(organizationSlug || lockedWorkspaceSlug || "").trim(),
                             { userId: "", password: "", rememberMe: false }
                           );
                         }

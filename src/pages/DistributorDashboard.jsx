@@ -111,6 +111,7 @@ import {
   shouldShowPhysicalStockBadge,
 } from "../utils/distributorSidebarSignals";
 import { getRawPhysicalStockFromDistributor } from "../utils/physicalStockTemplate";
+import { mergeStockLiftingWithDeliveredOrders } from "../utils/stockLiftingRecords";
 import { readProductRatesFromLocalStorage, writeProductRatesToLocalStorage } from "../utils/productRatesStorage";
 import {
   readGlobalGstPolicyFromLocalStorage,
@@ -389,76 +390,60 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
   // Subscribe to real-time distributor updates
   // Only subscribe if we have a distributor loaded to avoid unnecessary subscriptions
   useEffect(() => {
-    if (isSupabaseConfigured && distributorCode && distributor) {
-      let isSubscribed = true;
-      
-      const unsubscribe = subscribeToDistributor(distributorCode, (updatedDistributor) => {
-        if (!isSubscribed) return; // Prevent state updates after unmount
-        
-        if (updatedDistributor) {
-          // Update distributor data (target will be updated separately by target subscription)
-          // Keep existing target if available, otherwise use target from distributor document
-          setDistributor(prev => {
-            if (prev && prev.target) {
-              // Preserve existing target from targets collection subscription
-              return {
-                ...updatedDistributor,
-                target: prev.target
-              };
-            }
-            // Use target from distributor document if no target subscription data exists
-            return updatedDistributor;
-          });
-        }
-      });
-      
-      return () => {
-        isSubscribed = false;
-        unsubscribe();
-      };
-    }
-  }, [distributorCode, isSupabaseConfigured, distributor]);
+    if (!isSupabaseConfigured || !distributorCode) return;
+
+    let isSubscribed = true;
+
+    const unsubscribe = subscribeToDistributor(distributorCode, (updatedDistributor) => {
+      if (!isSubscribed) return;
+
+      if (updatedDistributor) {
+        setDistributor((prev) => {
+          if (prev && prev.target) {
+            return { ...updatedDistributor, target: prev.target };
+          }
+          return updatedDistributor;
+        });
+      }
+    });
+
+    return () => {
+      isSubscribed = false;
+      unsubscribe();
+    };
+  }, [distributorCode, isSupabaseConfigured]);
 
   // Subscribe to real-time target updates from targets collection
   // Only subscribe if we have a distributor loaded to avoid unnecessary subscriptions
   useEffect(() => {
-    if (isSupabaseConfigured && distributorCode && distributor) {
-      console.log(`🔄 Subscribing to target updates for distributor ${distributorCode}...`);
-      let isSubscribed = true;
-      
-      const unsubscribeTarget = subscribeToTarget(distributorCode, (targetData) => {
-        if (!isSubscribed) return; // Prevent state updates after unmount
-        
-        if (targetData) {
-          // Update distributor state with new target data
-          setDistributor(prev => {
-            if (prev) {
-              const updated = {
-                ...prev,
-                target: {
-                  CSD_PC: targetData.CSD_PC || 0,
-                  CSD_UC: targetData.CSD_UC || 0,
-                  Water_PC: targetData.Water_PC || 0,
-                  Water_UC: targetData.Water_UC || 0,
-                }
-              };
-              console.log(`✅ Target updated in real-time for distributor ${distributorCode}:`, updated.target);
-              return updated;
-            }
-            return prev;
-          });
-        } else {
-          // Target was deleted or doesn't exist, keep existing target or set to defaults
-          console.log(`⚠️ Target not found for distributor ${distributorCode}, keeping existing target`);
-        }
-      });
-      
-      return () => {
-        isSubscribed = false;
-        unsubscribeTarget();
-      };
-    }
-  }, [distributorCode, isSupabaseConfigured, distributor]);
+    if (!isSupabaseConfigured || !distributorCode) return;
+
+    let isSubscribed = true;
+
+    const unsubscribeTarget = subscribeToTarget(distributorCode, (targetData) => {
+      if (!isSubscribed) return;
+
+      if (targetData) {
+        setDistributor((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            target: {
+              CSD_PC: targetData.CSD_PC || 0,
+              CSD_UC: targetData.CSD_UC || 0,
+              Water_PC: targetData.Water_PC || 0,
+              Water_UC: targetData.Water_UC || 0,
+            },
+          };
+        });
+      }
+    });
+
+    return () => {
+      isSubscribed = false;
+      unsubscribeTarget();
+    };
+  }, [distributorCode, isSupabaseConfigured]);
 
   // Load active schemes for this distributor
   useEffect(() => {
@@ -1160,50 +1145,37 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
     stockLiftingFingerprintRef.current = null;
   }, [distributorCode]);
 
-  // Load stock lifting records from sales_data
+  // Load stock lifting records from sales_data (+ delivered orders when sales rows are missing)
   useEffect(() => {
     const loadStockLiftingRecords = async () => {
       try {
         if (isSupabaseConfigured && distributorCode) {
-          const records = await getStockLiftingRecords(distributorCode);
+          const salesRecords = await getStockLiftingRecords(distributorCode);
+          const records = mergeStockLiftingWithDeliveredOrders(salesRecords, orders, distributorCode);
           setStockLiftingRecords(records);
           stockLiftingFingerprintRef.current = fingerprintStockLiftingRecords(records);
         } else {
-          // Fallback: use orders as stock lifting records if no sales data
-          setStockLiftingRecords(orders.map(order => ({
-            date: order.timestamp ? new Date(order.timestamp).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-            timestamp: order.timestamp || order.created_at || new Date().toLocaleString(),
-            created_at: order.created_at || order.timestamp,
-            csdPC: order.csdPC || 0,
-            csdUC: order.csdUC || 0,
-            waterPC: order.waterPC || 0,
-            waterUC: order.waterUC || 0,
-          })));
+          const records = mergeStockLiftingWithDeliveredOrders([], orders, distributorCode);
+          setStockLiftingRecords(records);
+          stockLiftingFingerprintRef.current = fingerprintStockLiftingRecords(records);
         }
       } catch (error) {
         console.error("Error loading stock lifting records:", error);
-        // Fallback to orders
-        setStockLiftingRecords(orders.map(order => ({
-          date: order.timestamp ? new Date(order.timestamp).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          timestamp: order.timestamp || order.created_at || new Date().toLocaleString(),
-          created_at: order.created_at || order.timestamp,
-          csdPC: order.csdPC || 0,
-          csdUC: order.csdUC || 0,
-          waterPC: order.waterPC || 0,
-          waterUC: order.waterUC || 0,
-        })));
+        const records = mergeStockLiftingWithDeliveredOrders([], orders, distributorCode);
+        setStockLiftingRecords(records);
+        stockLiftingFingerprintRef.current = fingerprintStockLiftingRecords(records);
       }
     };
     loadStockLiftingRecords();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [distributorCode, isSupabaseConfigured]);
+  }, [distributorCode, isSupabaseConfigured, orders]);
 
   // Subscribe to sales_data changes to refresh stock lifting records
   useEffect(() => {
     if (isSupabaseConfigured && distributorCode) {
       const unsubscribe = subscribeToSalesData(async () => {
         try {
-          const records = await getStockLiftingRecords(distributorCode);
+          const salesRecords = await getStockLiftingRecords(distributorCode);
+          const records = mergeStockLiftingWithDeliveredOrders(salesRecords, orders, distributorCode);
           const nextFp = fingerprintStockLiftingRecords(records);
           const prevFp = stockLiftingFingerprintRef.current;
           setStockLiftingRecords(records);
@@ -1222,7 +1194,7 @@ function DistributorDashboard({ distributorName = "Distributor", distributorCode
       });
       return () => unsubscribe();
     }
-  }, [distributorCode, isSupabaseConfigured]);
+  }, [distributorCode, isSupabaseConfigured, orders]);
 
   const handleStockLiftRowClick = useCallback(
     (record) => {

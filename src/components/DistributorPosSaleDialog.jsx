@@ -60,6 +60,7 @@ import {
   localIsoDate,
   normalizePhysicalStockPayload,
   resolvePhysicalStockProductLines,
+  saveLocalPhysicalStockSnapshot,
 } from "../utils/physicalStockTemplate";
 import {
   appendPosSaleAsync,
@@ -2240,6 +2241,7 @@ export default function DistributorPosSaleDialog({
       list[idx] = { ...list[idx], physical_stock: stockPayload };
       saveDistributors(list);
     }
+    saveLocalPhysicalStockSnapshot(distributorCode, stockPayload);
     setDistributor?.((prev) => (prev ? { ...prev, physical_stock: stockPayload } : prev));
 
     if (!isSupabaseConfigured || !distributorCode) return;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -11,15 +11,18 @@ import {
   Typography,
   Stack,
   Box,
+  Alert,
+  CircularProgress,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import MailOutlineIcon from '@mui/icons-material/MailOutline';
 import { useOrganization } from '../context/OrganizationProvider';
 import { markOnboardingDone } from '../utils/onboarding';
 import { PLATFORM_NAME } from '../constants/saas';
 
-const STEPS = ['Welcome', 'Your workspace', 'Get started'];
+const STEPS = ['Welcome', 'Your workspace', 'Connect Gmail', 'Get started'];
 
 export default function OnboardingWizardDialog({
   open,
@@ -27,15 +30,48 @@ export default function OnboardingWizardDialog({
   onOpenWorkspaceSettings,
   onOpenDistributors,
   onOpenRateMaster,
+  ownerEmail = '',
+  initialStep = 0,
 }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { organization } = useOrganization();
-  const [activeStep, setActiveStep] = useState(0);
+  const [activeStep, setActiveStep] = useState(initialStep);
+  const [gmailConnecting, setGmailConnecting] = useState(false);
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [gmailEmail, setGmailEmail] = useState('');
+  const [gmailError, setGmailError] = useState('');
+
+  useEffect(() => {
+    if (open) setActiveStep(initialStep);
+  }, [open, initialStep]);
 
   const finish = () => {
     if (organization?.id) markOnboardingDone(organization.id);
     onClose();
+  };
+
+  const handleConnectGmail = async () => {
+    setGmailConnecting(true);
+    setGmailError('');
+    try {
+      const { connectGmailAsAdmin, isGmailConfigured } = await import('../services/gmailService');
+      if (!(await isGmailConfigured())) {
+        throw new Error(
+          'Gmail API is not configured yet. Your platform operator must save Gmail credentials in the Platform console.'
+        );
+      }
+      const connected = await connectGmailAsAdmin(ownerEmail);
+      if (!connected) {
+        throw new Error('Gmail authorization completed but the account could not be verified.');
+      }
+      setGmailEmail(connected);
+      setGmailConnected(true);
+    } catch (err) {
+      setGmailError(err?.message || 'Failed to connect Gmail');
+    } finally {
+      setGmailConnecting(false);
+    }
   };
 
   return (
@@ -69,6 +105,9 @@ export default function OnboardingWizardDialog({
               other customer on {PLATFORM_NAME}.
             </Typography>
             <Typography variant="body2" color="text.secondary">
+              You can connect Gmail in the next step to send order emails from your admin account.
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
               Invite your team anytime from the admin sidebar.
             </Typography>
           </Stack>
@@ -95,6 +134,34 @@ export default function OnboardingWizardDialog({
         )}
 
         {activeStep === 2 && (
+          <Stack spacing={2}>
+            <Typography fontWeight={700}>Connect Gmail for order emails</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Authorize {ownerEmail ? <strong>{ownerEmail}</strong> : 'your admin account'} with Google so you can send
+              order emails from this workspace.
+            </Typography>
+            {gmailConnected ? (
+              <Alert severity="success" icon={<CheckCircleOutlineIcon />}>
+                Gmail connected as <strong>{gmailEmail}</strong>.
+              </Alert>
+            ) : (
+              <>
+                {gmailError ? <Alert severity="error">{gmailError}</Alert> : null}
+                <Button
+                  variant="contained"
+                  startIcon={gmailConnecting ? <CircularProgress size={18} color="inherit" /> : <MailOutlineIcon />}
+                  disabled={gmailConnecting}
+                  onClick={handleConnectGmail}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  {gmailConnecting ? 'Authorizing…' : 'Authorize Gmail'}
+                </Button>
+              </>
+            )}
+          </Stack>
+        )}
+
+        {activeStep === 3 && (
           <Stack spacing={1.5}>
             <Typography fontWeight={700}>Recommended setup</Typography>
             {[

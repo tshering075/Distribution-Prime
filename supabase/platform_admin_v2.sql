@@ -80,10 +80,6 @@ BEGIN
     RAISE EXCEPTION 'Organization id is required' USING ERRCODE = '22023';
   END IF;
 
-  IF p_org_id = '00000000-0000-4000-8000-000000000001'::uuid THEN
-    RAISE EXCEPTION 'The default legacy workspace cannot be deleted' USING ERRCODE = '22023';
-  END IF;
-
   SELECT o.slug INTO v_slug FROM organizations o WHERE o.id = p_org_id;
   IF v_slug IS NULL THEN
     RAISE EXCEPTION 'Organization not found' USING ERRCODE = 'P0002';

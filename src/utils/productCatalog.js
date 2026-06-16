@@ -50,11 +50,19 @@ export function generateProductId() {
   return `p_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Uppercase label for product name / SKU display across the app. */
+export function formatProductLabelDisplay(label) {
+  const s = String(label ?? "").trim();
+  return s ? s.toUpperCase() : "";
+}
+
 /** Display / order line key: product name + SKU (e.g. Product A + 300 ML). */
 export function getProductLineName(product) {
   if (!product) return "";
-  if (product.lineName) return String(product.lineName).trim();
-  return customProductLineName(product.name, product.variant ?? product.sku);
+  if (product.lineName) return formatProductLabelDisplay(product.lineName);
+  return formatProductLabelDisplay(
+    customProductLineName(product.name, product.variant ?? product.sku)
+  );
 }
 
 export function normalizeCategory(raw) {
@@ -121,8 +129,8 @@ function guessCategoryFromLineName(lineName) {
 }
 
 function productToStored(p) {
-  const name = String(p.name ?? "").trim();
-  const variant = String(p.variant ?? p.sku ?? "").trim();
+  const name = formatProductLabelDisplay(p.name ?? "");
+  const variant = formatProductLabelDisplay(p.variant ?? p.sku ?? "");
   const lineName = getProductLineName({ name, variant });
   const rate = parseNum(p.rate, 0);
   const kgPerCase = parseNum(p.kgPerCase, 0);

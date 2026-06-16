@@ -59,6 +59,7 @@ import {
   buildSkuOptions,
   normalizeCatalogSettings,
   normalizeCategory,
+  formatProductLabelDisplay,
 } from "../utils/productCatalog";
 import { tableHeadRowSx, tableHeadCellSx } from "../theme/contrastSurfaces";
 import { useOrganization } from "../context/OrganizationProvider";
@@ -196,9 +197,11 @@ export default function RateMasterDialog({
   }, [open, refreshFromWorkspace]);
 
   const handleProductChange = (index, field, value) => {
+    const nextValue =
+      field === "name" || field === "variant" ? formatProductLabelDisplay(value) : value;
     setProducts((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
+      next[index] = { ...next[index], [field]: nextValue };
       return next;
     });
     setHasChanges(true);
@@ -618,7 +621,7 @@ export default function RateMasterDialog({
                                       placeholder="Product A"
                                       value={row.name}
                                       onChange={(e) => handleProductChange(index, "name", e.target.value)}
-                                      sx={{ ...COMPACT_FIELD, width: "100%" }}
+                                      sx={{ ...COMPACT_FIELD, width: "100%", "& input": { textTransform: "uppercase" } }}
                                     />
                                   </Tooltip>
                                 </TableCell>

@@ -1,5 +1,8 @@
 import React, { useMemo, useState } from "react";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -29,6 +32,7 @@ import PersonOutlineIcon from "@mui/icons-material/PersonOutline";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { BRAND_MARK_SRC } from "../constants/brand";
 import { logoSrcWithPublicUrl } from "../utils/organizationBrand";
 import { PLATFORM_NAME } from "../constants/saas";
@@ -165,7 +169,7 @@ function SignUpPage({ onLogin }) {
 
       onLogin("admin");
       setSuccess(true);
-      navigate("/admin?onboarding=1", { replace: true });
+      navigate("/admin?onboarding=1&connectGmail=1", { replace: true });
     } catch (err) {
       setError(err?.message || "Sign up failed. Please try again.");
     } finally {
@@ -305,7 +309,7 @@ function SignUpPage({ onLogin }) {
                   </Typography>
                 </Zoom>
                 <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center", lineHeight: 1.6 }}>
-                  Company details and your owner account — you&apos;ll sign in at your workspace URL after this.
+                  Quick setup: workspace + owner account. Add invoice details only if needed.
                 </Typography>
               </Stack>
 
@@ -316,155 +320,159 @@ function SignUpPage({ onLogin }) {
               ) : null}
 
               <Box component="form" onSubmit={handleSubmit} noValidate>
-                <Stack spacing={2.5}>
+                <Stack spacing={1.75}>
                   <Typography variant="overline" sx={{ fontWeight: 800, color: "text.secondary", letterSpacing: 1.2 }}>
                     Organization
                   </Typography>
 
-                  <TextField
-                    label="Company / organization name"
-                    value={organizationName}
-                    onChange={(e) => {
-                      setOrganizationName(e.target.value);
-                      if (fieldErrors.organizationName) {
-                        setFieldErrors((f) => ({ ...f, organizationName: "" }));
-                      }
-                    }}
-                    onBlur={handleSlugBlur}
-                    required
-                    fullWidth
-                    error={!!fieldErrors.organizationName}
-                    helperText={fieldErrors.organizationName || "Shown to your team and distributors"}
-                    FormHelperTextProps={{ sx: { mx: 0 } }}
-                    sx={fieldSx}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <BusinessOutlinedIcon sx={{ color: "primary.main", fontSize: 20 }} />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-
-                  <TextField
-                    label="Workspace ID"
-                    value={organizationSlug}
-                    onChange={(e) => {
-                      setOrganizationSlug(e.target.value);
-                      if (fieldErrors.organizationSlug) {
-                        setFieldErrors((f) => ({ ...f, organizationSlug: "" }));
-                      }
-                    }}
-                    onBlur={handleSlugBlur}
-                    required
-                    fullWidth
-                    error={!!fieldErrors.organizationSlug}
-                    helperText={
-                      fieldErrors.organizationSlug ||
-                      (signInPreview ? (
-                        <>
-                          Sign-in URL:{" "}
-                          <Box component="span" sx={{ fontWeight: 700, color: "primary.main", wordBreak: "break-all" }}>
-                            {signInPreview}
-                          </Box>
-                        </>
-                      ) : (
-                        "Lowercase letters, numbers, hyphens (e.g. acme-beverages)"
-                      ))
-                    }
-                    FormHelperTextProps={{ sx: { mx: 0 } }}
-                    sx={fieldSx}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <LinkOutlinedIcon sx={{ color: "primary.main", fontSize: 20 }} />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-
-                  <Typography variant="overline" sx={{ fontWeight: 800, color: "text.secondary", letterSpacing: 1.2 }}>
-                    Invoice letterhead
-                  </Typography>
-
-                  <TextField
-                    label="Address"
-                    value={organizationAddress}
-                    onChange={(e) => setOrganizationAddress(e.target.value)}
-                    fullWidth
-                    multiline
-                    minRows={2}
-                    placeholder="Street, town, dzongkhag"
-                    helperText="Shown at the top of shipping invoices"
-                    FormHelperTextProps={{ sx: { mx: 0 } }}
-                    sx={fieldSx}
-                  />
-
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                     <TextField
-                      label="Post No."
-                      value={organizationPostNo}
-                      onChange={(e) => setOrganizationPostNo(e.target.value)}
+                      label="Company / organization name"
+                      value={organizationName}
+                      onChange={(e) => {
+                        setOrganizationName(e.target.value);
+                        if (fieldErrors.organizationName) {
+                          setFieldErrors((f) => ({ ...f, organizationName: "" }));
+                        }
+                      }}
+                      onBlur={handleSlugBlur}
+                      required
                       fullWidth
-                      placeholder="e.g. 11001"
+                      error={!!fieldErrors.organizationName}
+                      helperText={fieldErrors.organizationName || "Shown to your team and distributors"}
+                      FormHelperTextProps={{ sx: { mx: 0 } }}
                       sx={fieldSx}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <BusinessOutlinedIcon sx={{ color: "primary.main", fontSize: 20 }} />
+                          </InputAdornment>
+                        ),
+                      }}
                     />
                     <TextField
-                      label="GST No."
-                      value={organizationGstNo}
-                      onChange={(e) => setOrganizationGstNo(e.target.value)}
+                      label="Workspace ID"
+                      value={organizationSlug}
+                      onChange={(e) => {
+                        setOrganizationSlug(e.target.value);
+                        if (fieldErrors.organizationSlug) {
+                          setFieldErrors((f) => ({ ...f, organizationSlug: "" }));
+                        }
+                      }}
+                      onBlur={handleSlugBlur}
+                      required
                       fullWidth
-                      placeholder="Organization GST number"
+                      error={!!fieldErrors.organizationSlug}
+                      helperText={
+                        fieldErrors.organizationSlug || "Lowercase letters, numbers, hyphens"
+                      }
+                      FormHelperTextProps={{ sx: { mx: 0 } }}
                       sx={fieldSx}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <LinkOutlinedIcon sx={{ color: "primary.main", fontSize: 20 }} />
+                          </InputAdornment>
+                        ),
+                      }}
                     />
                   </Stack>
+                  {signInPreview ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: -0.5 }}>
+                      Sign-in URL:{" "}
+                      <Box component="span" sx={{ fontWeight: 700, color: "primary.main", wordBreak: "break-all" }}>
+                        {signInPreview}
+                      </Box>
+                    </Typography>
+                  ) : null}
 
-                  <Divider sx={{ my: 0.5 }} />
+                  <Accordion disableGutters elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, "&:before": { display: "none" } }}>
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 44, "& .MuiAccordionSummary-content": { my: 1 } }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>Invoice letterhead (optional)</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ pt: 0 }}>
+                      <Stack spacing={1.5}>
+                        <TextField
+                          label="Address"
+                          value={organizationAddress}
+                          onChange={(e) => setOrganizationAddress(e.target.value)}
+                          fullWidth
+                          multiline
+                          minRows={2}
+                          placeholder="Street, town, dzongkhag"
+                          helperText="Shown at the top of shipping invoices"
+                          FormHelperTextProps={{ sx: { mx: 0 } }}
+                          sx={fieldSx}
+                        />
+                        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                          <TextField
+                            label="Post No."
+                            value={organizationPostNo}
+                            onChange={(e) => setOrganizationPostNo(e.target.value)}
+                            fullWidth
+                            placeholder="e.g. 11001"
+                            sx={fieldSx}
+                          />
+                          <TextField
+                            label="GST No."
+                            value={organizationGstNo}
+                            onChange={(e) => setOrganizationGstNo(e.target.value)}
+                            fullWidth
+                            placeholder="Organization GST number"
+                            sx={fieldSx}
+                          />
+                        </Stack>
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+
+                  <Divider sx={{ my: 0.25 }} />
 
                   <Typography variant="overline" sx={{ fontWeight: 800, color: "text.secondary", letterSpacing: 1.2 }}>
                     Owner account
                   </Typography>
 
-                  <TextField
-                    label="Your name"
-                    value={ownerName}
-                    onChange={(e) => setOwnerName(e.target.value)}
-                    fullWidth
-                    sx={fieldSx}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <PersonOutlineIcon sx={{ color: "primary.main", fontSize: 20 }} />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-
-                  <TextField
-                    label="Owner email"
-                    type="email"
-                    value={ownerEmail}
-                    onChange={(e) => {
-                      setOwnerEmail(e.target.value);
-                      if (fieldErrors.ownerEmail) {
-                        setFieldErrors((f) => ({ ...f, ownerEmail: "" }));
-                      }
-                    }}
-                    required
-                    fullWidth
-                    autoComplete="email"
-                    error={!!fieldErrors.ownerEmail}
-                    helperText={fieldErrors.ownerEmail || "Used to sign in and recover access"}
-                    FormHelperTextProps={{ sx: { mx: 0 } }}
-                    sx={fieldSx}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <EmailOutlinedIcon sx={{ color: "primary.main", fontSize: 20 }} />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                    <TextField
+                      label="Your name"
+                      value={ownerName}
+                      onChange={(e) => setOwnerName(e.target.value)}
+                      fullWidth
+                      sx={fieldSx}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <PersonOutlineIcon sx={{ color: "primary.main", fontSize: 20 }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                    <TextField
+                      label="Owner email"
+                      type="email"
+                      value={ownerEmail}
+                      onChange={(e) => {
+                        setOwnerEmail(e.target.value);
+                        if (fieldErrors.ownerEmail) {
+                          setFieldErrors((f) => ({ ...f, ownerEmail: "" }));
+                        }
+                      }}
+                      required
+                      fullWidth
+                      autoComplete="email"
+                      error={!!fieldErrors.ownerEmail}
+                      helperText={fieldErrors.ownerEmail || "Used to sign in and recover access"}
+                      FormHelperTextProps={{ sx: { mx: 0 } }}
+                      sx={fieldSx}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <EmailOutlinedIcon sx={{ color: "primary.main", fontSize: 20 }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  </Stack>
 
                   <TextField
                     label="Password"

@@ -13,13 +13,16 @@ import { useTheme } from "@mui/material/styles";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import LogoutIcon from "@mui/icons-material/Logout";
 import PeopleOutlinedIcon from "@mui/icons-material/PeopleOutlined";
+import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
 import SaasAppBarTitle from "../components/saas/SaasAppBarTitle";
 import AppSnackbar from "../components/AppSnackbar";
 import PlatformWorkspaceDialog from "../components/platform/PlatformWorkspaceDialog";
 import PlatformUsersDialog from "../components/platform/PlatformUsersDialog";
+import GmailSettingsDialog from "../components/GmailSettingsDialog";
 import {
   PlatformFiltersPanel,
   PlatformWorkspacesTable,
+  PlatformEmptyWorkspacesState,
 } from "../components/platform/PlatformDashboardSections";
 import {
   checkPlatformAdmin,
@@ -52,6 +55,7 @@ export default function PlatformDashboard({ onLogout }) {
   const [selectedOrg, setSelectedOrg] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [usersDialogOpen, setUsersDialogOpen] = useState(false);
+  const [gmailSettingsOpen, setGmailSettingsOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: "" });
 
   const load = useCallback(async () => {
@@ -149,6 +153,29 @@ export default function PlatformDashboard({ onLogout }) {
             title={`${PLATFORM_NAME} Operator Console`}
             subtitle={headerSubtitle || "Platform administration"}
           />
+          <Tooltip title="Gmail API credentials (all workspaces)">
+            <Button
+              color="inherit"
+              size="small"
+              startIcon={<EmailOutlinedIcon />}
+              onClick={() => setGmailSettingsOpen(true)}
+              sx={{ fontWeight: 700, display: { xs: "none", sm: "inline-flex" } }}
+            >
+              Gmail
+            </Button>
+          </Tooltip>
+          <Tooltip title="Gmail API credentials">
+            <span>
+              <IconButton
+                color="inherit"
+                onClick={() => setGmailSettingsOpen(true)}
+                sx={{ display: { xs: "inline-flex", sm: "none" } }}
+                aria-label="Gmail settings"
+              >
+                <EmailOutlinedIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
           <Tooltip title="Platform operators">
             <Button
               color="inherit"
@@ -224,27 +251,33 @@ export default function PlatformDashboard({ onLogout }) {
               minHeight: 0,
             }}
           >
-            <PlatformFiltersPanel
-              search={search}
-              statusFilter={statusFilter}
-              sortId={sortId}
-              filteredCount={filtered.length}
-              totalCount={orgs.length}
-              onSearchChange={setSearch}
-              onStatusChange={setStatusFilter}
-              onSortChange={setSortId}
-              onExport={handleExport}
-              exportDisabled={filtered.length === 0}
-              onReset={resetFilters}
-              hasActiveFilters={hasActiveFilters}
-            />
-            <PlatformWorkspacesTable
-              rows={filtered}
-              loading={loading}
-              selectedId={selectedOrg?.id}
-              onRowClick={openDetail}
-              totalCount={orgs.length}
-            />
+            {!loading && orgs.length === 0 && !error ? (
+              <PlatformEmptyWorkspacesState />
+            ) : (
+              <>
+                <PlatformFiltersPanel
+                  search={search}
+                  statusFilter={statusFilter}
+                  sortId={sortId}
+                  filteredCount={filtered.length}
+                  totalCount={orgs.length}
+                  onSearchChange={setSearch}
+                  onStatusChange={setStatusFilter}
+                  onSortChange={setSortId}
+                  onExport={handleExport}
+                  exportDisabled={filtered.length === 0}
+                  onReset={resetFilters}
+                  hasActiveFilters={hasActiveFilters}
+                />
+                <PlatformWorkspacesTable
+                  rows={filtered}
+                  loading={loading}
+                  selectedId={selectedOrg?.id}
+                  onRowClick={openDetail}
+                  totalCount={orgs.length}
+                />
+              </>
+            )}
           </Box>
         </Container>
       </Box>
@@ -253,6 +286,12 @@ export default function PlatformDashboard({ onLogout }) {
         open={usersDialogOpen}
         onClose={() => setUsersDialogOpen(false)}
         onToast={(message) => setToast({ open: true, message })}
+      />
+
+      <GmailSettingsDialog
+        open={gmailSettingsOpen}
+        onClose={() => setGmailSettingsOpen(false)}
+        platformMode
       />
 
       <PlatformWorkspaceDialog

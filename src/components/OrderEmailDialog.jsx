@@ -192,7 +192,7 @@ function OrderEmailDialog({ open, onClose, order, onSend, onManageRecipients }) 
         getConnectedGmailEmail,
       } = await import("../services/gmailService");
       if (!(await isGmailConfigured())) {
-        setError("Gmail API is not configured. Set credentials in Settings first.");
+        setError("Gmail API is not configured. Ask your platform operator to set credentials in the Platform console.");
         return;
       }
       const connected = await ensureGmailAuthenticated({ interactive: true });

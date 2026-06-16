@@ -1,4 +1,5 @@
 import { enrichLineWithMfgBatch, num } from "./orderLineCalculation";
+import { formatLotDateDisplay } from "./shippingFifoLots";
 import { COMPANY_NAME } from "../constants/brand";
 
 function escapeHtml(value) {
@@ -167,9 +168,9 @@ function buildLineRowsHtml(lines) {
       return `<tr class="${i % 2 ? "stripe" : ""}">
         <td>${i + 1}</td>
         <td class="sku">${escapeHtml(row.sku)}</td>
-        <td>${escapeHtml(row.mfgDate || "—")}</td>
+        <td>${escapeHtml(row.mfgDate ? formatLotDateDisplay(row.mfgDate) : "—")}</td>
         <td>${escapeHtml(row.batchNo || "—")}</td>
-        <td>${escapeHtml(row.bbdDate || "—")}</td>
+        <td>${escapeHtml(row.bbdDate ? formatLotDateDisplay(row.bbdDate) : "—")}</td>
         <td class="num">${escapeHtml(qtyLabel)}</td>
         <td class="num">${formatInr(row.rate)}</td>
         <td class="num">${formatInr(row.totalAmount)}</td>

@@ -1,3 +1,12 @@
+import { customProductLineName } from "../constants/productSkus";
+import {
+  categorySortKey,
+  ensureProductCatalog,
+  formatProductLabelDisplay,
+  getActiveProducts,
+  getProductLineName,
+  normalizeCategory,
+} from "./productCatalog";
 import { mfgDateToInputValue, mfgDateSortKey } from "./shippingFifoLots";
 import { fgRowsMatchingSku } from "./fgStockSkuMatch";
 
@@ -19,6 +28,7 @@ function nextRowId() {
 export function createEmptyInventoryRow() {
   return {
     id: nextRowId(),
+    catalogProductId: "",
     productName: "",
     sku: "",
     category: "CSD",
@@ -29,6 +39,109 @@ export function createEmptyInventoryRow() {
   };
 }
 
+/** Calculator / order line key from inventory product name + SKU variant. */
+export function getInventoryRowLineName(row) {
+  const fromParts = customProductLineName(row?.productName, row?.sku);
+  if (fromParts) return formatProductLabelDisplay(fromParts);
+  return formatProductLabelDisplay(row?.sku || row?.productName || "");
+}
+
+function catalogRowMatchKey(product) {
+  return String(product?.id || "").trim() || getProductLineName(product).toUpperCase();
+}
+
+/** Match a saved inventory row to an active catalogue product. */
+export function findCatalogProductForInventoryRow(row, activeProducts) {
+  const products = activeProducts || [];
+  const catalogId = String(row?.catalogProductId || "").trim();
+  if (catalogId) {
+    const byId = products.find((p) => p.id === catalogId);
+    if (byId) return byId;
+  }
+
+  const lineName = getProductLineName({
+    name: row?.productName,
+    variant: row?.sku,
+  });
+  const lineUpper = lineName.toUpperCase();
+  if (lineUpper) {
+    const byLine = products.find((p) => getProductLineName(p).toUpperCase() === lineUpper);
+    if (byLine) return byLine;
+  }
+
+  const name = String(row?.productName || "").trim().toUpperCase();
+  const sku = String(row?.sku || "").trim().toUpperCase();
+  if (name && sku) {
+    const byParts = products.find(
+      (p) =>
+        String(p.name || "").trim().toUpperCase() === name &&
+        String(p.variant ?? p.sku ?? "").trim().toUpperCase() === sku
+    );
+    if (byParts) return byParts;
+  }
+
+  if (sku) {
+    const bySkuAsLine = products.find((p) => getProductLineName(p).toUpperCase() === sku);
+    if (bySkuAsLine) return bySkuAsLine;
+  }
+
+  return null;
+}
+
+export function createInventoryRowFromCatalogProduct(product, overrides = {}) {
+  return {
+    ...createEmptyInventoryRow(),
+    catalogProductId: String(product?.id || "").trim(),
+    productName: String(product?.name ?? "").trim(),
+    sku: String(product?.variant ?? product?.sku ?? "").trim(),
+    category: normalizeCategory(product?.category),
+    ...overrides,
+  };
+}
+
+/**
+ * Build inventory rows from Product & Rate Master, merging saved lot data.
+ * Each active catalogue product appears at least once; orphan lots are dropped.
+ */
+export function mergeInventoryWithCatalog(productRates, savedRows) {
+  const active = getActiveProducts(ensureProductCatalog(productRates))
+    .slice()
+    .sort((a, b) => {
+      const cat = categorySortKey(a.category) - categorySortKey(b.category);
+      if (cat !== 0) return cat;
+      return getProductLineName(a).localeCompare(getProductLineName(b));
+    });
+
+  const saved = (Array.isArray(savedRows) ? savedRows : []).map((r) => normalizeInventoryRow(r));
+  const lotsByProduct = new Map();
+
+  for (const row of saved) {
+    const product = findCatalogProductForInventoryRow(row, active);
+    if (!product) continue;
+    const key = catalogRowMatchKey(product);
+    if (!lotsByProduct.has(key)) lotsByProduct.set(key, []);
+    lotsByProduct.get(key).push({
+      ...row,
+      catalogProductId: product.id,
+      productName: String(product.name || "").trim(),
+      sku: String(product.variant ?? product.sku ?? "").trim(),
+      category: normalizeCategory(product.category),
+    });
+  }
+
+  const merged = [];
+  for (const product of active) {
+    const key = catalogRowMatchKey(product);
+    const lots = lotsByProduct.get(key) || [];
+    if (lots.length === 0) {
+      merged.push(createInventoryRowFromCatalogProduct(product));
+    } else {
+      merged.push(...lots);
+    }
+  }
+  return merged;
+}
+
 export function normalizeInventoryRow(row) {
   const id = String(row?.id || "").trim() || nextRowId();
   const qtyRaw = row?.quantity;
@@ -37,8 +150,9 @@ export function normalizeInventoryRow(row) {
 
   return {
     id,
-    productName: String(row?.productName ?? row?.product_name ?? "").trim(),
-    sku: String(row?.sku ?? "").trim(),
+    catalogProductId: String(row?.catalogProductId ?? row?.catalog_product_id ?? "").trim(),
+    productName: formatProductLabelDisplay(row?.productName ?? row?.product_name ?? ""),
+    sku: formatProductLabelDisplay(row?.sku ?? ""),
     category: String(row?.category ?? "CSD").trim() || "CSD",
     mfgDate: mfgDateToInputValue(row?.mfgDate ?? row?.mfg_date ?? "") || String(row?.mfgDate ?? "").trim(),
     batchNo: String(row?.batchNo ?? row?.batch_no ?? "").trim(),
@@ -72,13 +186,21 @@ export function inventoryRowsMatchingSku(skuName, rows) {
   const exact = normalized.filter((r) => r.sku && r.sku.toUpperCase() === upper);
   if (exact.length > 0) return exact;
 
+  const byLine = normalized.filter(
+    (r) => getInventoryRowLineName(r).toUpperCase() === upper
+  );
+  if (byLine.length > 0) return byLine;
+
   const byName = normalized.filter(
     (r) => r.productName && r.productName.toUpperCase() === upper
   );
   if (byName.length > 0) return byName;
 
   return normalized.filter((r) => {
-    const fgLike = { description: r.productName || r.sku, sku: r.sku };
+    const fgLike = {
+      description: getInventoryRowLineName(r) || r.productName || r.sku,
+      sku: r.sku,
+    };
     return fgRowsMatchingSku(sku, [fgLike]).length > 0;
   });
 }
@@ -192,11 +314,13 @@ export function getInventorySkuOptions(inventoryRows) {
   const map = new Map();
   for (const raw of inventoryRows || []) {
     const row = normalizeInventoryRow(raw);
-    if (!row.sku || row.quantity <= 0) continue;
-    const key = row.sku.toUpperCase();
+    const lineName = getInventoryRowLineName(row);
+    if (!lineName || row.quantity <= 0) continue;
+    const key = lineName.toUpperCase();
     const prev = map.get(key) || {
-      sku: row.sku,
+      sku: lineName,
       productName: row.productName,
+      variant: row.sku,
       category: row.category,
       totalQty: 0,
     };
@@ -205,6 +329,46 @@ export function getInventorySkuOptions(inventoryRows) {
     map.set(key, prev);
   }
   return [...map.values()].sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
+}
+
+/**
+ * All catalogue products with total available cases and FIFO lot breakdown (for shipping reference).
+ */
+export function buildProductStockAvailabilityList(productRates, inventoryRows) {
+  const rows = mergeInventoryWithCatalog(productRates, inventoryRows || []);
+  const map = new Map();
+
+  for (const row of rows) {
+    const lineName = getInventoryRowLineName(row);
+    if (!lineName) continue;
+    const key = lineName.toUpperCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        product: lineName,
+        productName: row.productName,
+        variant: row.sku,
+        category: row.category || "CSD",
+        totalQty: 0,
+        lots: [],
+      });
+    }
+    const entry = map.get(key);
+    const qty = Math.max(0, Math.floor(Number(row.quantity) || 0));
+    if (qty <= 0) continue;
+    entry.totalQty += qty;
+    entry.lots.push({
+      mfgDate: String(row.mfgDate || "").trim(),
+      batchNo: String(row.batchNo || "").trim(),
+      bbdDate: String(row.bbdDate || "").trim(),
+      quantity: qty,
+    });
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const cat = categorySortKey(a.category) - categorySortKey(b.category);
+    if (cat !== 0) return cat;
+    return String(a.product).localeCompare(String(b.product));
+  });
 }
 
 /**

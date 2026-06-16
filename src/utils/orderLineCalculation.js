@@ -1,5 +1,7 @@
+import { customProductLineName } from "../constants/productSkus";
 import {
   ensureProductCatalog,
+  formatProductLabelDisplay,
   getActiveProducts,
   getProductLineName,
   getUcDivisor,
@@ -41,6 +43,35 @@ export function buildCalculatorSkus(productRates) {
 export function resolveSkuMeta(skuName, productRates, skus = null) {
   const list = skus || buildCalculatorSkus(productRates);
   return list.find((s) => s.name === skuName) || null;
+}
+
+/** Full catalogue line name (e.g. COKE 300 ML) from a stored SKU or variant label. */
+export function resolveCatalogLineName(sku, productRates) {
+  const s = String(sku || "").trim();
+  if (!s) return "";
+  const active = getActiveProducts(ensureProductCatalog(productRates));
+  const upper = s.toUpperCase();
+
+  const exact = active.find((p) => getProductLineName(p).toUpperCase() === upper);
+  if (exact) return getProductLineName(exact);
+
+  const byVariant = active.filter(
+    (p) => String(p.variant ?? p.sku ?? "").trim().toUpperCase() === upper
+  );
+  if (byVariant.length === 1) return getProductLineName(byVariant[0]);
+
+  return s;
+}
+
+/** Display label for order / shipping table rows. */
+export function formatOrderLineSkuLabel(row, productRates = null) {
+  const raw = String(row?.sku ?? "").trim();
+  const productName = String(row?.productName ?? row?.product_name ?? "").trim();
+  if (productName && raw && !raw.toUpperCase().includes(productName.toUpperCase())) {
+    return formatProductLabelDisplay(customProductLineName(productName, raw));
+  }
+  const resolved = productRates ? resolveCatalogLineName(raw, productRates) : raw;
+  return formatProductLabelDisplay(resolved || productName || "—");
 }
 
 export function getPurchasedCasesFromRow(row) {

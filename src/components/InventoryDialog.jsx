@@ -14,14 +14,12 @@ import {
   Box,
   IconButton,
   Chip,
-  FormControl,
-  Select,
-  MenuItem,
   Stack,
   Tooltip,
   AppBar,
   Toolbar,
   LinearProgress,
+  Alert,
 } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import CloseIcon from "@mui/icons-material/Close";
@@ -40,21 +38,32 @@ import {
 } from "../utils/workspaceInventoryStorage";
 import {
   createEmptyInventoryRow,
+  createInventoryRowFromCatalogProduct,
+  findCatalogProductForInventoryRow,
+  mergeInventoryWithCatalog,
   normalizeInventoryRow,
   normalizeInventoryPayload,
 } from "../utils/workspaceInventory";
+import { formatLotDateDisplay, parseLotDateDisplay } from "../utils/shippingFifoLots";
+import { ensureProductCatalog, getActiveProducts } from "../utils/productCatalog";
 import { tableHeadRowSx, tableHeadCellSx } from "../theme/contrastSurfaces";
 import { useOrganization } from "../context/OrganizationProvider";
 import { useBrand } from "../hooks/useBrand";
 
 const DENSE_CELL = { py: 0.5, px: 0.75, fontSize: "0.75rem", lineHeight: 1.25 };
+const READONLY_CELL = {
+  ...DENSE_CELL,
+  fontWeight: 600,
+  color: "text.primary",
+  whiteSpace: "normal",
+  textTransform: "uppercase",
+  lineHeight: 1.35,
+};
 const COMPACT_FIELD = {
   "& .MuiInputBase-root": { fontSize: "0.8125rem", height: 32 },
   "& .MuiInputBase-input": { py: 0.35, px: 0.75 },
   "& .MuiSelect-select": { py: 0.35, minHeight: "unset !important" },
 };
-
-const CATEGORY_OPTIONS = ["CSD", "Water", "CAN"];
 
 function formatSavedAt(iso) {
   if (!iso) return null;
@@ -65,7 +74,16 @@ function formatSavedAt(iso) {
   }
 }
 
-export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
+function inventoryRowHasLotData(row) {
+  return (
+    row.quantity > 0 ||
+    Boolean(String(row.mfgDate || "").trim()) ||
+    Boolean(String(row.batchNo || "").trim()) ||
+    Boolean(String(row.bbdDate || "").trim())
+  );
+}
+
+export default function InventoryDialog({ open, onClose, productRates = null, onInventoryUpdated }) {
   const theme = useTheme();
   const brand = useBrand();
   const { organization } = useOrganization();
@@ -79,6 +97,18 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
   const [hasChanges, setHasChanges] = useState(false);
 
+  const activeCatalogProducts = useMemo(
+    () => getActiveProducts(ensureProductCatalog(productRates)),
+    [productRates]
+  );
+
+  const catalogEmpty = activeCatalogProducts.length === 0;
+
+  const applyCatalog = useCallback(
+    (savedRows) => mergeInventoryWithCatalog(productRates, savedRows),
+    [productRates]
+  );
+
   const totalQty = useMemo(
     () => rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0),
     [rows]
@@ -89,7 +119,7 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
     try {
       const cloud = await getWorkspaceInventory();
       if (cloud?.rows) {
-        setRows(cloud.rows.map((r) => normalizeInventoryRow(r)));
+        setRows(applyCatalog(cloud.rows.map((r) => normalizeInventoryRow(r))));
         setCloudSynced(true);
         setLastSavedLabel(formatSavedAt(cloud.updatedAt));
         writeWorkspaceInventoryToLocalStorage(cloud, organization?.id);
@@ -97,26 +127,28 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
       }
       const local = readWorkspaceInventoryFromLocalStorage(organization?.id);
       if (local?.rows) {
-        setRows(local.rows.map((r) => normalizeInventoryRow(r)));
+        setRows(applyCatalog(local.rows.map((r) => normalizeInventoryRow(r))));
         setCloudSynced(false);
         setLastSavedLabel(formatSavedAt(local.updatedAt));
         return;
       }
-      setRows([]);
+      setRows(applyCatalog([]));
       setCloudSynced(true);
       setLastSavedLabel(null);
     } catch (e) {
       console.error(e);
       const local = readWorkspaceInventoryFromLocalStorage(organization?.id);
       if (local?.rows) {
-        setRows(local.rows.map((r) => normalizeInventoryRow(r)));
+        setRows(applyCatalog(local.rows.map((r) => normalizeInventoryRow(r))));
         setCloudSynced(false);
+      } else {
+        setRows(applyCatalog([]));
       }
       setSnackbar({ open: true, message: e.message || "Could not load inventory", severity: "error" });
     } finally {
       setLoading(false);
     }
-  }, [organization?.id]);
+  }, [organization?.id, applyCatalog]);
 
   useEffect(() => {
     if (!open) {
@@ -130,45 +162,80 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
     }
   }, [open, loadInventory]);
 
+  const productRatesRef = useRef(productRates);
+
+  useEffect(() => {
+    if (!open) {
+      productRatesRef.current = productRates;
+      return;
+    }
+    if (productRatesRef.current === productRates || loading) return;
+    productRatesRef.current = productRates;
+    setRows((prev) => applyCatalog(prev));
+  }, [open, productRates, applyCatalog, loading]);
+
   const updateRow = (id, patch) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, ...patch } : r))
-    );
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     setHasChanges(true);
   };
 
-  const handleAddRow = () => {
-    setRows((prev) => [...prev, createEmptyInventoryRow()]);
+  const handleAddLot = (catalogProductId) => {
+    const product = activeCatalogProducts.find((p) => p.id === catalogProductId);
+    if (!product) return;
+    const newRow = createInventoryRowFromCatalogProduct(product);
+    setRows((prev) => {
+      const idx = prev.map((r) => r.catalogProductId).lastIndexOf(catalogProductId);
+      const next = [...prev];
+      next.splice(idx + 1, 0, newRow);
+      return next;
+    });
     setHasChanges(true);
   };
 
   const handleRemoveRow = (id) => {
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    setRows((prev) => {
+      const row = prev.find((r) => r.id === id);
+      if (!row) return prev;
+
+      const sameProductRows = prev.filter((r) => r.catalogProductId === row.catalogProductId);
+      if (sameProductRows.length <= 1 && row.catalogProductId) {
+        const product = findCatalogProductForInventoryRow(row, activeCatalogProducts);
+        if (product) {
+          return prev.map((r) =>
+            r.id === id ? createInventoryRowFromCatalogProduct(product, { id: r.id }) : r
+          );
+        }
+        return prev.map((r) =>
+          r.id === id
+            ? {
+                ...createEmptyInventoryRow(),
+                id: r.id,
+                catalogProductId: row.catalogProductId,
+                productName: row.productName,
+                sku: row.sku,
+                category: row.category,
+              }
+            : r
+        );
+      }
+
+      return prev.filter((r) => r.id !== id);
+    });
     setHasChanges(true);
   };
 
   const handleSave = async () => {
     const normalized = rows
       .map((r) => normalizeInventoryRow(r))
-      .filter((r) => r.sku || r.productName);
-
-    for (const row of normalized) {
-      if (!row.sku) {
-        setSnackbar({ open: true, message: "Each row needs a SKU.", severity: "warning" });
-        return;
-      }
-      if (!row.productName) {
-        setSnackbar({ open: true, message: "Each row needs a product name.", severity: "warning" });
-        return;
-      }
-    }
+      .filter((r) => r.sku || r.productName)
+      .filter((r) => inventoryRowHasLotData(r));
 
     setSaving(true);
     try {
       const payload = normalizeInventoryPayload({ rows: normalized, updatedBy: brand?.appName || "" });
       writeWorkspaceInventoryToLocalStorage(payload, organization?.id);
       const saved = await saveWorkspaceInventory(payload);
-      setRows(saved.rows.map((r) => normalizeInventoryRow(r)));
+      setRows(applyCatalog(saved.rows.map((r) => normalizeInventoryRow(r))));
       setHasChanges(false);
       setCloudSynced(true);
       setLastSavedLabel(formatSavedAt(saved.updatedAt));
@@ -213,7 +280,7 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
               variant="outlined"
               startIcon={<SaveIcon />}
               onClick={handleSave}
-              disabled={saving || !hasChanges}
+              disabled={saving || !hasChanges || catalogEmpty}
               sx={{ borderColor: alpha("#fff", 0.5), fontWeight: 700 }}
             >
               Save
@@ -228,96 +295,72 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
         <Box sx={{ p: { xs: 1.5, sm: 2.5 }, maxWidth: 1400, mx: "auto", width: "100%" }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 2 }} alignItems={{ sm: "center" }}>
             <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
-              Company stock lots used by shipping for MFG, batch, BBD, and availability. Quantities reduce when orders are dispatched.
+              Products come from Product &amp; Rate Master. Enter MFG date, batch, BBD, and quantity for each stock lot.
+              Quantities reduce when orders are dispatched.
             </Typography>
-            <Chip label={`${rows.length} line${rows.length === 1 ? "" : "s"}`} size="small" />
+            <Chip label={`${activeCatalogProducts.length} product${activeCatalogProducts.length === 1 ? "" : "s"}`} size="small" />
             <Chip label={`${totalQty.toLocaleString()} cases total`} size="small" color="primary" variant="outlined" />
           </Stack>
 
-          {rows.length === 0 && !loading ? (
-            <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
-              <Inventory2OutlinedIcon sx={{ fontSize: 48, color: "text.disabled", mb: 1 }} />
-              <Typography variant="h6" gutterBottom>
-                No inventory yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Add product lots with SKU, MFG date, batch, BBD, and quantity for shipping dispatch.
-              </Typography>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={handleAddRow}>
-                Add stock line
-              </Button>
-            </Paper>
-          ) : (
+          {catalogEmpty && !loading ? (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              No products in the catalogue. Add products in <strong>Product &amp; Rate Master</strong> first — they will
+              appear here automatically.
+            </Alert>
+          ) : null}
+
+          {!catalogEmpty ? (
             <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
               <Table size="small" sx={{ minWidth: 960 }}>
                 <TableHead>
                   <TableRow sx={tableHeadRowSx(theme)}>
-                    {[
-                      "",
-                      "Product name",
-                      "SKU",
-                      "Category",
-                      "MFG date",
-                      "Batch no.",
-                      "BBD",
-                      "Qty (cases)",
-                    ].map((label) => (
-                      <TableCell key={label || "actions"} sx={{ ...tableHeadCellSx(), ...DENSE_CELL, whiteSpace: "nowrap" }}>
-                        {label}
-                      </TableCell>
-                    ))}
+                    {["", "Product name", "SKU", "Category", "MFG date", "Batch no.", "BBD", "Qty (cases)"].map(
+                      (label) => (
+                        <TableCell
+                          key={label || "actions"}
+                          sx={{ ...tableHeadCellSx(), ...DENSE_CELL, whiteSpace: "nowrap" }}
+                        >
+                          {label}
+                        </TableCell>
+                      )
+                    )}
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {rows.map((row) => (
                     <TableRow key={row.id} hover>
                       <TableCell sx={DENSE_CELL}>
-                        <IconButton size="small" color="error" onClick={() => handleRemoveRow(row.id)}>
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
+                        <Stack direction="row" spacing={0.25} alignItems="center">
+                          <Tooltip title="Clear lot / remove extra lot">
+                            <IconButton size="small" color="error" onClick={() => handleRemoveRow(row.id)}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Add another lot for this product">
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={() => handleAddLot(row.catalogProductId)}
+                              disabled={!row.catalogProductId}
+                            >
+                              <AddIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                      <TableCell sx={READONLY_CELL}>{row.productName || "—"}</TableCell>
+                      <TableCell sx={READONLY_CELL}>{row.sku || "—"}</TableCell>
+                      <TableCell sx={DENSE_CELL}>
+                        <Chip label={row.category || "CSD"} size="small" variant="outlined" sx={{ fontWeight: 600 }} />
                       </TableCell>
                       <TableCell sx={DENSE_CELL}>
                         <TextField
                           size="small"
+                          type="text"
                           fullWidth
-                          value={row.productName}
-                          onChange={(e) => updateRow(row.id, { productName: e.target.value })}
-                          placeholder="Product name"
-                          sx={COMPACT_FIELD}
-                        />
-                      </TableCell>
-                      <TableCell sx={DENSE_CELL}>
-                        <TextField
-                          size="small"
-                          fullWidth
-                          value={row.sku}
-                          onChange={(e) => updateRow(row.id, { sku: e.target.value })}
-                          placeholder="SKU (match Rate Master)"
-                          sx={COMPACT_FIELD}
-                        />
-                      </TableCell>
-                      <TableCell sx={DENSE_CELL}>
-                        <FormControl size="small" fullWidth sx={COMPACT_FIELD}>
-                          <Select
-                            value={row.category || "CSD"}
-                            onChange={(e) => updateRow(row.id, { category: e.target.value })}
-                          >
-                            {CATEGORY_OPTIONS.map((c) => (
-                              <MenuItem key={c} value={c}>
-                                {c}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell sx={DENSE_CELL}>
-                        <TextField
-                          size="small"
-                          type="date"
-                          fullWidth
-                          value={row.mfgDate || ""}
-                          onChange={(e) => updateRow(row.id, { mfgDate: e.target.value })}
-                          InputLabelProps={{ shrink: true }}
+                          placeholder="DD-MM-YYYY"
+                          value={row.mfgDate ? formatLotDateDisplay(row.mfgDate) : ""}
+                          onChange={(e) => updateRow(row.id, { mfgDate: parseLotDateDisplay(e.target.value) })}
                           sx={COMPACT_FIELD}
                         />
                       </TableCell>
@@ -334,11 +377,11 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
                       <TableCell sx={DENSE_CELL}>
                         <TextField
                           size="small"
-                          type="date"
+                          type="text"
                           fullWidth
-                          value={row.bbdDate || ""}
-                          onChange={(e) => updateRow(row.id, { bbdDate: e.target.value })}
-                          InputLabelProps={{ shrink: true }}
+                          placeholder="DD-MM-YYYY"
+                          value={row.bbdDate ? formatLotDateDisplay(row.bbdDate) : ""}
+                          onChange={(e) => updateRow(row.id, { bbdDate: parseLotDateDisplay(e.target.value) })}
                           sx={COMPACT_FIELD}
                         />
                       </TableCell>
@@ -358,17 +401,10 @@ export default function InventoryDialog({ open, onClose, onInventoryUpdated }) {
                       </TableCell>
                     </TableRow>
                   ))}
-                  <TableRow>
-                    <TableCell colSpan={8} sx={{ py: 1, border: 0 }}>
-                      <Button size="small" startIcon={<AddIcon />} onClick={handleAddRow} variant="outlined">
-                        Add stock line
-                      </Button>
-                    </TableCell>
-                  </TableRow>
                 </TableBody>
               </Table>
             </TableContainer>
-          )}
+          ) : null}
         </Box>
       </Dialog>
 

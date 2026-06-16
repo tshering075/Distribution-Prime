@@ -29,7 +29,6 @@ import {
   deletePlatformOrganization,
   listTenantStaff,
   PLATFORM_STATUSES,
-  PROTECTED_DEFAULT_ORG_ID,
   STATUS_LABELS,
   updatePlatformOrganization,
 } from "../../services/platformAdminService";
@@ -166,7 +165,6 @@ export default function PlatformWorkspaceDialog({
 
   const loginUrl = buildWorkspaceLoginUrl(org.slug);
   const isBusy = busy === org.id;
-  const isProtectedDefault = org.id === PROTECTED_DEFAULT_ORG_ID;
   const deleteSlugOk = deleteConfirmSlug.trim() === String(org.slug || "").trim();
 
   const renderTabContent = () => {
@@ -184,7 +182,6 @@ export default function PlatformWorkspaceDialog({
               onSave={handleSaveDetails}
             />
             <WorkspaceDangerSection
-              isProtectedDefault={isProtectedDefault}
               isBusy={isBusy}
               onDelete={() => {
                 setDeleteConfirmSlug("");

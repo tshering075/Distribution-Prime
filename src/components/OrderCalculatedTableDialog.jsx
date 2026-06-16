@@ -23,6 +23,7 @@ import {
   CircularProgress,
   useMediaQuery,
   useTheme,
+  Tooltip,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import AddIcon from "@mui/icons-material/Add";
@@ -49,9 +50,12 @@ import {
   orderRowsToEditState,
   createEmptyEditRow,
   getPurchasedCasesFromRow,
+  formatOrderLineSkuLabel,
+  resolveCatalogLineName,
 } from "../utils/orderLineCalculation";
 import { getAllCalculatorSkuNames } from "../utils/calculatorSkuNames";
-import { mfgDateToInputValue } from "../utils/shippingFifoLots";
+import { formatProductLabelDisplay } from "../utils/productCatalog";
+import { mfgDateToInputValue, formatLotDateDisplay, parseLotDateDisplay } from "../utils/shippingFifoLots";
 import {
   getWorkspaceInventory,
   subscribeWorkspaceInventory,
@@ -93,10 +97,19 @@ function getDialogTableDensity(condensed, isMobile) {
       py: isMobile ? 0.5 : 0.625,
       shortHeaders: true,
       roundAmounts: false,
-      skuMinW: 108,
-      mfgMinW: 132,
-      batchMinW: 88,
-      qtyW: 88,
+      productColMinW: 152,
+      productColWidth: "20%",
+      mfgColMinW: 118,
+      mfgColWidth: "11%",
+      batchColMinW: 104,
+      batchColWidth: "10%",
+      bbdColMinW: 118,
+      bbdColWidth: "11%",
+      stockColMinW: 76,
+      stockColWidth: "8%",
+      qtyW: 80,
+      numColMinW: 68,
+      numColWidth: "8%",
       shellPx: 1,
       shellPy: 0.75,
     };
@@ -115,14 +128,239 @@ function getDialogTableDensity(condensed, isMobile) {
     py: isMobile ? 0.75 : 1.5,
     shortHeaders: isMobile,
     roundAmounts: isMobile,
-    skuMinW: 140,
-    mfgMinW: 132,
-    batchMinW: 108,
+    productColMinW: 168,
+    productColWidth: "18%",
+    mfgColMinW: 132,
+    mfgColWidth: "11%",
+    batchColMinW: 116,
+    batchColWidth: "10%",
+    bbdColMinW: 132,
+    bbdColWidth: "11%",
+    stockColMinW: 84,
+    stockColWidth: "8%",
     qtyW: isMobile ? 72 : 96,
+    numColMinW: 76,
+    numColWidth: "8%",
     shellPx: 2,
     shellPy: 1,
   };
 }
+
+function buildOrderTableColumns(editable, density) {
+  const columns = [];
+  if (editable) {
+    columns.push({ key: "actions", label: "", align: "center", width: 40, minWidth: 40, wrap: false });
+  }
+  columns.push(
+    {
+      key: "product",
+      label: "Product",
+      align: "left",
+      width: density.productColWidth,
+      minWidth: density.productColMinW,
+      wrap: true,
+    },
+    {
+      key: "mfg",
+      label: density.shortHeaders ? "MFG" : "MFG Date",
+      align: "left",
+      width: density.mfgColWidth,
+      minWidth: density.mfgColMinW,
+      wrap: true,
+    },
+    {
+      key: "batch",
+      label: density.shortHeaders ? "Batch" : "Batch No",
+      align: "left",
+      width: density.batchColWidth,
+      minWidth: density.batchColMinW,
+      wrap: true,
+    },
+    {
+      key: "bbd",
+      label: "BBD",
+      align: "left",
+      width: density.bbdColWidth,
+      minWidth: density.bbdColMinW,
+      wrap: true,
+    },
+    {
+      key: "stock",
+      label: "Stock",
+      align: "left",
+      width: density.stockColWidth,
+      minWidth: density.stockColMinW,
+      wrap: false,
+    },
+    {
+      key: "qty",
+      label: density.shortHeaders ? "Qty" : "Qty/Cases",
+      align: "right",
+      width: density.qtyW,
+      minWidth: density.qtyW,
+      wrap: false,
+    },
+    {
+      key: "rate",
+      label: "Rate",
+      align: "right",
+      width: density.numColWidth,
+      minWidth: density.numColMinW,
+      wrap: false,
+    },
+    {
+      key: "amount",
+      label: density.shortHeaders ? "Amt" : "Total Amount",
+      align: "right",
+      width: density.numColWidth,
+      minWidth: density.numColMinW,
+      wrap: false,
+    },
+    {
+      key: "tons",
+      label: density.shortHeaders ? "Tons" : "Total Tons",
+      align: "right",
+      width: density.numColWidth,
+      minWidth: density.numColMinW,
+      wrap: false,
+    },
+    {
+      key: "uc",
+      label: density.shortHeaders ? "UC" : "Total UC",
+      align: "right",
+      width: density.numColWidth,
+      minWidth: density.numColMinW,
+      wrap: false,
+    }
+  );
+  return columns;
+}
+
+function shippingTableCellSx(col, density, { header = false, extra = {}, hasField = false } = {}) {
+  if (!col) return extra;
+  const isRight = col.align === "right";
+  return {
+    ...(header ? tableHeadCellSx() : {}),
+    textAlign: col.align,
+    px: density.px,
+    py: density.py,
+    width: col.width,
+    minWidth: col.minWidth,
+    whiteSpace: header ? (col.wrap ? "normal" : "nowrap") : "normal",
+    overflow: header ? undefined : "visible",
+    verticalAlign: header ? "bottom" : "top",
+    fontSize: header ? density.head : density.body,
+    lineHeight: 1.3,
+    fontWeight: header ? 800 : isRight ? 600 : undefined,
+    fontVariantNumeric: isRight && !header ? "tabular-nums" : undefined,
+    color: header ? undefined : "text.primary",
+    boxSizing: "border-box",
+    ...(hasField && !header ? { height: "auto" } : {}),
+    ...extra,
+  };
+}
+
+function ProductCellLabel({ label, density }) {
+  const text = formatProductLabelDisplay(label);
+  if (!text || text === "—") {
+    return (
+      <Typography component="span" sx={{ fontSize: density.body, color: "text.secondary" }}>
+        —
+      </Typography>
+    );
+  }
+  return (
+    <Tooltip title={text} placement="top-start" enterDelay={400}>
+      <Typography
+        component="span"
+        sx={{
+          fontWeight: 700,
+          fontSize: density.body,
+          textTransform: "uppercase",
+          whiteSpace: "normal",
+          lineHeight: 1.35,
+          display: "block",
+        }}
+      >
+        {text}
+      </Typography>
+    </Tooltip>
+  );
+}
+
+function LotFieldLabel({ label, density }) {
+  const text = String(label ?? "").trim();
+  if (!text || text === "—") {
+    return (
+      <Typography component="span" sx={{ fontSize: density.body, color: "text.secondary" }}>
+        —
+      </Typography>
+    );
+  }
+  return (
+    <Tooltip title={text} placement="top-start" enterDelay={400}>
+      <Typography
+        component="span"
+        sx={{
+          fontWeight: 600,
+          fontSize: density.body,
+          whiteSpace: "normal",
+          lineHeight: 1.35,
+          display: "block",
+          wordBreak: "break-word",
+        }}
+      >
+        {text}
+      </Typography>
+    </Tooltip>
+  );
+}
+
+function shippingInputSx(density, { align = "left" } = {}) {
+  return {
+    fontSize: density.input,
+    width: "100%",
+    "& .MuiInputBase-root": {
+      width: "100%",
+      height: "auto !important",
+      minHeight: 34,
+      alignItems: "center",
+      overflow: "visible",
+    },
+    "& .MuiOutlinedInput-notchedOutline": {
+      borderColor: "divider",
+    },
+    "& .MuiSelect-select": {
+      height: "auto !important",
+      minHeight: "1.35em",
+      py: "6px !important",
+      pl: "8px !important",
+      pr: "28px !important",
+      whiteSpace: "normal",
+      lineHeight: 1.35,
+      wordBreak: "break-word",
+      overflow: "visible",
+      textOverflow: "clip",
+      display: "block",
+      textAlign: align,
+    },
+    "& .MuiInputBase-input": {
+      py: "6px",
+      px: "8px",
+      height: "auto",
+      minHeight: "1.35em",
+      fontSize: density.input,
+      whiteSpace: "normal",
+      overflow: "visible",
+      textOverflow: "clip",
+      textAlign: align,
+    },
+  };
+}
+
+const lotFieldSelectSx = (density) => shippingInputSx(density, { align: "left" });
+
+const lotFieldInputSx = (density) => shippingInputSx(density, { align: "left" });
 
 function InventoryLotEditCells({
   sku,
@@ -131,6 +369,7 @@ function InventoryLotEditCells({
   bbdDate,
   inventoryRows,
   density,
+  cellSx,
   onMfgChange,
   onBatchChange,
   onBbdChange,
@@ -138,10 +377,10 @@ function InventoryLotEditCells({
   if (!sku) {
     return (
       <>
-        <TableCell sx={{ fontSize: density.body, color: "text.secondary", px: density.px, py: density.py }}>—</TableCell>
-        <TableCell sx={{ fontSize: density.body, color: "text.secondary", px: density.px, py: density.py }}>—</TableCell>
-        <TableCell sx={{ fontSize: density.body, color: "text.secondary", px: density.px, py: density.py }}>—</TableCell>
-        <TableCell sx={{ fontSize: density.body, color: "text.secondary", px: density.px, py: density.py }}>—</TableCell>
+        <TableCell sx={cellSx("mfg")}>—</TableCell>
+        <TableCell sx={cellSx("batch")}>—</TableCell>
+        <TableCell sx={cellSx("bbd")}>—</TableCell>
+        <TableCell sx={cellSx("stock")}>—</TableCell>
       </>
     );
   }
@@ -164,28 +403,33 @@ function InventoryLotEditCells({
           value={inputMfgDate || ""}
           onChange={(e) => onMfgChange(e.target.value)}
           onClick={(e) => e.stopPropagation()}
-          sx={{ fontSize: density.input, "& .MuiSelect-select": { py: 0.5 } }}
+          sx={lotFieldSelectSx(density)}
+          renderValue={(v) => (v ? formatLotDateDisplay(v) : <em>Select MFG</em>)}
         >
           <MenuItem value="">
             <em>Select MFG</em>
           </MenuItem>
-          {mfgOptions.map((d) => (
-            <MenuItem key={d} value={mfgDateToInputValue(d) || d}>
-              {d}
-            </MenuItem>
-          ))}
+          {mfgOptions.map((d) => {
+            const iso = mfgDateToInputValue(d) || d;
+            return (
+              <MenuItem key={iso} value={iso} sx={{ whiteSpace: "normal" }}>
+                {formatLotDateDisplay(d)}
+              </MenuItem>
+            );
+          })}
         </Select>
       );
     }
     return (
       <TextField
         size="small"
-        type="date"
+        type="text"
         fullWidth
-        value={inputMfgDate}
-        onChange={(e) => onMfgChange(e.target.value)}
+        placeholder="DD-MM-YYYY"
+        value={inputMfgDate ? formatLotDateDisplay(inputMfgDate) : ""}
+        onChange={(e) => onMfgChange(parseLotDateDisplay(e.target.value))}
         onClick={(e) => e.stopPropagation()}
-        sx={{ fontSize: density.input, "& input": { py: 0.5, fontSize: density.input } }}
+        sx={lotFieldInputSx(density)}
       />
     );
   };
@@ -200,13 +444,14 @@ function InventoryLotEditCells({
           value={batchNo || ""}
           onChange={(e) => onBatchChange(e.target.value)}
           onClick={(e) => e.stopPropagation()}
-          sx={{ fontSize: density.input, "& .MuiSelect-select": { py: 0.5 } }}
+          sx={lotFieldSelectSx(density)}
+          renderValue={(v) => (v ? v : <em>Select batch</em>)}
         >
           <MenuItem value="">
             <em>Select batch</em>
           </MenuItem>
           {batchOptions.map((b) => (
-            <MenuItem key={b} value={b}>
+            <MenuItem key={b} value={b} sx={{ whiteSpace: "normal", wordBreak: "break-word" }}>
               {b}
             </MenuItem>
           ))}
@@ -221,7 +466,7 @@ function InventoryLotEditCells({
         onChange={(e) => onBatchChange(e.target.value)}
         onClick={(e) => e.stopPropagation()}
         placeholder="Batch no."
-        sx={{ fontSize: density.input, "& input": { py: 0.5, fontSize: density.input } }}
+        sx={lotFieldInputSx(density)}
       />
     );
   };
@@ -236,50 +481,55 @@ function InventoryLotEditCells({
           value={inputBbdDate || ""}
           onChange={(e) => onBbdChange(e.target.value)}
           onClick={(e) => e.stopPropagation()}
-          sx={{ fontSize: density.input, "& .MuiSelect-select": { py: 0.5 } }}
+          sx={lotFieldSelectSx(density)}
+          renderValue={(v) => (v ? formatLotDateDisplay(v) : <em>Select BBD</em>)}
         >
           <MenuItem value="">
             <em>Select BBD</em>
           </MenuItem>
-          {bbdOptions.map((d) => (
-            <MenuItem key={d} value={mfgDateToInputValue(d) || d}>
-              {d}
-            </MenuItem>
-          ))}
+          {bbdOptions.map((d) => {
+            const iso = mfgDateToInputValue(d) || d;
+            return (
+              <MenuItem key={iso} value={iso} sx={{ whiteSpace: "normal" }}>
+                {formatLotDateDisplay(d)}
+              </MenuItem>
+            );
+          })}
         </Select>
       );
     }
     return (
       <TextField
         size="small"
-        type="date"
+        type="text"
         fullWidth
-        value={inputBbdDate}
-        onChange={(e) => onBbdChange(e.target.value)}
+        placeholder="DD-MM-YYYY"
+        value={inputBbdDate ? formatLotDateDisplay(inputBbdDate) : ""}
+        onChange={(e) => onBbdChange(parseLotDateDisplay(e.target.value))}
         onClick={(e) => e.stopPropagation()}
-        sx={{ fontSize: density.input, "& input": { py: 0.5, fontSize: density.input } }}
+        sx={lotFieldInputSx(density)}
       />
     );
   };
 
   return (
     <>
-      <TableCell sx={{ minWidth: density.mfgMinW, px: density.px, py: density.py }}>
-        <FormControl size="small" fullWidth>
+      <TableCell sx={cellSx("mfg", { hasField: true })}>
+        <FormControl size="small" fullWidth sx={{ m: 0 }}>
           {renderMfgField()}
         </FormControl>
       </TableCell>
-      <TableCell sx={{ minWidth: density.batchMinW, px: density.px, py: density.py }}>
-        <FormControl size="small" fullWidth>
+      <TableCell sx={cellSx("batch", { hasField: true })}>
+        <FormControl size="small" fullWidth sx={{ m: 0 }}>
           {renderBatchField()}
         </FormControl>
       </TableCell>
-      <TableCell sx={{ minWidth: density.mfgMinW, px: density.px, py: density.py }}>
-        <FormControl size="small" fullWidth>
+      <TableCell sx={cellSx("bbd", { hasField: true })}>
+        <FormControl size="small" fullWidth sx={{ m: 0 }}>
           {renderBbdField()}
         </FormControl>
       </TableCell>
-      <TableCell sx={{ minWidth: 88, px: density.px, py: density.py }}>
+      <TableCell sx={cellSx("stock")}>
         <Chip
           size="small"
           label={lotQty > 0 ? `${lotQty} avail` : skuTotal > 0 ? `${skuTotal} SKU` : "No stock"}
@@ -317,12 +567,7 @@ function QtyCell({ row, density, editable, purchasedCases, onPurchasedCasesChang
         value={purchasedCases === "" || purchasedCases == null ? "" : purchasedCases}
         onChange={(e) => onPurchasedCasesChange(e.target.value)}
         sx={{
-          minWidth: density.qtyW,
-          "& input": {
-            fontSize: density.input,
-            py: 0.5,
-            fontVariantNumeric: "tabular-nums",
-          },
+          ...shippingInputSx(density, { align: "right" }),
           "& input[type=number]": { MozAppearance: "textfield" },
           "& input[type=number]::-webkit-outer-spin-button, & input[type=number]::-webkit-inner-spin-button": {
             WebkitAppearance: "none",
@@ -450,6 +695,14 @@ export default function OrderCalculatedTableDialog({
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const useFullScreen = fullScreen || isMobile;
   const density = useMemo(() => getDialogTableDensity(condensed, isMobile), [condensed, isMobile]);
+  const orderColumns = useMemo(() => buildOrderTableColumns(editable, density), [editable, density]);
+  const cellSx = useCallback(
+    (key, options = {}) => {
+      const col = orderColumns.find((c) => c.key === key);
+      return shippingTableCellSx(col, density, options);
+    },
+    [orderColumns, density]
+  );
   const summ = calcSummaryRows(theme);
   const resultsShellSx = calculatorResultsShellSx(theme);
 
@@ -457,10 +710,11 @@ export default function OrderCalculatedTableDialog({
   const [saveError, setSaveError] = useState("");
   const [inventoryRows, setInventoryRows] = useState([]);
 
-  const tableColCount = editable ? 11 : 10;
+  const tableColCount = orderColumns.length;
 
   const skuOptions = useMemo(() => {
-    if (skuOptionsProp?.length) return skuOptionsProp;
+    const resolve = (name) => resolveCatalogLineName(name, productRates) || name;
+    if (skuOptionsProp?.length) return skuOptionsProp.map(resolve);
     const fromInventory = getInventorySkuOptions(inventoryRows).map((o) => o.sku);
     if (fromInventory.length > 0) return fromInventory;
     return getAllCalculatorSkuNames(productRates);
@@ -501,19 +755,21 @@ export default function OrderCalculatedTableDialog({
     const rows =
       initial.length > 0
         ? initial.map((r) => {
-            if (!r.sku || (r.mfgDate && r.batchNo)) return r;
-            const fifo = pickFifoLotFromInventory(inventoryRows, r.sku);
+            const sku = resolveCatalogLineName(r.sku, productRates) || r.sku;
+            const base = { ...r, sku };
+            if (!sku || (base.mfgDate && base.batchNo)) return base;
+            const fifo = pickFifoLotFromInventory(inventoryRows, sku);
             const normalizedMfg = mfgDateToInputValue(fifo.mfgDate) || fifo.mfgDate;
             return {
-              ...r,
-              mfgDate: r.mfgDate ? mfgDateToInputValue(r.mfgDate) || r.mfgDate : normalizedMfg,
-              batchNo: r.batchNo || fifo.batchNo,
-              bbdDate: r.bbdDate ? mfgDateToInputValue(r.bbdDate) || r.bbdDate : fifo.bbdDate,
+              ...base,
+              mfgDate: base.mfgDate ? mfgDateToInputValue(base.mfgDate) || base.mfgDate : normalizedMfg,
+              batchNo: base.batchNo || fifo.batchNo,
+              bbdDate: base.bbdDate ? mfgDateToInputValue(base.bbdDate) || base.bbdDate : fifo.bbdDate,
             };
           })
         : [createEmptyEditRow()];
     setEditRows(rows);
-  }, [open, editable, order, inventoryRows]);
+  }, [open, editable, order, inventoryRows, productRates]);
 
   const staticRows = useMemo(
     () =>
@@ -639,17 +895,20 @@ export default function OrderCalculatedTableDialog({
 
   const handleSkuChange = useCallback(
     (key, sku) => {
-      const fifo = sku ? pickFifoLotFromInventory(inventoryRows, sku) : { mfgDate: "", batchNo: "", bbdDate: "" };
+      const lineSku = resolveCatalogLineName(sku, productRates) || sku;
+      const fifo = lineSku
+        ? pickFifoLotFromInventory(inventoryRows, lineSku)
+        : { mfgDate: "", batchNo: "", bbdDate: "" };
       const normalizedMfg = mfgDateToInputValue(fifo.mfgDate) || fifo.mfgDate;
       updateEditRow(key, {
-        sku,
+        sku: lineSku,
         preferSchemeName: null,
         mfgDate: normalizedMfg,
         batchNo: fifo.batchNo,
         bbdDate: mfgDateToInputValue(fifo.bbdDate) || fifo.bbdDate,
       });
     },
-    [inventoryRows, updateEditRow]
+    [inventoryRows, productRates, updateEditRow]
   );
 
   const handleMfgChange = useCallback(
@@ -845,56 +1104,38 @@ export default function OrderCalculatedTableDialog({
                   📅 {headerDate}
                 </Box>
               </Box>
-              <Table size="small" sx={{ width: "100%", tableLayout: condensed ? "fixed" : "auto" }}>
+              <Table
+                size="small"
+                sx={{
+                  width: "100%",
+                  minWidth: condensed ? 1080 : 1180,
+                  tableLayout: "fixed",
+                  "& .MuiTableCell-root": {
+                    overflow: "visible",
+                  },
+                  "& .MuiTableRow-root": {
+                    height: "auto",
+                  },
+                }}
+              >
+                <colgroup>
+                  {orderColumns.map((col) => (
+                    <col
+                      key={col.key}
+                      style={{
+                        width: typeof col.width === "number" ? `${col.width}px` : col.width,
+                        minWidth: col.minWidth,
+                      }}
+                    />
+                  ))}
+                </colgroup>
                 <TableHead>
                   <TableRow sx={tableHeadRowSx(theme)}>
-                    {(editable
-                      ? [
-                          "",
-                          "SKU",
-                          density.shortHeaders ? "MFG" : "MFG Date",
-                          density.shortHeaders ? "Batch" : "Batch No",
-                          "BBD",
-                          "Stock",
-                          density.shortHeaders ? "Qty" : "Qty/Cases",
-                          "Rate",
-                          density.shortHeaders ? "Amt" : "Total Amount",
-                          density.shortHeaders ? "Tons" : "Total Tons",
-                          density.shortHeaders ? "UC" : "Total UC",
-                        ]
-                      : [
-                          "SKU",
-                          density.shortHeaders ? "MFG" : "MFG Date",
-                          density.shortHeaders ? "Batch" : "Batch No",
-                          "BBD",
-                          "Stock",
-                          density.shortHeaders ? "Qty" : "Qty/Cases",
-                          "Rate",
-                          density.shortHeaders ? "Amt" : "Total Amount",
-                          density.shortHeaders ? "Tons" : "Total Tons",
-                          density.shortHeaders ? "UC" : "Total UC",
-                        ]
-                    ).map((label, i) => {
-                      const qtyColIdx = editable ? 6 : 5;
-                      return (
-                        <TableCell
-                          key={`${label}-${i}`}
-                          sx={{
-                            ...tableHeadCellSx(),
-                            fontSize: density.head,
-                            textAlign: i <= (editable ? 5 : 4) ? "left" : "right",
-                            px: density.px,
-                            py: density.py,
-                            whiteSpace: "nowrap",
-                            width: editable && i === 0 ? 36 : i === qtyColIdx ? density.qtyW : undefined,
-                            minWidth: i === qtyColIdx ? density.qtyW : undefined,
-                            lineHeight: 1.25,
-                          }}
-                        >
-                          {label}
-                        </TableCell>
-                      );
-                    })}
+                    {orderColumns.map((col) => (
+                      <TableCell key={col.key} sx={cellSx(col.key, { header: true })}>
+                        {col.label}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -915,58 +1156,63 @@ export default function OrderCalculatedTableDialog({
                         }}
                       >
                         {editable ? (
-                          <TableCell sx={{ px: 0.5, width: 40 }}>
-                            <IconButton
-                              size="small"
-                              color="error"
-                              aria-label="remove line"
-                              onClick={() => handleRemoveRow(editSource._key)}
-                              disabled={editRows.length <= 1}
-                            >
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
+                          <TableCell sx={cellSx("actions", { extra: { p: 0.5 } })}>
+                            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                aria-label="remove line"
+                                onClick={() => handleRemoveRow(editSource._key)}
+                                disabled={editRows.length <= 1}
+                              >
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
                           </TableCell>
                         ) : null}
-                        <TableCell
-                          sx={{
-                            fontWeight: 700,
-                            fontSize: density.body,
-                            wordBreak: condensed ? "break-word" : "normal",
-                            color: "text.primary",
-                            minWidth: editable ? density.skuMinW : undefined,
-                            px: density.px,
-                            py: density.py,
-                          }}
-                        >
+                        <TableCell sx={cellSx("product", { extra: { fontWeight: 700 }, hasField: editable })}>
                           {editable ? (
-                            <FormControl size="small" fullWidth>
+                            <FormControl size="small" fullWidth sx={{ m: 0 }}>
                               <Select
-                                value={editSource.sku || ""}
+                                value={resolveCatalogLineName(editSource.sku, productRates) || editSource.sku || ""}
                                 displayEmpty
                                 onChange={(e) => handleSkuChange(editSource._key, e.target.value)}
                                 onClick={(e) => e.stopPropagation()}
                                 sx={{
-                                  fontSize: density.input,
+                                  ...shippingInputSx(density, { align: "left" }),
                                   fontWeight: 700,
-                                  "& .MuiSelect-select": { py: 0.5 },
+                                  textTransform: "uppercase",
                                 }}
                                 MenuProps={{ PaperProps: { sx: { maxHeight: 320 } } }}
+                                renderValue={(selected) =>
+                                  selected ? formatProductLabelDisplay(selected) : (
+                                    <em style={{ textTransform: "none" }}>Select product</em>
+                                  )
+                                }
                               >
                                 <MenuItem value="">
-                                  <em>Select SKU</em>
+                                  <em>Select product</em>
                                 </MenuItem>
                                 {skuOptions.map((name) => {
                                   const avail = getInventorySkuTotalQuantity(inventoryRows, name);
+                                  const displayName = formatProductLabelDisplay(name);
                                   return (
-                                    <MenuItem key={name} value={name} sx={{ fontSize: density.input }}>
-                                      {avail > 0 ? `${name} (${avail} avail)` : name}
+                                    <MenuItem
+                                      key={name}
+                                      value={name}
+                                      sx={{ fontSize: density.input, textTransform: "uppercase", whiteSpace: "normal" }}
+                                    >
+                                      {avail > 0 ? `${displayName} (${avail} avail)` : displayName}
                                     </MenuItem>
                                   );
                                 })}
                               </Select>
                             </FormControl>
                           ) : (
-                            row.sku
+                            <ProductCellLabel
+                              label={formatOrderLineSkuLabel(row, productRates)}
+                              density={density}
+                            />
                           )}
                         </TableCell>
                         {editable ? (
@@ -977,6 +1223,7 @@ export default function OrderCalculatedTableDialog({
                             bbdDate={editSource.bbdDate}
                             inventoryRows={inventoryRows}
                             density={density}
+                            cellSx={cellSx}
                             onMfgChange={(val) => handleMfgChange(editSource._key, val, editSource.sku)}
                             onBatchChange={(val) => handleBatchChange(editSource._key, val, editSource.sku)}
                             onBbdChange={(val) =>
@@ -987,22 +1234,16 @@ export default function OrderCalculatedTableDialog({
                           />
                         ) : (
                           <>
-                            <TableCell
-                              sx={{ fontWeight: 600, fontSize: density.body, px: density.px, py: density.py }}
-                            >
-                              {row.mfgDate || "—"}
+                            <TableCell sx={cellSx("mfg")}>
+                              <LotFieldLabel label={formatLotDateDisplay(row.mfgDate)} density={density} />
                             </TableCell>
-                            <TableCell
-                              sx={{ fontWeight: 600, fontSize: density.body, px: density.px, py: density.py }}
-                            >
-                              {row.batchNo || "—"}
+                            <TableCell sx={cellSx("batch")}>
+                              <LotFieldLabel label={row.batchNo} density={density} />
                             </TableCell>
-                            <TableCell
-                              sx={{ fontWeight: 600, fontSize: density.body, px: density.px, py: density.py }}
-                            >
-                              {row.bbdDate || "—"}
+                            <TableCell sx={cellSx("bbd")}>
+                              <LotFieldLabel label={formatLotDateDisplay(row.bbdDate)} density={density} />
                             </TableCell>
-                            <TableCell sx={{ px: density.px, py: density.py }}>
+                            <TableCell sx={cellSx("stock")}>
                               {(() => {
                                 const lotQty = getInventoryLotQuantity(
                                   inventoryRows,
@@ -1024,20 +1265,7 @@ export default function OrderCalculatedTableDialog({
                             </TableCell>
                           </>
                         )}
-                        <TableCell
-                          align="right"
-                          sx={{
-                            fontWeight: "bold",
-                            fontSize: density.body,
-                            color: "text.primary",
-                            px: density.px,
-                            py: density.py,
-                            minWidth: density.qtyW,
-                            width: density.qtyW,
-                            whiteSpace: "nowrap",
-                            overflow: "visible",
-                          }}
-                        >
+                        <TableCell sx={cellSx("qty", { extra: { fontWeight: "bold" }, hasField: editable })}>
                           <QtyCell
                             row={row}
                             density={density}
@@ -1050,28 +1278,16 @@ export default function OrderCalculatedTableDialog({
                             }
                           />
                         </TableCell>
-                        <TableCell
-                          align="right"
-                          sx={{ fontWeight: "bold", fontSize: density.body, color: "text.primary", px: density.px, py: density.py }}
-                        >
+                        <TableCell sx={cellSx("rate", { extra: { fontWeight: "bold" } })}>
                           <RateCell row={row} density={density} />
                         </TableCell>
-                        <TableCell
-                          align="right"
-                          sx={{ fontWeight: "bold", fontSize: density.body, color: "text.primary", px: density.px, py: density.py }}
-                        >
+                        <TableCell sx={cellSx("amount", { extra: { fontWeight: "bold" } })}>
                           {row.sku && num(row.cases) > 0 ? formatAmount(totalAmount, density) : "—"}
                         </TableCell>
-                        <TableCell
-                          align="right"
-                          sx={{ fontWeight: "bold", fontSize: density.body, color: "text.primary", px: density.px, py: density.py }}
-                        >
+                        <TableCell sx={cellSx("tons", { extra: { fontWeight: "bold" } })}>
                           {row.sku && num(row.cases) > 0 ? totalTon.toFixed(3) : "—"}
                         </TableCell>
-                        <TableCell
-                          align="right"
-                          sx={{ fontWeight: "bold", fontSize: density.body, color: "text.primary", px: density.px, py: density.py }}
-                        >
+                        <TableCell sx={cellSx("uc", { extra: { fontWeight: "bold" } })}>
                           {row.sku && num(row.cases) > 0 && totalUC != null ? totalUC.toFixed(2) : "—"}
                         </TableCell>
                       </TableRow>
