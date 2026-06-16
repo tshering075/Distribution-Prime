@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -47,14 +47,7 @@ function GmailSettingsDialog({ open, onClose, platformMode = false }) {
   const [success, setSuccess] = useState("");
   const [isConfigured, setIsConfigured] = useState(false);
 
-  // Load current credentials when dialog opens
-  useEffect(() => {
-    if (open) {
-      loadCredentials();
-    }
-  }, [open]);
-
-  const loadCredentials = async () => {
+  const loadCredentials = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -77,7 +70,15 @@ function GmailSettingsDialog({ open, onClose, platformMode = false }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [platformMode]);
+
+  // Load current credentials when dialog opens
+  useEffect(() => {
+    if (open) {
+      loadCredentials();
+    }
+  }, [open, loadCredentials]);
+
 
   const handleSave = async () => {
     if (!clientId.trim() || !apiKey.trim()) {
