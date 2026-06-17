@@ -44,7 +44,7 @@ import {
   normalizeInventoryRow,
   normalizeInventoryPayload,
 } from "../utils/workspaceInventory";
-import { formatLotDateDisplay, parseLotDateDisplay } from "../utils/shippingFifoLots";
+import { mfgDateToInputValue } from "../utils/shippingFifoLots";
 import { ensureProductCatalog, getActiveProducts } from "../utils/productCatalog";
 import { tableHeadRowSx, tableHeadCellSx } from "../theme/contrastSurfaces";
 import { useOrganization } from "../context/OrganizationProvider";
@@ -63,6 +63,11 @@ const COMPACT_FIELD = {
   "& .MuiInputBase-root": { fontSize: "0.8125rem", height: 32 },
   "& .MuiInputBase-input": { py: 0.35, px: 0.75 },
   "& .MuiSelect-select": { py: 0.35, minHeight: "unset !important" },
+  "& input[type='date']::-webkit-calendar-picker-indicator": {
+    margin: 0,
+    padding: 0,
+    cursor: "pointer",
+  },
 };
 
 function formatSavedAt(iso) {
@@ -356,11 +361,11 @@ export default function InventoryDialog({ open, onClose, productRates = null, on
                       <TableCell sx={DENSE_CELL}>
                         <TextField
                           size="small"
-                          type="text"
+                          type="date"
                           fullWidth
-                          placeholder="DD-MM-YYYY"
-                          value={row.mfgDate ? formatLotDateDisplay(row.mfgDate) : ""}
-                          onChange={(e) => updateRow(row.id, { mfgDate: parseLotDateDisplay(e.target.value) })}
+                          inputProps={{ "aria-label": "Manufacturing date" }}
+                          value={mfgDateToInputValue(row.mfgDate)}
+                          onChange={(e) => updateRow(row.id, { mfgDate: e.target.value })}
                           sx={COMPACT_FIELD}
                         />
                       </TableCell>
@@ -377,11 +382,11 @@ export default function InventoryDialog({ open, onClose, productRates = null, on
                       <TableCell sx={DENSE_CELL}>
                         <TextField
                           size="small"
-                          type="text"
+                          type="date"
                           fullWidth
-                          placeholder="DD-MM-YYYY"
-                          value={row.bbdDate ? formatLotDateDisplay(row.bbdDate) : ""}
-                          onChange={(e) => updateRow(row.id, { bbdDate: parseLotDateDisplay(e.target.value) })}
+                          inputProps={{ "aria-label": "Best before date" }}
+                          value={mfgDateToInputValue(row.bbdDate)}
+                          onChange={(e) => updateRow(row.id, { bbdDate: e.target.value })}
                           sx={COMPACT_FIELD}
                         />
                       </TableCell>
