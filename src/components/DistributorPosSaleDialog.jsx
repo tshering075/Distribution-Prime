@@ -81,13 +81,14 @@ import {
 } from "../utils/posSaleStorage";
 import {
   buildDispatchedInboundMap,
+  buildPosPhysicalStockRows,
   buildStockAvailabilityMap,
   deductStockForPosSale,
-  getPhysicalStockRowsFromDistributor,
   lineItemsForStockRestore,
   mergeDispatchedInboundIntoAvailability,
   restoreStockFromPosSale,
 } from "../utils/posStock";
+import { flagUncreditedDeliveredOrdersPhysicalStockApplied } from "../utils/posPhysicalStockSync";
 import {
   buildDispatchedInboundBySku,
   buildDispatchedOrderCards,
@@ -367,7 +368,7 @@ function PosSectionHeader({ title, subtitle, action }) {
   );
 }
 
-function PosKpiStrip({ todayTotal, todayCount, todayItems }) {
+function PosKpiStrip({ todayTotal, todayCount, todayItems, compact = false }) {
   const theme = useTheme();
   return (
     <Paper
@@ -376,7 +377,7 @@ function PosKpiStrip({ todayTotal, todayCount, todayItems }) {
       sx={{
         flexShrink: 0,
         px: { xs: 1.5, sm: 2.5 },
-        py: 1.25,
+        py: compact ? 0.75 : 1.25,
         borderBottom: 1,
         borderColor: "divider",
         bgcolor: alpha(theme.palette.primary.main, 0.03),
@@ -385,31 +386,31 @@ function PosKpiStrip({ todayTotal, todayCount, todayItems }) {
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "repeat(3, 1fr)", md: "repeat(3, minmax(0, 200px))" },
-          gap: 1,
+          gridTemplateColumns: { xs: "repeat(3, 1fr)", md: compact ? "repeat(3, minmax(0, 1fr))" : "repeat(3, minmax(0, 200px))" },
+          gap: compact ? 0.75 : 1,
         }}
       >
         <Box>
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: compact ? "0.65rem" : undefined }}>
             Today&apos;s sales
           </Typography>
-          <Typography variant="subtitle1" sx={{ fontWeight: 900, lineHeight: 1.2 }}>
+          <Typography variant={compact ? "body2" : "subtitle1"} sx={{ fontWeight: 900, lineHeight: 1.2 }}>
             {formatNu(todayTotal)}
           </Typography>
         </Box>
         <Box>
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: compact ? "0.65rem" : undefined }}>
             Transactions
           </Typography>
-          <Typography variant="subtitle1" sx={{ fontWeight: 900, lineHeight: 1.2 }}>
+          <Typography variant={compact ? "body2" : "subtitle1"} sx={{ fontWeight: 900, lineHeight: 1.2 }}>
             {todayCount}
           </Typography>
         </Box>
         <Box>
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: compact ? "0.65rem" : undefined }}>
             Cases sold
           </Typography>
-          <Typography variant="subtitle1" sx={{ fontWeight: 900, lineHeight: 1.2 }}>
+          <Typography variant={compact ? "body2" : "subtitle1"} sx={{ fontWeight: 900, lineHeight: 1.2 }}>
             {todayItems}
           </Typography>
         </Box>
@@ -498,6 +499,8 @@ function ProductCatalogueRow({ sku, stock, inCartQty, accent, onAdd, onSetQty, d
   const outOfStock = stock !== null && stock <= 0;
   const lowStock = stock !== null && stock > 0 && stock <= LOW_STOCK_THRESHOLD;
   const atMax = stock !== null && inCartQty >= stock;
+  const displayName = sku.productName || sku.name;
+  const variantLabel = sku.variant || null;
 
   return (
     <TableRow
@@ -520,27 +523,39 @@ function ProductCatalogueRow({ sku, stock, inCartQty, accent, onAdd, onSetQty, d
             }}
           />
           <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" sx={{ fontWeight: 800, lineHeight: 1.3 }} noWrap>
-              {sku.name}
-            </Typography>
+            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0 }}>
+              <Typography variant="body2" sx={{ fontWeight: 800, lineHeight: 1.3 }} noWrap>
+                {displayName}
+              </Typography>
+              {variantLabel ? (
+                <Chip
+                  label={variantLabel}
+                  size="small"
+                  sx={{
+                    height: 18,
+                    fontSize: "0.625rem",
+                    fontWeight: 800,
+                    bgcolor: alpha(accent, 0.12),
+                    color: accent,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
+            </Stack>
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography variant="caption" sx={{ fontWeight: 700, color: accent, fontSize: "0.65rem" }}>
                 {sku.category}
               </Typography>
               {outOfStock ? (
-                <Typography variant="caption" color="error.main" sx={{ fontWeight: 700, fontSize: "0.65rem" }}>
-                  Out
-                </Typography>
+                <Chip label="Out of stock" size="small" color="error" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 700 }} />
               ) : lowStock ? (
-                <Typography variant="caption" color="warning.main" sx={{ fontWeight: 700, fontSize: "0.65rem" }}>
-                  Low
-                </Typography>
+                <Chip label="Low stock" size="small" color="warning" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 700 }} />
               ) : null}
             </Stack>
           </Box>
         </Stack>
       </TableCell>
-      <TableCell align="right" sx={{ whiteSpace: "nowrap", width: 88 }}>
+      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
         <Typography variant="body2" sx={{ fontWeight: 800, color: "primary.main", fontSize: "0.8125rem" }}>
           {formatNu(sku.rate)}
         </Typography>
@@ -550,11 +565,23 @@ function ProductCatalogueRow({ sku, stock, inCartQty, accent, onAdd, onSetQty, d
           </Typography>
         ) : null}
       </TableCell>
-      <TableCell align="center" sx={{ width: 52, fontWeight: 700, fontSize: "0.8125rem" }}>
-        {stock == null ? "—" : stock}
+      <TableCell align="center">
+        {stock == null ? (
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700, fontSize: "0.75rem" }}>
+            —
+          </Typography>
+        ) : (
+          <Chip
+            label={stock}
+            size="small"
+            color={outOfStock ? "error" : lowStock ? "warning" : "success"}
+            variant={outOfStock ? "filled" : "outlined"}
+            sx={{ height: 20, minWidth: 28, fontWeight: 800, fontSize: "0.65rem", px: 0.25 }}
+          />
+        )}
       </TableCell>
       {!isMobile ? (
-        <TableCell align="center" sx={{ width: 44, fontSize: "0.75rem", color: "text.secondary" }}>
+        <TableCell align="center" sx={{ fontSize: "0.75rem", color: "text.secondary" }}>
           {inCartQty > 0 ? (
             <Chip label={inCartQty} size="small" color="primary" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 800 }} />
           ) : (
@@ -562,7 +589,7 @@ function ProductCatalogueRow({ sku, stock, inCartQty, accent, onAdd, onSetQty, d
           )}
         </TableCell>
       ) : null}
-      <TableCell align="right" sx={{ width: isMobile ? 132 : 148, pr: 1.5 }}>
+      <TableCell align="right" sx={{ pr: 1 }}>
         <Stack direction="row" spacing={0.25} alignItems="center" justifyContent="flex-end">
           <IconButton
             size="small"
@@ -599,12 +626,13 @@ function ProductCatalogueRow({ sku, stock, inCartQty, accent, onAdd, onSetQty, d
             onClick={() => onAdd(sku)}
             sx={{
               minWidth: 0,
-              px: 1,
+              px: 0.75,
               height: 28,
               fontWeight: 800,
-              fontSize: "0.75rem",
+              fontSize: "0.7rem",
               textTransform: "none",
               boxShadow: "none",
+              display: { xs: "inline-flex", md: "none" },
             }}
           >
             Add
@@ -625,9 +653,17 @@ function ProductCatalogueTable({ skus, getStockForSku, cartQtyMap, onAdd, onSetQ
         borderColor: "divider",
         borderRadius: 2,
         overflow: "auto",
+        WebkitOverflowScrolling: "touch",
       }}
     >
-      <Table size="small" stickyHeader sx={{ tableLayout: "fixed", minWidth: isMobile ? 420 : 520 }}>
+      <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "100%", minWidth: isMobile ? 360 : 480 }}>
+        <colgroup>
+          <col style={{ width: isMobile ? "34%" : "30%" }} />
+          <col style={{ width: "14%" }} />
+          <col style={{ width: "12%" }} />
+          {!isMobile ? <col style={{ width: "8%" }} /> : null}
+          <col style={{ width: isMobile ? "40%" : "36%" }} />
+        </colgroup>
         <TableHead>
           <TableRow>
             <TableCell sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, bgcolor: "background.paper" }}>
@@ -635,27 +671,27 @@ function ProductCatalogueTable({ skus, getStockForSku, cartQtyMap, onAdd, onSetQ
             </TableCell>
             <TableCell
               align="right"
-              sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, width: 88, bgcolor: "background.paper" }}
+              sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, bgcolor: "background.paper" }}
             >
               Rate
             </TableCell>
             <TableCell
               align="center"
-              sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, width: 52, bgcolor: "background.paper" }}
+              sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, bgcolor: "background.paper" }}
             >
               Avail
             </TableCell>
             {!isMobile ? (
               <TableCell
                 align="center"
-                sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, width: 44, bgcolor: "background.paper" }}
+                sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, bgcolor: "background.paper" }}
               >
                 Cart
               </TableCell>
             ) : null}
             <TableCell
               align="right"
-              sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, width: 148, bgcolor: "background.paper", pr: 1.5 }}
+              sx={{ fontWeight: 800, fontSize: "0.7rem", py: 0.75, bgcolor: "background.paper", pr: 1.5 }}
             >
               Qty
             </TableCell>
@@ -799,9 +835,18 @@ function CartPanel({
               <Paper key={line.sku} variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
                   <Box sx={{ minWidth: 0, pr: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                      {line.name}
-                    </Typography>
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                        {line.productName || line.name}
+                      </Typography>
+                      {line.variant ? (
+                        <Chip
+                          label={line.variant}
+                          size="small"
+                          sx={{ height: 18, fontSize: "0.625rem", fontWeight: 800 }}
+                        />
+                      ) : null}
+                    </Stack>
                     <Typography variant="caption" color="text.secondary">
                       {formatNu(line.rate)} / case
                     </Typography>
@@ -1917,9 +1962,41 @@ export default function DistributorPosSaleDialog({
   );
   const catalogSkuNames = useMemo(() => skus.map((s) => s.name), [skus]);
   const physicalRows = useMemo(
-    () => getPhysicalStockRowsFromDistributor(distributor, productRates),
-    [distributor, productRates]
+    () => buildPosPhysicalStockRows(distributor, productRates, orders, distributorCode),
+    [distributor, productRates, orders, distributorCode]
   );
+
+  useEffect(() => {
+    if (!open || !distributorCode || !isSupabaseConfigured || !setDistributor) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getDistributorByCode } = await import("../services/supabaseService");
+        const fresh = await getDistributorByCode(distributorCode);
+        if (cancelled || !fresh) return;
+        setDistributor((prev) => ({
+          ...(prev || {}),
+          ...fresh,
+          physical_stock: fresh.physical_stock ?? fresh.physicalStock ?? prev?.physical_stock,
+        }));
+        const list = getDistributors();
+        const idx = list.findIndex((d) => d.code === distributorCode);
+        if (idx >= 0) {
+          list[idx] = {
+            ...list[idx],
+            ...fresh,
+            physical_stock: fresh.physical_stock ?? fresh.physicalStock ?? list[idx].physical_stock,
+          };
+          saveDistributors(list);
+        }
+      } catch (err) {
+        console.warn("POS: could not refresh distributor physical stock:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, distributorCode, isSupabaseConfigured, setDistributor]);
 
   const deliveredOrders = useMemo(
     () => getDeliveredOrdersForDistributor(orders, distributorCode),
@@ -2098,7 +2175,7 @@ export default function DistributorPosSaleDialog({
       if (qtyDelta <= 0) return prev;
       return [
         ...prev,
-        { sku: sku.name, name: sku.name, category: sku.category, rate, qty: qtyDelta },
+        { sku: sku.name, name: sku.name, productName: sku.productName, variant: sku.variant, category: sku.category, rate, qty: qtyDelta },
       ];
     });
   };
@@ -2121,7 +2198,7 @@ export default function DistributorPosSaleDialog({
       if (idx >= 0) {
         return prev.map((l) => (l.sku === sku.name ? { ...l, qty: n } : l));
       }
-      return [...prev, { sku: sku.name, name: sku.name, category: sku.category, rate, qty: n }];
+      return [...prev, { sku: sku.name, name: sku.name, productName: sku.productName, variant: sku.variant, category: sku.category, rate, qty: n }];
     });
   };
 
@@ -2191,7 +2268,7 @@ export default function DistributorPosSaleDialog({
         await deletePosSaleAsync(distributorCode, sale.id, { isSupabaseConfigured });
       }
 
-      let nextRows = getPhysicalStockRowsFromDistributor(distributor, productRates);
+      let nextRows = buildPosPhysicalStockRows(distributor, productRates, orders, distributorCode);
       for (const sale of list) {
         ({ rows: nextRows } = restoreStockFromPosSale(nextRows, lineItemsForStockRestore(sale)));
       }
@@ -2285,8 +2362,14 @@ export default function DistributorPosSaleDialog({
         amount: num(l.rate) * num(l.qty),
       }));
 
+      const rowsForDeduction = buildPosPhysicalStockRows(
+        distributor,
+        productRates,
+        orders,
+        distributorCode
+      );
       const { rows: nextRows, shortages, deductions } = deductStockForPosSale(
-        physicalRows,
+        rowsForDeduction,
         lines.map((l) => ({ sku: l.sku, qty: l.qty }))
       );
 
@@ -2330,6 +2413,9 @@ export default function DistributorPosSaleDialog({
       );
 
       await persistStock(stockPayload);
+      await flagUncreditedDeliveredOrdersPhysicalStockApplied(orders, distributorCode, {
+        distributorCode,
+      });
       clearHeldPosSale(distributorCode);
       setHeldSale(null);
 
@@ -2436,9 +2522,12 @@ export default function DistributorPosSaleDialog({
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
-        {tab !== 0 ? (
-          <PosKpiStrip todayTotal={todayTotal} todayCount={todaySales.length} todayItems={todayItems} />
-        ) : null}
+        <PosKpiStrip
+          todayTotal={todayTotal}
+          todayCount={todaySales.length}
+          todayItems={todayItems}
+          compact={tab === 0}
+        />
 
         <Paper
           elevation={0}
@@ -2487,32 +2576,26 @@ export default function DistributorPosSaleDialog({
               minHeight: 0,
               display: "flex",
               flexDirection: "column",
+              overflow: "hidden",
               bgcolor: (t) => alpha(t.palette.grey[500], 0.04),
             }}
           >
             <Box
               sx={{
                 flex: 1,
-                minHeight: { xs: 0, md: "calc(100dvh - 132px)" },
-                height: { md: "calc(100dvh - 132px)" },
+                minHeight: 0,
+                overflow: "hidden",
                 pt: 0,
                 pb: { xs: 1, md: 1.5 },
                 px: { xs: 1, md: 2 },
                 display: "grid",
-                gridTemplateColumns: { xs: "1fr", md: "1fr minmax(400px, 480px)" },
+                gridTemplateColumns: { xs: "1fr", md: "1fr minmax(360px, 440px)" },
                 gridTemplateRows: "1fr",
-                alignItems: "start",
+                alignItems: "stretch",
                 gap: { xs: 0, md: 2 },
               }}
             >
-              <PosPanel
-                sx={{
-                  height: { md: "calc(100dvh - 132px)" },
-                  minHeight: { md: "calc(100dvh - 132px)" },
-                  maxHeight: { md: "calc(100dvh - 132px)" },
-                  alignSelf: "start",
-                }}
-              >
+              <PosPanel sx={{ minHeight: 0, height: "100%" }}>
                 <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
                   <PosSectionHeader
                     title="Product catalogue"
@@ -2556,17 +2639,25 @@ export default function DistributorPosSaleDialog({
 
                 <Box sx={{ px: 2, py: 1, borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
                   <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                    {categories.map((cat) => (
+                    {categories.map((cat) => {
+                      const catColor = CATEGORY_COLORS[cat] || theme.palette.primary.main;
+                      const selected = categoryFilter === cat;
+                      return (
                       <Chip
                         key={cat}
                         label={cat}
                         size="small"
                         onClick={() => setCategoryFilter(cat)}
-                        color={categoryFilter === cat ? "primary" : "default"}
-                        variant={categoryFilter === cat ? "filled" : "outlined"}
-                        sx={{ fontWeight: 700 }}
+                        color={selected ? "primary" : "default"}
+                        variant={selected ? "filled" : "outlined"}
+                        sx={{
+                          fontWeight: 700,
+                          ...(selected
+                            ? { bgcolor: alpha(catColor, 0.18), color: catColor, borderColor: catColor }
+                            : { borderColor: alpha(catColor, 0.35) }),
+                        }}
                       />
-                    ))}
+                    );})}
                   </Stack>
                 </Box>
 
@@ -2618,10 +2709,8 @@ export default function DistributorPosSaleDialog({
                   sx={{
                     boxShadow: (t) => `0 8px 32px ${alpha(t.palette.common.black, 0.06)}`,
                     width: "100%",
-                    height: { md: "calc(100dvh - 132px)" },
-                    minHeight: { md: "calc(100dvh - 132px)" },
-                    maxHeight: { md: "calc(100dvh - 132px)" },
-                    alignSelf: "start",
+                    minHeight: 0,
+                    height: "100%",
                   }}
                 >
                   <CartPanel {...cartPanelProps} />
@@ -2654,8 +2743,8 @@ export default function DistributorPosSaleDialog({
                     sx: {
                       borderTopLeftRadius: 16,
                       borderTopRightRadius: 16,
-                      height: { xs: "96dvh", sm: "min(96dvh, 820px)" },
-                      maxHeight: "96dvh",
+                      height: { xs: "min(88dvh, calc(100dvh - 48px))", sm: "min(88dvh, 760px)" },
+                      maxHeight: "88dvh",
                       overflow: "hidden",
                       display: "flex",
                       flexDirection: "column",

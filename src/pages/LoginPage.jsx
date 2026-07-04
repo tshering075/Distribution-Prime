@@ -17,11 +17,23 @@ import {
   Alert,
   Checkbox,
   FormControlLabel,
+  ToggleButton,
+  ToggleButtonGroup,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Divider,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import { useNavigate, Link as RouterLink, useSearchParams } from "react-router-dom";
 import { PLATFORM_NAME, PLATFORM_CONSOLE_LOGIN_PATH } from "../constants/saas";
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import BusinessOutlinedIcon from "@mui/icons-material/BusinessOutlined";
+import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
+import StorefrontOutlinedIcon from "@mui/icons-material/StorefrontOutlined";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import PersonIcon from "@mui/icons-material/Person";
@@ -88,7 +100,7 @@ function LoginPage({
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [error, setError] = useState(false);
+  const [loginAs, setLoginAs] = useState("distributor");
   const [errorMessage, setErrorMessage] = useState("");
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -130,6 +142,17 @@ function LoginPage({
     }
   }, [lockedWorkspaceSlug, searchParams]);
 
+  useEffect(() => {
+    if (userId.includes("@")) {
+      setLoginAs("admin");
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    const inviteEmail = searchParams.get("email");
+    if (inviteEmail) setLoginAs("admin");
+  }, [searchParams]);
+
   const navigateAfterStaffLogin = (actualRole) => {
     const returnTo = searchParams.get("returnTo");
     if (returnTo && returnTo.startsWith("/")) {
@@ -144,6 +167,7 @@ function LoginPage({
   };
   const isDarkUi = isDayView;
   const greeting = getBhutanGreeting();
+  const isSupabaseConfigured = supabase !== null;
 
   const inputSurfaceSx = isDarkUi
     ? {
@@ -163,15 +187,37 @@ function LoginPage({
         },
       };
 
+  const fieldSx = {
+    "& .MuiOutlinedInput-root": {
+      borderRadius: "14px",
+      transition: "all 0.25s ease",
+      ...inputSurfaceSx,
+    },
+    "& .MuiInputLabel-root": { fontWeight: 650 },
+  };
+
+  const isAdminLogin = loginAs === "admin";
+  const UserFieldIcon = isAdminLogin ? EmailOutlinedIcon : PersonIcon;
+  const userFieldLabel = !isSupabaseConfigured
+    ? "User ID"
+    : isAdminLogin
+    ? "Work email"
+    : "Distributor code or username";
+  const userFieldHelper =
+    fieldErrors.userId ||
+    (!isSupabaseConfigured
+      ? undefined
+      : isAdminLogin
+      ? "The email your admin invited you with"
+      : "Your code from your admin — not your email address");
+  const firstFieldAutofocus = isSupabaseConfigured && !lockedWorkspaceSlug ? "workspace" : "userId";
+
   const handleTogglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
 
-  const isSupabaseConfigured = supabase !== null;
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(false);
     setErrorMessage("");
     setLoading(true);
     
@@ -185,10 +231,12 @@ function LoginPage({
     let hasErrors = false;
     
     if (!trimmedUserId || trimmedUserId.length < 1) {
-      setFieldErrors(prev => ({
+      setFieldErrors((prev) => ({
         ...prev,
         userId: isSupabaseConfigured
-          ? "Distributor code or username (or admin email) is required"
+          ? isAdminLogin
+            ? "Work email is required"
+            : "Distributor code or username is required"
           : "User ID is required",
       }));
       hasErrors = true;
@@ -200,7 +248,6 @@ function LoginPage({
     }
     
     if (hasErrors) {
-      setError(true);
       setErrorMessage("Please fill in all required fields");
       setLoading(false);
       return;
@@ -221,7 +268,6 @@ function LoginPage({
         try {
           await resolveOrganizationForLogin(organizationSlug);
         } catch (orgError) {
-          setError(true);
           setErrorMessage(orgError.message || "Invalid workspace ID");
           setLoading(false);
           return;
@@ -394,7 +440,6 @@ function LoginPage({
         try {
           await resolveOrganizationForLogin(organizationSlug);
         } catch (orgError) {
-          setError(true);
           setErrorMessage(orgError.message || "Invalid workspace ID");
           setLoading(false);
           return;
@@ -417,11 +462,9 @@ function LoginPage({
       }
 
       // Invalid credentials
-      setError(true);
       setErrorMessage(normalizedSupabaseError || "Invalid User ID or Password");
       setLoading(false);
     } catch (error) {
-      setError(true);
       setErrorMessage(error.message || "Login failed. Please try again.");
       setLoading(false);
     }
@@ -469,9 +512,15 @@ function LoginPage({
               component={RouterLink}
               to="/"
               size="small"
-              sx={{ textTransform: "none", fontWeight: 800, display: { xs: "none", sm: "inline-flex" } }}
+              startIcon={<ArrowBackIcon sx={{ display: { xs: "inline-flex", sm: "none" } }} />}
+              sx={{ textTransform: "none", fontWeight: 800 }}
             >
-              Home
+              <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                Home
+              </Box>
+              <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                Back
+              </Box>
             </Button>
             <DayNightThemeToggle />
           </Stack>
@@ -548,14 +597,40 @@ function LoginPage({
                 border: "1px solid",
                 borderColor: "divider",
                 boxShadow: `0 28px 80px ${alpha(theme.palette.common.black, isDarkUi ? 0.5 : 0.14)}`,
+                p: { xs: 2.5, sm: 3.25 },
+                maxWidth: { xs: "100%", md: 430 },
+                mx: "auto",
+                width: "100%",
               }}
             >
-              <Box sx={{ textAlign: "center", mb: 3.25 }}>
+              <Chip
+                icon={<VerifiedUserOutlinedIcon />}
+                label="Secure workspace access"
+                size="small"
+                sx={{
+                  display: { xs: "flex", md: "none" },
+                  alignSelf: "center",
+                  mb: 2,
+                  fontWeight: 800,
+                  bgcolor: alpha(theme.palette.primary.main, 0.1),
+                  color: "primary.main",
+                  border: `1px solid ${alpha(theme.palette.primary.main, 0.18)}`,
+                  "& .MuiChip-icon": { color: "inherit" },
+                }}
+              />
+
+              <Box sx={{ textAlign: "center", mb: 2.75 }}>
                 <Box
                   component="img"
                   src={markSrc}
                   alt={displayName}
-                  sx={{ width: 86, height: "auto", mb: 1.5 }}
+                  sx={{
+                    width: { xs: 64, sm: 86 },
+                    height: "auto",
+                    mb: 1.25,
+                    display: { xs: "none", sm: "block" },
+                    mx: "auto",
+                  }}
                 />
                 <Zoom in timeout={850}>
                   <Typography
@@ -563,8 +638,9 @@ function LoginPage({
                     sx={{
                       fontWeight: 950,
                       color: "text.primary",
-                      mb: 0.75,
+                      mb: 0.5,
                       letterSpacing: -0.4,
+                      fontSize: { xs: "1.65rem", sm: "2.125rem" },
                     }}
                   >
                     {greeting}
@@ -578,190 +654,323 @@ function LoginPage({
                 </Typography>
               </Box>
 
-              <Box component="form" onSubmit={handleSubmit}>
+              {errorMessage ? (
+                <Alert
+                  severity="error"
+                  sx={{ mb: 2.25, borderRadius: 2 }}
+                  onClose={() => setErrorMessage("")}
+                >
+                  {errorMessage}
+                </Alert>
+              ) : null}
+
+              <Box component="form" onSubmit={handleSubmit} noValidate>
                 {inviteToken ? (
-                  <Alert severity="info" sx={{ mb: 2 }}>
+                  <Alert severity="info" sx={{ mb: 2.25, borderRadius: 2 }}>
                     Sign in to accept your team invite. You will return here after signing in.
                   </Alert>
                 ) : null}
                 {!isSupabaseConfigured ? (
-                  <Alert severity="warning" sx={{ mb: 2 }}>
+                  <Alert severity="warning" sx={{ mb: 2.25, borderRadius: 2 }}>
                     Database not connected. Set <strong>REACT_APP_SUPABASE_URL</strong> and{" "}
                     <strong>REACT_APP_SUPABASE_ANON_KEY</strong> in Cloudflare Pages → Settings →
                     Variables and Secrets (Production), then redeploy.
                   </Alert>
                 ) : null}
-                {isSupabaseConfigured && (
+
+                <Stack spacing={2}>
+                  {isSupabaseConfigured && (
+                    <>
+                      <Typography
+                        variant="overline"
+                        sx={{ fontWeight: 800, color: "text.secondary", letterSpacing: 1.2 }}
+                      >
+                        Workspace
+                      </Typography>
+                      <TextField
+                        fullWidth
+                        label="Workspace ID"
+                        variant="outlined"
+                        value={organizationSlug}
+                        disabled={Boolean(lockedWorkspaceSlug)}
+                        autoFocus={firstFieldAutofocus === "workspace"}
+                        onChange={(e) => {
+                          setOrganizationSlug(e.target.value);
+                          setErrorMessage("");
+                        }}
+                        helperText={
+                          lockedWorkspaceSlug
+                            ? `Signing in to workspace "${lockedWorkspaceSlug}"`
+                            : "Your company's sign-in ID (e.g. acme-beverages)"
+                        }
+                        FormHelperTextProps={{ sx: { mx: 0 } }}
+                        sx={fieldSx}
+                        InputProps={{
+                          startAdornment: (
+                            <InputAdornment position="start">
+                              <BusinessOutlinedIcon sx={{ color: "primary.main", fontSize: 20 }} />
+                            </InputAdornment>
+                          ),
+                        }}
+                      />
+                    </>
+                  )}
+
+                  {isSupabaseConfigured && (
+                    <ToggleButtonGroup
+                      value={loginAs}
+                      exclusive
+                      fullWidth
+                      size="small"
+                      onChange={(_, value) => {
+                        if (value) setLoginAs(value);
+                      }}
+                      aria-label="Sign in as"
+                      sx={{
+                        "& .MuiToggleButton-root": {
+                          py: 1,
+                          textTransform: "none",
+                          fontWeight: 800,
+                          borderRadius: "12px !important",
+                          border: `1px solid ${theme.palette.divider}`,
+                          "&.Mui-selected": {
+                            bgcolor: alpha(theme.palette.primary.main, 0.12),
+                            color: "primary.main",
+                            borderColor: alpha(theme.palette.primary.main, 0.35),
+                            "&:hover": {
+                              bgcolor: alpha(theme.palette.primary.main, 0.18),
+                            },
+                          },
+                        },
+                        gap: 1,
+                        "& .MuiToggleButtonGroup-grouped": {
+                          border: `1px solid ${theme.palette.divider} !important`,
+                          "&:not(:first-of-type)": { ml: 0 },
+                        },
+                      }}
+                    >
+                      <ToggleButton value="distributor" aria-label="Sign in as distributor">
+                        <StorefrontOutlinedIcon sx={{ fontSize: 18, mr: 0.75 }} />
+                        Distributor
+                      </ToggleButton>
+                      <ToggleButton value="admin" aria-label="Sign in as admin or staff">
+                        <AdminPanelSettingsOutlinedIcon sx={{ fontSize: 18, mr: 0.75 }} />
+                        Admin / staff
+                      </ToggleButton>
+                    </ToggleButtonGroup>
+                  )}
+
+                  <Typography
+                    variant="overline"
+                    sx={{ fontWeight: 800, color: "text.secondary", letterSpacing: 1.2 }}
+                  >
+                    Your credentials
+                  </Typography>
+
                   <TextField
                     fullWidth
-                    label="Workspace ID"
+                    label={userFieldLabel}
+                    type={isAdminLogin && isSupabaseConfigured ? "email" : "text"}
                     variant="outlined"
-                    value={organizationSlug}
-                    disabled={Boolean(lockedWorkspaceSlug)}
+                    value={userId}
+                    autoComplete={isAdminLogin ? "email" : "username"}
+                    autoFocus={firstFieldAutofocus === "userId"}
+                    placeholder={
+                      isSupabaseConfigured
+                        ? isAdminLogin
+                          ? "you@company.com"
+                          : "e.g. JD123"
+                        : undefined
+                    }
                     onChange={(e) => {
-                      setOrganizationSlug(e.target.value);
-                      setError(false);
+                      setUserId(e.target.value);
+                      if (fieldErrors.userId) {
+                        setFieldErrors((prev) => ({ ...prev, userId: "" }));
+                      }
+                      setErrorMessage("");
                     }}
-                    helperText={
-                      lockedWorkspaceSlug
-                        ? `Signing in to workspace "${lockedWorkspaceSlug}"`
-                        : "Your company's sign-in ID (e.g. acme-beverages)"
-                    }
-                    sx={{ mb: 2.25 }}
+                    error={!!fieldErrors.userId}
+                    helperText={userFieldHelper}
+                    FormHelperTextProps={{ sx: { mx: 0 } }}
+                    sx={fieldSx}
                     InputProps={{
-                      sx: {
-                        borderRadius: "14px",
-                        transition: "all 0.25s ease",
-                        ...inputSurfaceSx,
-                      },
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <UserFieldIcon sx={{ color: "primary.main", fontSize: 20 }} />
+                        </InputAdornment>
+                      ),
                     }}
-                    InputLabelProps={{ sx: { fontWeight: 650 } }}
                   />
-                )}
-                <TextField
-                  fullWidth
-                  label={isSupabaseConfigured ? "Distributor code, username, or admin email" : "User ID"}
-                  variant="outlined"
-                  value={userId}
-                  autoComplete="username"
-                  onChange={(e) => {
-                    setUserId(e.target.value);
-                    if (fieldErrors.userId) {
-                      setFieldErrors(prev => ({ ...prev, userId: "" }));
-                    }
-                    setError(false);
-                  }}
-                  error={!!fieldErrors.userId}
-                  helperText={
-                    fieldErrors.userId ||
-                    (isSupabaseConfigured
-                      ? "Distributors: use your code (e.g. JD123) or username — not your email"
-                      : undefined)
-                  }
-                  FormHelperTextProps={{ sx: { mx: 0 } }}
-                  sx={{ mb: 2.25 }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <PersonIcon sx={{ color: "primary.main", fontSize: 20 }} />
-                      </InputAdornment>
-                    ),
-                    sx: {
-                      borderRadius: "14px",
-                      transition: "all 0.25s ease",
-                      ...inputSurfaceSx,
-                    },
-                  }}
-                  InputLabelProps={{ sx: { fontWeight: 650 } }}
-                />
 
-                <TextField
-                  fullWidth
-                  label="Password"
-                  type={showPassword ? "text" : "password"}
-                  variant="outlined"
-                  value={password}
-                  autoComplete="current-password"
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    if (fieldErrors.password) {
-                      setFieldErrors(prev => ({ ...prev, password: "" }));
-                    }
-                    setError(false);
-                  }}
-                  error={!!fieldErrors.password}
-                  helperText={fieldErrors.password}
-                  sx={{ mb: 1 }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <LockIcon sx={{ color: "primary.main", fontSize: 20 }} />
-                      </InputAdornment>
-                    ),
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton
-                          aria-label="toggle password visibility"
-                          onClick={handleTogglePasswordVisibility}
-                          edge="end"
-                          sx={{ color: "text.secondary" }}
-                        >
-                          {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                        </IconButton>
-                      </InputAdornment>
-                    ),
-                    sx: {
-                      borderRadius: "14px",
-                      transition: "all 0.25s ease",
-                      ...inputSurfaceSx,
-                    },
-                  }}
-                  InputLabelProps={{ sx: { fontWeight: 650 } }}
-                />
-
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={rememberMe}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setRememberMe(checked);
-                        if (!checked) {
-                          writeRememberedLogin(
-                            String(organizationSlug || lockedWorkspaceSlug || "").trim(),
-                            { userId: "", password: "", rememberMe: false }
-                          );
-                        }
-                      }}
-                      color="primary"
-                      size="small"
-                    />
-                  }
-                  label="Remember me on this device"
-                  sx={{ mb: 2, ml: 0.25, userSelect: "none" }}
-                />
-
-                <Zoom in timeout={600}>
-                  <Button
-                    type="submit"
-                    variant="contained"
+                  <TextField
                     fullWidth
-                    disabled={loading}
-                    color="primary"
+                    label="Password"
+                    type={showPassword ? "text" : "password"}
+                    variant="outlined"
+                    value={password}
+                    autoComplete="current-password"
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (fieldErrors.password) {
+                        setFieldErrors((prev) => ({ ...prev, password: "" }));
+                      }
+                      setErrorMessage("");
+                    }}
+                    error={!!fieldErrors.password}
+                    helperText={fieldErrors.password}
+                    FormHelperTextProps={{ sx: { mx: 0 } }}
+                    sx={fieldSx}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <LockIcon sx={{ color: "primary.main", fontSize: 20 }} />
+                        </InputAdornment>
+                      ),
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            aria-label={showPassword ? "Hide password" : "Show password"}
+                            onClick={handleTogglePasswordVisibility}
+                            edge="end"
+                            size="small"
+                            sx={{ color: "text.secondary" }}
+                          >
+                            {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={rememberMe}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setRememberMe(checked);
+                          if (!checked) {
+                            writeRememberedLogin(
+                              String(organizationSlug || lockedWorkspaceSlug || "").trim(),
+                              { userId: "", password: "", rememberMe: false }
+                            );
+                          }
+                        }}
+                        color="primary"
+                        size="small"
+                      />
+                    }
+                    label="Remember me"
+                    sx={{ ml: 0, userSelect: "none", "& .MuiFormControlLabel-label": { fontSize: "0.875rem" } }}
+                  />
+
+                  <Zoom in timeout={600}>
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      fullWidth
+                      disabled={loading}
+                      color="primary"
+                      sx={{
+                        minHeight: 52,
+                        fontWeight: 900,
+                        borderRadius: "14px",
+                        py: 1.45,
+                        fontSize: "1rem",
+                        textTransform: "none",
+                        boxShadow: (t) => `0 14px 28px ${alpha(t.palette.primary.main, 0.3)}`,
+                        transition: "all 0.25s ease",
+                        "&:hover": {
+                          bgcolor: "primary.dark",
+                          boxShadow: (t) => `0 18px 34px ${alpha(t.palette.primary.main, 0.38)}`,
+                          transform: "translateY(-2px)",
+                        },
+                        "&:active": { transform: "translateY(0)" },
+                      }}
+                    >
+                      {loading ? (
+                        <>
+                          <CircularProgress size={22} color="inherit" sx={{ mr: 1 }} />
+                          Signing in...
+                        </>
+                      ) : (
+                        "Sign in"
+                      )}
+                    </Button>
+                  </Zoom>
+                </Stack>
+
+                {isSupabaseConfigured && (
+                  <Accordion
+                    disableGutters
+                    elevation={0}
                     sx={{
-                      minHeight: 52,
-                      fontWeight: 900,
-                      borderRadius: "14px",
-                      py: 1.45,
-                      fontSize: "1rem",
-                      textTransform: "none",
-                      boxShadow: (t) => `0 14px 28px ${alpha(t.palette.primary.main, 0.3)}`,
-                      transition: "all 0.25s ease",
-                      "&:hover": {
-                        bgcolor: "primary.dark",
-                        boxShadow: (t) => `0 18px 34px ${alpha(t.palette.primary.main, 0.38)}`,
-                        transform: "translateY(-2px)",
-                      },
-                      "&:active": { transform: "translateY(0)" },
+                      mt: 2,
+                      bgcolor: "transparent",
+                      "&:before": { display: "none" },
+                      border: `1px solid ${theme.palette.divider}`,
+                      borderRadius: "14px !important",
+                      overflow: "hidden",
                     }}
                   >
-                    {loading ? (
-                      <>
-                        <CircularProgress size={22} color="inherit" sx={{ mr: 1 }} />
-                        Signing in...
-                      </>
-                    ) : (
-                      "Sign in"
-                    )}
-                  </Button>
-                </Zoom>
+                    <AccordionSummary
+                      expandIcon={<ExpandMoreIcon />}
+                      sx={{
+                        minHeight: 48,
+                        px: 1.5,
+                        "& .MuiAccordionSummary-content": { my: 1 },
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 750 }}>
+                        Not sure what to enter?
+                      </Typography>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ px: 1.75, pt: 0, pb: 1.75 }}>
+                      <Stack spacing={1.5}>
+                        <Stack direction="row" spacing={1.25} alignItems="flex-start">
+                          <StorefrontOutlinedIcon sx={{ color: "primary.main", fontSize: 20, mt: 0.15 }} />
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 800, mb: 0.25 }}>
+                              Distributors
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.55 }}>
+                              Use your workspace ID plus the distributor code or username from your admin — not your
+                              personal email.
+                            </Typography>
+                          </Box>
+                        </Stack>
+                        <Stack direction="row" spacing={1.25} alignItems="flex-start">
+                          <AdminPanelSettingsOutlinedIcon sx={{ color: "primary.main", fontSize: 20, mt: 0.15 }} />
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 800, mb: 0.25 }}>
+                              Admins & viewers
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.55 }}>
+                              Use your workspace ID and the work email you were invited with.
+                            </Typography>
+                          </Box>
+                        </Stack>
+                        <Stack direction="row" spacing={1.25} alignItems="flex-start">
+                          <LocalShippingOutlinedIcon sx={{ color: "primary.main", fontSize: 20, mt: 0.15 }} />
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 800, mb: 0.25 }}>
+                              Shipping team
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.55 }}>
+                              Sign in with the email and password your admin set up for dispatch access.
+                            </Typography>
+                          </Box>
+                        </Stack>
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
               </Box>
 
+              <Divider sx={{ my: 2.5 }} />
+
               {isSupabaseConfigured && (
-                <Typography
-                  variant="body2"
-                  sx={{ mt: 2.5, textAlign: "center", display: { xs: "none", sm: "block" } }}
-                >
+                <Typography variant="body2" sx={{ textAlign: "center" }}>
                   New company?{" "}
                   <Box
                     component={RouterLink}
@@ -802,7 +1011,7 @@ function LoginPage({
                 component="nav"
                 aria-label="Legal"
                 sx={{
-                  mt: 3,
+                  mt: 2.5,
                   pt: 2,
                   borderTop: 1,
                   borderColor: "divider",
@@ -812,20 +1021,12 @@ function LoginPage({
                 <Typography variant="caption" color="text.secondary">
                   <Box
                     component={RouterLink}
-                    to="/"
-                    sx={{ color: "primary.main", textDecoration: "none", fontWeight: 800, "&:hover": { textDecoration: "underline" } }}
-                  >
-                    Home
-                  </Box>
-                  {" | "}
-                  <Box
-                    component={RouterLink}
                     to={PRIVACY_POLICY_PATH}
                     sx={{ color: "primary.main", textDecoration: "none", fontWeight: 800, "&:hover": { textDecoration: "underline" } }}
                   >
                     Privacy
                   </Box>
-                  {" | "}
+                  {" · "}
                   <Box
                     component={RouterLink}
                     to={TERMS_OF_SERVICE_PATH}
@@ -840,17 +1041,6 @@ function LoginPage({
         </Box>
       </Container>
 
-      {/* Error Snackbar */}
-      <AppSnackbar
-        open={error}
-        severity="error"
-        message={errorMessage || "Invalid User ID or Password"}
-        autoHideDuration={2500}
-        onClose={() => setError(false)}
-        anchorOrigin={{ vertical: "top", horizontal: "right" }}
-      />
-
-      {/* ✅ Success Snackbar */}
       <AppSnackbar
         open={success}
         severity="success"

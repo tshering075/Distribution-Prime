@@ -64,6 +64,39 @@ const productFieldSx = {
   },
 };
 
+function CalculatorNumericHeaderCell({ isMobile, lines, shortLabel, minWidth }) {
+  return (
+    <TableCell
+      sx={{
+        fontWeight: "bold",
+        color: "text.primary",
+        fontSize: isMobile ? 9 : 14,
+        textAlign: "right",
+        px: isMobile ? 0.5 : 1.5,
+        py: isMobile ? 0.75 : 1.5,
+        whiteSpace: "normal",
+        letterSpacing: "0.5px",
+        minWidth,
+        lineHeight: 1.15,
+        verticalAlign: "bottom",
+      }}
+    >
+      {isMobile || !lines
+        ? shortLabel
+        : lines.map((line) => (
+            <Typography
+              key={line}
+              component="span"
+              display="block"
+              sx={{ fontSize: "inherit", fontWeight: "inherit", lineHeight: 1.15 }}
+            >
+              {line}
+            </Typography>
+          ))}
+    </TableCell>
+  );
+}
+
 function CalculatorSectionHeader({ title, subtitle, paletteColor = "primary", icon: Icon, filledCount }) {
   const theme = useTheme();
   const main = theme.palette[paletteColor]?.main ?? theme.palette.primary.main;
@@ -112,11 +145,28 @@ function CalculatorSectionHeader({ title, subtitle, paletteColor = "primary", ic
   );
 }
 
-function ProductCaseField({ label, value, onChange, isMobile, inputStyle, priceLine, stockAvail, hasValue }) {
+function ProductCaseField({ label, skuLabel, value, onChange, isMobile, inputStyle, priceLine, stockAvail, hasValue }) {
   return (
     <Box>
+      {skuLabel ? (
+        <Stack direction="row" alignItems="baseline" spacing={0.75} sx={{ mb: 0.75, minHeight: 20 }}>
+          <Typography
+            variant="caption"
+            sx={{ fontWeight: 800, color: "text.primary", textTransform: "uppercase", lineHeight: 1.3 }}
+          >
+            {label}
+          </Typography>
+          <Chip
+            label={skuLabel}
+            size="small"
+            color="primary"
+            variant="outlined"
+            sx={{ height: 22, fontWeight: 800, "& .MuiChip-label": { px: 0.85, fontSize: "0.68rem" } }}
+          />
+        </Stack>
+      ) : null}
       <TextField
-        label={label}
+        label={skuLabel ? "Cases" : label}
         type="number"
         InputLabelProps={{ shrink: true }}
         inputProps={{
@@ -769,7 +819,8 @@ function CokeCalculator({
               {csdProducts.map((item) => (
                 <ProductCaseField
                   key={item.name}
-                  label={item.name}
+                  label={item.productName || item.name}
+                  skuLabel={item.variant || ""}
                   value={inputs[item.name]}
                   hasValue={Number(inputs[item.name]) > 0}
                   inputStyle={getInputStyle(item).input}
@@ -804,7 +855,8 @@ function CokeCalculator({
               {canProducts.map((item) => (
                 <ProductCaseField
                   key={item.name}
-                  label={item.name}
+                  label={item.productName || item.name}
+                  skuLabel={item.variant || ""}
                   value={inputs[item.name]}
                   hasValue={Number(inputs[item.name]) > 0}
                   inputStyle={getInputStyle(item).input}
@@ -839,7 +891,8 @@ function CokeCalculator({
               {waterProducts.map((item) => (
                 <ProductCaseField
                   key={item.name}
-                  label={item.name}
+                  label={item.productName || item.name}
+                  skuLabel={item.variant || ""}
                   value={inputs[item.name]}
                   hasValue={Number(inputs[item.name]) > 0}
                   inputStyle={getInputStyle(item).input}
@@ -1055,30 +1108,18 @@ function CokeCalculator({
                     }}>
                       Rate
                     </TableCell>
-                    <TableCell sx={{ 
-                      fontWeight: "bold", 
-                      color: "text.primary", 
-                      fontSize: isMobile ? 9 : 14, 
-                      textAlign: "right", 
-                      px: isMobile ? 0.5 : 1.5, 
-                      py: isMobile ? 0.75 : 1.5, 
-                      whiteSpace: "nowrap",
-                      letterSpacing: "0.5px"
-                    }}>
-                      {isMobile ? "Amount" : "Total Amount"}
-                    </TableCell>
-                    <TableCell sx={{ 
-                      fontWeight: "bold", 
-                      color: "text.primary", 
-                      fontSize: isMobile ? 9 : 14, 
-                      textAlign: "right", 
-                      px: isMobile ? 0.5 : 1.5, 
-                      py: isMobile ? 0.75 : 1.5, 
-                      whiteSpace: "nowrap",
-                      letterSpacing: "0.5px"
-                    }}>
-                      {isMobile ? "Tons" : "Total Tons"}
-                    </TableCell>
+                    <CalculatorNumericHeaderCell
+                      isMobile={isMobile}
+                      lines={["Total", "Amount"]}
+                      shortLabel="Amount"
+                      minWidth={isMobile ? 52 : 92}
+                    />
+                    <CalculatorNumericHeaderCell
+                      isMobile={isMobile}
+                      lines={["Total", "Tons"]}
+                      shortLabel="Tons"
+                      minWidth={isMobile ? 44 : 84}
+                    />
                     <TableCell sx={{ 
                       fontWeight: "bold", 
                       color: "text.primary", 
@@ -1654,30 +1695,18 @@ function CokeCalculator({
                   }}>
                     Rate
                   </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: "bold", 
-                    color: "text.primary", 
-                    fontSize: isMobile ? 9 : 14, 
-                    textAlign: "right", 
-                    px: isMobile ? 0.5 : 1.5, 
-                    py: isMobile ? 0.75 : 1.5, 
-                    whiteSpace: "nowrap",
-                    letterSpacing: "0.5px"
-                  }}>
-                    {isMobile ? "Amount" : "Total Amount"}
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: "bold", 
-                    color: "text.primary", 
-                    fontSize: isMobile ? 9 : 14, 
-                    textAlign: "right", 
-                    px: isMobile ? 0.5 : 1.5, 
-                    py: isMobile ? 0.75 : 1.5, 
-                    whiteSpace: "nowrap",
-                    letterSpacing: "0.5px"
-                  }}>
-                    {isMobile ? "Tons" : "Total Tons"}
-                  </TableCell>
+                  <CalculatorNumericHeaderCell
+                    isMobile={isMobile}
+                    lines={["Total", "Amount"]}
+                    shortLabel="Amount"
+                    minWidth={isMobile ? 52 : 92}
+                  />
+                  <CalculatorNumericHeaderCell
+                    isMobile={isMobile}
+                    lines={["Total", "Tons"]}
+                    shortLabel="Tons"
+                    minWidth={isMobile ? 44 : 84}
+                  />
                   <TableCell sx={{ 
                     fontWeight: "bold", 
                     color: "text.primary", 

@@ -56,13 +56,75 @@ export function formatProductLabelDisplay(label) {
   return s ? s.toUpperCase() : "";
 }
 
+const VARIANT_SIZE_PATTERN = /^(\d+(?:\.\d+)?)\s*(ML|L|LT|LTR|LITRE|LITER)$/i;
+
+/** True when label is a pack size (e.g. 300 ML, 1.25 L). */
+export function isVariantSizeLabel(label) {
+  return VARIANT_SIZE_PATTERN.test(String(label ?? "").trim());
+}
+
+/**
+ * Split a combined line into product name + SKU variant when variant is missing.
+ * e.g. "COKE 300 ML" → { name: "COKE", variant: "300 ML" }
+ */
+export function splitProductNameAndVariant(name, variant, lineName = "") {
+  const existingVariant = formatProductLabelDisplay(variant ?? "");
+  const existingName = formatProductLabelDisplay(name ?? "");
+  if (existingVariant) {
+    return { name: existingName, variant: existingVariant };
+  }
+
+  const sources = [lineName, name]
+    .map((s) => String(s ?? "").trim())
+    .filter(Boolean);
+
+  for (const source of sources) {
+    const parts = source.split(/\s+/).filter(Boolean);
+    if (parts.length < 2) continue;
+
+    const lastTwo = parts.slice(-2).join(" ");
+    if (isVariantSizeLabel(lastTwo)) {
+      const productName = parts.slice(0, -2).join(" ");
+      if (productName) {
+        return {
+          name: formatProductLabelDisplay(productName),
+          variant: formatProductLabelDisplay(lastTwo),
+        };
+      }
+    }
+
+    const last = parts[parts.length - 1];
+    if (isVariantSizeLabel(last)) {
+      const productName = parts.slice(0, -1).join(" ");
+      if (productName) {
+        return {
+          name: formatProductLabelDisplay(productName),
+          variant: formatProductLabelDisplay(last),
+        };
+      }
+    }
+  }
+
+  return { name: existingName || formatProductLabelDisplay(lineName), variant: "" };
+}
+
+/** Product name + SKU variant for display (splits legacy combined names). */
+export function getProductNameAndVariant(product) {
+  const lineName =
+    product?.lineName ||
+    customProductLineName(product?.name, product?.variant ?? product?.sku);
+  return splitProductNameAndVariant(
+    product?.name,
+    product?.variant ?? product?.sku,
+    lineName
+  );
+}
+
 /** Display / order line key: product name + SKU (e.g. Product A + 300 ML). */
 export function getProductLineName(product) {
   if (!product) return "";
-  if (product.lineName) return formatProductLabelDisplay(product.lineName);
-  return formatProductLabelDisplay(
-    customProductLineName(product.name, product.variant ?? product.sku)
-  );
+  const { name, variant } = getProductNameAndVariant(product);
+  return formatProductLabelDisplay(customProductLineName(name, variant));
 }
 
 export function normalizeCategory(raw) {
@@ -129,9 +191,8 @@ function guessCategoryFromLineName(lineName) {
 }
 
 function productToStored(p) {
-  const name = formatProductLabelDisplay(p.name ?? "");
-  const variant = formatProductLabelDisplay(p.variant ?? p.sku ?? "");
-  const lineName = getProductLineName({ name, variant });
+  const { name, variant } = getProductNameAndVariant(p);
+  const lineName = formatProductLabelDisplay(customProductLineName(name, variant));
   const rate = parseNum(p.rate, 0);
   const kgPerCase = parseNum(p.kgPerCase, 0);
   let ucMultiplier = null;

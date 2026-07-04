@@ -211,18 +211,20 @@ function buildOrderTableColumns(editable, density) {
     {
       key: "amount",
       label: density.shortHeaders ? "Amt" : "Total Amount",
+      headerLines: density.shortHeaders ? null : ["Total", "Amount"],
       align: "right",
       width: density.numColWidth,
-      minWidth: density.numColMinW,
-      wrap: false,
+      minWidth: density.shortHeaders ? 76 : 96,
+      wrap: true,
     },
     {
       key: "tons",
       label: density.shortHeaders ? "Tons" : "Total Tons",
+      headerLines: density.shortHeaders ? null : ["Total", "Tons"],
       align: "right",
       width: density.numColWidth,
-      minWidth: density.numColMinW,
-      wrap: false,
+      minWidth: density.shortHeaders ? 68 : 88,
+      wrap: true,
     },
     {
       key: "uc",
@@ -246,7 +248,7 @@ function shippingTableCellSx(col, density, { header = false, extra = {}, hasFiel
     py: density.py,
     width: col.width,
     minWidth: col.minWidth,
-    whiteSpace: header ? (col.wrap ? "normal" : "nowrap") : "normal",
+    whiteSpace: header ? (col.wrap || col.headerLines ? "normal" : "nowrap") : "normal",
     overflow: header ? undefined : "visible",
     verticalAlign: header ? "bottom" : "top",
     fontSize: header ? density.head : density.body,
@@ -1108,7 +1110,7 @@ export default function OrderCalculatedTableDialog({
                 size="small"
                 sx={{
                   width: "100%",
-                  minWidth: condensed ? 1080 : 1180,
+                  minWidth: condensed ? 1120 : 1240,
                   tableLayout: "fixed",
                   "& .MuiTableCell-root": {
                     overflow: "visible",
@@ -1133,7 +1135,22 @@ export default function OrderCalculatedTableDialog({
                   <TableRow sx={tableHeadRowSx(theme)}>
                     {orderColumns.map((col) => (
                       <TableCell key={col.key} sx={cellSx(col.key, { header: true })}>
-                        {col.label}
+                        {col.headerLines ? (
+                          <Box component="span" sx={{ display: "inline-block", lineHeight: 1.2 }}>
+                            {col.headerLines.map((line) => (
+                              <Typography
+                                key={line}
+                                component="span"
+                                display="block"
+                                sx={{ fontSize: "inherit", fontWeight: "inherit", lineHeight: 1.15 }}
+                              >
+                                {line}
+                              </Typography>
+                            ))}
+                          </Box>
+                        ) : (
+                          col.label
+                        )}
                       </TableCell>
                     ))}
                   </TableRow>

@@ -5,7 +5,9 @@ import {
   formatProductLabelDisplay,
   getActiveProducts,
   getProductLineName,
+  getProductNameAndVariant,
   normalizeCategory,
+  splitProductNameAndVariant,
 } from "./productCatalog";
 import { mfgDateToInputValue, mfgDateSortKey } from "./shippingFifoLots";
 import { fgRowsMatchingSku } from "./fgStockSkuMatch";
@@ -89,11 +91,12 @@ export function findCatalogProductForInventoryRow(row, activeProducts) {
 }
 
 export function createInventoryRowFromCatalogProduct(product, overrides = {}) {
+  const { name, variant } = getProductNameAndVariant(product || {});
   return {
     ...createEmptyInventoryRow(),
     catalogProductId: String(product?.id || "").trim(),
-    productName: String(product?.name ?? "").trim(),
-    sku: String(product?.variant ?? product?.sku ?? "").trim(),
+    productName: name,
+    sku: variant,
     category: normalizeCategory(product?.category),
     ...overrides,
   };
@@ -120,11 +123,12 @@ export function mergeInventoryWithCatalog(productRates, savedRows) {
     if (!product) continue;
     const key = catalogRowMatchKey(product);
     if (!lotsByProduct.has(key)) lotsByProduct.set(key, []);
+    const parts = getProductNameAndVariant(product);
     lotsByProduct.get(key).push({
       ...row,
       catalogProductId: product.id,
-      productName: String(product.name || "").trim(),
-      sku: String(product.variant ?? product.sku ?? "").trim(),
+      productName: parts.name,
+      sku: parts.variant,
       category: normalizeCategory(product.category),
     });
   }
@@ -148,11 +152,21 @@ export function normalizeInventoryRow(row) {
   const quantity =
     qtyRaw === "" || qtyRaw == null ? 0 : Math.max(0, Math.floor(num(qtyRaw)));
 
+  let productName = formatProductLabelDisplay(row?.productName ?? row?.product_name ?? "");
+  let sku = formatProductLabelDisplay(row?.sku ?? "");
+  if (!sku && productName) {
+    const split = splitProductNameAndVariant(productName, "", "");
+    if (split.variant) {
+      productName = split.name;
+      sku = split.variant;
+    }
+  }
+
   return {
     id,
     catalogProductId: String(row?.catalogProductId ?? row?.catalog_product_id ?? "").trim(),
-    productName: formatProductLabelDisplay(row?.productName ?? row?.product_name ?? ""),
-    sku: formatProductLabelDisplay(row?.sku ?? ""),
+    productName,
+    sku,
     category: String(row?.category ?? "CSD").trim() || "CSD",
     mfgDate: mfgDateToInputValue(row?.mfgDate ?? row?.mfg_date ?? "") || String(row?.mfgDate ?? "").trim(),
     batchNo: String(row?.batchNo ?? row?.batch_no ?? "").trim(),

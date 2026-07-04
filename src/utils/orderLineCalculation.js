@@ -4,6 +4,7 @@ import {
   formatProductLabelDisplay,
   getActiveProducts,
   getProductLineName,
+  getProductNameAndVariant,
   getUcDivisor,
   isUcEnabled,
 } from "./productCatalog";
@@ -22,6 +23,7 @@ export function buildCalculatorSkus(productRates) {
   const ucDivisor = getUcDivisor(catalog);
 
   return getActiveProducts(catalog).map((p) => {
+    const { name: productName, variant } = getProductNameAndVariant(p);
     const name = getProductLineName(p);
     const ucMul = p.ucMultiplier;
     const ucFormula =
@@ -31,6 +33,8 @@ export function buildCalculatorSkus(productRates) {
     return {
       id: p.id,
       name,
+      productName,
+      variant,
       category: p.category,
       kgPerCase: Number(p.kgPerCase) || 0,
       rate: Number(p.rate) || 0,

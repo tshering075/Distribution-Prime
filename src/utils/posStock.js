@@ -5,6 +5,7 @@
 
 import { normalizeForStockMatch } from "./fgStockSkuMatch";
 import { physicalStockSkusMatch } from "./physicalStockSkuMatch";
+import { mergePrimarySalesFromDispatchedOrders } from "./dispatchPrimarySales";
 import {
   createEmptyFifoLot,
   getLotsFromProductRow,
@@ -167,6 +168,21 @@ export function getPhysicalStockRowsFromDistributor(distributor, productRates) {
   const raw = getRawPhysicalStockFromDistributor(distributor);
   const lines = resolvePhysicalStockProductLines(productRates);
   return normalizePhysicalStockPayload(raw, lines).rows;
+}
+
+/**
+ * Physical stock rows for POS — saved distributor stock plus primary sale from
+ * delivered orders not yet credited to physical_stock (matches POS availability).
+ */
+export function buildPosPhysicalStockRows(distributor, productRates, orders, distributorCode) {
+  const base = getPhysicalStockRowsFromDistributor(distributor, productRates);
+  return mergePrimarySalesFromDispatchedOrders(
+    base,
+    orders,
+    distributorCode,
+    productRates,
+    { onlyUncredited: true }
+  );
 }
 
 function findRowForSkuKey(rows, skuKey, catalogSku) {

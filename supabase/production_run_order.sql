@@ -19,6 +19,7 @@
 -- 6c. add_dispatch_primary_sale_and_inventory_read_rpc.sql  (primary sale on dispatch + inventory read for distributors)
 -- 7.  add_distributor_gstin_tpn.sql      (optional GST/TPN on distributors)
 -- 8.  add_physical_stock_column.sql      (distributors.physical_stock JSONB)
+-- 8b. add_workspace_inventory.sql        (workspace_inventory_lots + save/get/deduct RPCs)
 -- 9.  ADD_DISTRIBUTOR_PHYSICAL_STOCK_SNAPSHOTS.sql  (history + distributor RPC)
 -- 10. add_distributor_pos_settings.sql   (distributors.pos_settings JSONB)
 -- 11. add_distributor_pos_sales.sql      (POS sales table + session RPCs)
